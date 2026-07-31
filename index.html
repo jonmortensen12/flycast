@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Flycast — rod &amp; line test rig</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --slate:#101a1e;        /* wet river stone */
+    --slate-2:#18262c;
+    --moss:#2f4a44;
+    --copper:#b5713f;       /* oxidized brass ferrule */
+    --mayfly:#e8e3d4;       /* mayfly wing */
+    --dim:#7d8b8c;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--slate);color:var(--mayfly);
+    font-family:"Space Mono",ui-monospace,monospace;overflow:hidden}
+  canvas{display:block}
+  #overlay{
+    position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;
+    padding:6vmin;gap:2.2rem;overflow-y:auto;
+    background:radial-gradient(120% 90% at 20% 0%,var(--slate-2) 0%,var(--slate) 60%);
+  }
+  #overlay.gone{display:none}
+  h1{
+    font-family:"Fraunces",Georgia,serif;font-weight:300;font-size:clamp(2.6rem,9vmin,5.2rem);
+    line-height:.92;margin:0;letter-spacing:-.02em;
+  }
+  h1 em{font-style:italic;font-weight:600;color:var(--copper)}
+  .eyebrow{font-size:.7rem;letter-spacing:.34em;text-transform:uppercase;color:var(--dim);margin:0 0 1rem}
+  .spec{border-top:1px solid #2a3a3e;max-width:44rem;width:100%}
+  .spec div{display:flex;justify-content:space-between;gap:1rem;padding:.5rem 0;
+    border-bottom:1px solid #1e2c30;font-size:.78rem}
+  .spec dt{color:var(--dim)}
+  .spec dd{margin:0;text-align:right}
+  #enter{
+    align-self:flex-start;background:var(--copper);color:#140d07;border:0;cursor:pointer;
+    font-family:"Space Mono",monospace;font-weight:700;font-size:.9rem;letter-spacing:.18em;
+    text-transform:uppercase;padding:1.05rem 2.4rem;border-radius:2px;
+    transition:transform .15s ease,box-shadow .15s ease;
+  }
+  #enter:hover{transform:translateY(-2px);box-shadow:0 8px 0 -4px #6d4325}
+  #enter:focus-visible{outline:2px solid var(--mayfly);outline-offset:3px}
+  #enter[disabled]{background:#33403f;color:var(--dim);cursor:not-allowed;transform:none;box-shadow:none}
+  .note{font-size:.75rem;color:var(--dim);max-width:36rem;line-height:1.7}
+  .note b{color:var(--mayfly);font-weight:400}
+  @media (prefers-reduced-motion:reduce){#enter{transition:none}}
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <div>
+    <p class="eyebrow">Test rig 01 · casting feel</p>
+    <h1>Flycast<br><em>rod &amp; line</em></h1>
+  </div>
+
+  <dl class="spec">
+    <div><dt>Rod</dt><dd>9 ft · 12-node flexible beam · tapered stiffness</dd></div>
+    <div><dt>Line</dt><dd>48-node constrained chain · WF-weight taper into leader</dd></div>
+    <div><dt>Air</dt><dd>Anisotropic drag — high normal, low tangential</dd></div>
+    <div><dt>Water</dt><dd>Gaussian current field, peak 0.85 m/s</dd></div>
+    <div><dt>Solver</dt><dd>Position-based · 8 substeps × 6 iterations</dd></div>
+  </dl>
+
+  <button id="enter">Enter VR</button>
+
+  <p class="note" id="hint">
+    <b>Right hand holds the rod.</b> Trigger releases line to shoot · Grip strips line back in ·
+    <b>A</b> resets the cast. <b>Left thumbstick</b> tunes live: up/down = rod stiffness,
+    left/right = line drag. Read the numbers off the panel on your left and tell me which ones felt right.
+  </p>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.169.0/build/three.module.js"}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ────────────────────────────────────────────────────────────
+   TUNABLES — everything worth arguing about lives here
+   ──────────────────────────────────────────────────────────── */
+const P = {
+  rodLength: 2.74,       // 9 ft
+  rodNodes: 12,
+  stiffButt: 0.97,       // PBD bending stiffness at the butt
+  stiffTip: 0.14,        // ...and at the tip
+  stiffMul: 1.00,        // live-tunable multiplier
+
+  lineNodes: 48,
+  lineOut: 9.0,          // metres from rod tip to fly
+  lineMin: 3.0, lineMax: 20.0,
+  flyLineDensity: 0.0033,   // kg/m  (~WF5 head)
+  leaderDensity: 0.00035,   // kg/m
+  leaderFrac: 0.28,         // last 28% of the line is leader/tippet
+  flyLineDia: 0.0013, leaderDia: 0.00045,
+
+  dragMul: 1.00,         // live-tunable multiplier
+  cdNormal: 1.1, cdTangent: 0.03,
+
+  waterY: -0.05,
+  currentPeak: 0.85,     // m/s, flows toward +X
+  currentZ: -8.0, currentW: 6.5,
+
+  substeps: 8,
+  iterations: 6,
+};
+
+const RN = P.rodNodes, LN = P.lineNodes, N = RN + LN;
+const ROD_SEG = P.rodLength / (RN - 1);
+let   LINE_SEG = P.lineOut / (LN - 1);
+
+/* ── particle state ── */
+const pos  = new Float32Array(N * 3);
+const prd  = new Float32Array(N * 3);
+const vel  = new Float32Array(N * 3);
+const invM = new Float32Array(N);
+const dragK= new Float32Array(N);   // 0.5·ρ·Cd·A / m
+const bendK= new Float32Array(N);
+
+/* rod masses: tapered, butt-heavy. Nodes 0 and 1 are driven by the hand. */
+for (let i = 0; i < RN; i++) {
+  const t = i / (RN - 1);
+  if (i < 2) { invM[i] = 0; }
+  else {
+    const m = 0.014 * (1 - 0.75 * t);
+    invM[i] = 1 / m;
+    dragK[i] = 0.5 * 1.2 * 1.0 * (0.006 * ROD_SEG) / m;
+  }
+  bendK[i] = P.stiffButt + (P.stiffTip - P.stiffButt) * Math.pow(t, 1.4);
+}
+
+/* line masses depend on lineOut, so they get rebuilt whenever it changes */
+function rebuildLine() {
+  LINE_SEG = P.lineOut / (LN - 1);
+  for (let j = 0; j < LN; j++) {
+    const i = RN + j, s = j / (LN - 1);
+    const inLeader = s > (1 - P.leaderFrac);
+    let dens, dia;
+    if (!inLeader) { dens = P.flyLineDensity; dia = P.flyLineDia; }
+    else {
+      const u = (s - (1 - P.leaderFrac)) / P.leaderFrac;   // 0 at butt of leader → 1 at fly
+      dens = P.flyLineDensity * (1 - u) * 0.28 + P.leaderDensity;
+      dia  = P.flyLineDia * (1 - u) * 0.4 + P.leaderDia;
+    }
+    let m = Math.max(dens * LINE_SEG, 1.2e-4);
+    if (j === LN - 1) m += 2.2e-5;                          // the fly itself
+    invM[i]  = 1 / m;
+    dragK[i] = 0.5 * 1.2 * P.cdNormal * (dia * LINE_SEG) / m;
+  }
+}
+rebuildLine();
+
+/* ────────────────────────────────────────────────────────────
+   SOLVER
+   ──────────────────────────────────────────────────────────── */
+function solveDist(a, b, rest, k) {
+  const w = invM[a] + invM[b]; if (w === 0) return;
+  const A = a * 3, B = b * 3;
+  let dx = pos[B] - pos[A], dy = pos[B+1] - pos[A+1], dz = pos[B+2] - pos[A+2];
+  const d = Math.sqrt(dx*dx + dy*dy + dz*dz); if (d < 1e-9) return;
+  const s = ((d - rest) / d) * k / w;
+  dx *= s; dy *= s; dz *= s;
+  pos[A] += dx*invM[a]; pos[A+1] += dy*invM[a]; pos[A+2] += dz*invM[a];
+  pos[B] -= dx*invM[b]; pos[B+1] -= dy*invM[b]; pos[B+2] -= dz*invM[b];
+}
+
+/* resists curvature: pushes b back toward the midpoint of a and c */
+function solveBend(a, b, c, k) {
+  const w = invM[a]*0.25 + invM[b] + invM[c]*0.25; if (w <= 0) return;
+  const A = a*3, B = b*3, C = c*3;
+  const dx = pos[B]   - (pos[A]   + pos[C]  ) * 0.5;
+  const dy = pos[B+1] - (pos[A+1] + pos[C+1]) * 0.5;
+  const dz = pos[B+2] - (pos[A+2] + pos[C+2]) * 0.5;
+  const s = k / w;
+  pos[A]   += dx*s*invM[a]*0.5; pos[A+1] += dy*s*invM[a]*0.5; pos[A+2] += dz*s*invM[a]*0.5;
+  pos[C]   += dx*s*invM[c]*0.5; pos[C+1] += dy*s*invM[c]*0.5; pos[C+2] += dz*s*invM[c]*0.5;
+  pos[B]   -= dx*s*invM[b];     pos[B+1] -= dy*s*invM[b];     pos[B+2] -= dz*s*invM[b];
+}
+
+function solveAll() {
+  for (let i = 0; i < RN - 1; i++) solveDist(i, i + 1, ROD_SEG, 1.0);
+  for (let i = 1; i < RN - 1; i++) solveBend(i - 1, i, i + 1, Math.min(1, bendK[i] * P.stiffMul));
+  solveDist(RN - 1, RN, 0.0, 1.0);                       // line is tied to the rod tip
+  for (let i = RN; i < N - 1; i++) solveDist(i, i + 1, LINE_SEG, 1.0);
+}
+
+const currentAt = z => P.currentPeak * Math.exp(-Math.pow((z - P.currentZ) / P.currentW, 2));
+
+function applyDrag(i, h) {
+  const p = i*3;
+  const a = (i > 0 ? i-1 : i)*3, b = (i < N-1 ? i+1 : i)*3;
+  let tx = pos[b]-pos[a], ty = pos[b+1]-pos[a+1], tz = pos[b+2]-pos[a+2];
+  let tl = Math.sqrt(tx*tx+ty*ty+tz*tz); if (tl < 1e-8) return;
+  tx/=tl; ty/=tl; tz/=tl;
+
+  const vx = vel[p], vy = vel[p+1], vz = vel[p+2];
+  const vt = vx*tx + vy*ty + vz*tz;
+  let nx = vx - vt*tx, ny = vy - vt*ty, nz = vz - vt*tz;
+  const nsp = Math.sqrt(nx*nx+ny*ny+nz*nz);
+
+  const kN = dragK[i] * P.dragMul;
+  const kT = kN * (P.cdTangent / P.cdNormal);
+  const fN = 1 / (1 + kN * nsp * h);                      // unconditionally stable
+  const fT = 1 / (1 + kT * Math.abs(vt) * h);
+  nx *= fN; ny *= fN; nz *= fN;
+  const vt2 = vt * fT;
+  vel[p] = nx + vt2*tx; vel[p+1] = ny + vt2*ty; vel[p+2] = nz + vt2*tz;
+}
+
+function applyWater(i, h) {
+  const p = i*3;
+  const depth = P.waterY - pos[p+1];
+  vel[p+1] += Math.min(depth, 0.25) * 95 * h;             // floats — dry line, dry fly
+  const sp = Math.sqrt(vel[p]*vel[p] + vel[p+1]*vel[p+1] + vel[p+2]*vel[p+2]);
+  const wd = 1 / (1 + 7*h*sp + 5*h);
+  vel[p] *= wd; vel[p+1] *= wd; vel[p+2] *= wd;
+  const cu = currentAt(pos[p+2]);
+  vel[p] += (cu - vel[p]) * Math.min(1, 6*h);             // the current takes the line
+}
+
+const _k0 = new THREE.Vector3(), _k1 = new THREE.Vector3();
+const _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3();
+
+function physics(dt) {
+  const h = dt / P.substeps;
+  for (let s = 1; s <= P.substeps; s++) {
+    const a = s / P.substeps;
+    // hand-driven nodes, interpolated across the substep so the rod actually gets loaded
+    pos[0] = _p0.x + (_k0.x - _p0.x)*a; pos[1] = _p0.y + (_k0.y - _p0.y)*a; pos[2] = _p0.z + (_k0.z - _p0.z)*a;
+    pos[3] = _p1.x + (_k1.x - _p1.x)*a; pos[4] = _p1.y + (_k1.y - _p1.y)*a; pos[5] = _p1.z + (_k1.z - _p1.z)*a;
+
+    for (let i = 2; i < N; i++) {
+      const p = i*3;
+      vel[p+1] -= 9.81 * h;
+      applyDrag(i, h);
+      if (pos[p+1] < P.waterY) applyWater(i, h);
+      prd[p] = pos[p]; prd[p+1] = pos[p+1]; prd[p+2] = pos[p+2];
+      pos[p] += vel[p]*h; pos[p+1] += vel[p+1]*h; pos[p+2] += vel[p+2]*h;
+    }
+    for (let it = 0; it < P.iterations; it++) solveAll();
+    for (let i = 2; i < N; i++) {
+      const p = i*3;
+      vel[p]   = (pos[p]   - prd[p]  ) / h;
+      vel[p+1] = (pos[p+1] - prd[p+1]) / h;
+      vel[p+2] = (pos[p+2] - prd[p+2]) / h;
+    }
+  }
+  _p0.copy(_k0); _p1.copy(_k1);
+}
+
+/* ────────────────────────────────────────────────────────────
+   SCENE
+   ──────────────────────────────────────────────────────────── */
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x9fb0ad, 25, 95);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.03, 400);
+camera.position.set(0, 1.55, 0.4);
+
+scene.add(new THREE.HemisphereLight(0xdfeaea, 0x2b3a34, 2.0));
+const sun = new THREE.DirectionalLight(0xfff2dc, 1.9);
+sun.position.set(-14, 18, -6);
+scene.add(sun);
+
+/* sky */
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(180, 24, 16),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false,
+    uniforms: { uLo: { value: new THREE.Color(0xb9c6bd) }, uHi: { value: new THREE.Color(0x4d7ea8) } },
+    vertexShader: `varying float vY; void main(){ vY = normalize(position).y;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `uniform vec3 uLo, uHi; varying float vY;
+      void main(){ gl_FragColor = vec4(mix(uLo, uHi, smoothstep(-0.1, 0.75, vY)), 1.0);
+      #include <colorspace_fragment> }`
+  })
+);
+scene.add(sky);
+
+/* water */
+const waterMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uDeep: { value: new THREE.Color(0x1d3a3c) },
+    uShallow: { value: new THREE.Color(0x497f74) }
+  },
+  vertexShader: `
+    uniform float uTime; varying vec3 vW; varying float vH;
+    void main(){
+      vec4 wp = modelMatrix * vec4(position,1.0);
+      float h = sin(wp.x*1.7 + uTime*2.3)*0.012
+              + sin(wp.x*0.7 + wp.z*0.9 + uTime*1.5)*0.020
+              + sin(wp.z*2.4 - uTime*1.1)*0.009;
+      wp.y += h; vH = h; vW = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: `
+    uniform vec3 uDeep, uShallow; uniform float uTime; varying vec3 vW; varying float vH;
+    void main(){
+      float d = clamp(length(vW.xz)/55.0, 0.0, 1.0);
+      vec3 c = mix(uShallow, uDeep, d*0.85) + vH*5.5;
+      float f = smoothstep(0.62, 0.97, sin(vW.x*0.9 + vW.z*0.28 + uTime*1.9)*0.5+0.5);
+      c = mix(c, vec3(0.86,0.90,0.89), f*0.11);
+      gl_FragColor = vec4(c, 1.0);
+      #include <colorspace_fragment>
+    }`
+});
+const water = new THREE.Mesh(new THREE.PlaneGeometry(140, 140, 100, 100), waterMat);
+water.rotation.x = -Math.PI/2;
+water.position.y = P.waterY;
+scene.add(water);
+
+/* a rising fish to cast at */
+const ring = new THREE.Mesh(
+  new THREE.TorusGeometry(0.34, 0.018, 6, 40),
+  new THREE.MeshBasicMaterial({ color: 0xe8e3d4, transparent: true, opacity: 0.55 })
+);
+ring.rotation.x = -Math.PI/2;
+ring.position.set(-3, P.waterY + 0.02, -8);
+scene.add(ring);
+
+/* ── tube mesh: builds a swept tube along a polyline, updated every frame ── */
+class Tube {
+  constructor(n, radii, colors, radial = 6) {
+    this.n = n; this.R = radial; this.radii = radii;
+    const V = n * radial;
+    this.p = new Float32Array(V*3); this.nm = new Float32Array(V*3);
+    const col = new Float32Array(V*3), idx = [];
+    for (let i = 0; i < n; i++) for (let j = 0; j < radial; j++) {
+      const k = (i*radial + j)*3;
+      col[k] = colors[i*3]; col[k+1] = colors[i*3+1]; col[k+2] = colors[i*3+2];
+    }
+    for (let i = 0; i < n-1; i++) for (let j = 0; j < radial; j++) {
+      const a = i*radial+j, b = i*radial+(j+1)%radial;
+      const c = (i+1)*radial+j, d = (i+1)*radial+(j+1)%radial;
+      idx.push(a,c,b, b,c,d);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.p, 3));
+    g.setAttribute('normal',   new THREE.BufferAttribute(this.nm, 3));
+    g.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    g.setIndex(idx);
+    this.geo = g;
+    this.mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.55, metalness: 0.05
+    }));
+    this.mesh.frustumCulled = false;
+  }
+  update(src, off) {
+    const n = this.n, R = this.R;
+    for (let i = 0; i < n; i++) {
+      const p = (off+i)*3;
+      const a = (off + Math.max(i-1, 0))*3, b = (off + Math.min(i+1, n-1))*3;
+      let tx = src[b]-src[a], ty = src[b+1]-src[a+1], tz = src[b+2]-src[a+2];
+      let tl = Math.sqrt(tx*tx+ty*ty+tz*tz);
+      if (tl < 1e-8) { tx = 0; ty = 1; tz = 0; tl = 1; }
+      tx/=tl; ty/=tl; tz/=tl;
+      let ux = 0, uy = 1, uz = 0;
+      if (Math.abs(ty) > 0.985) { ux = 1; uy = 0; uz = 0; }
+      let ax = ty*uz - tz*uy, ay = tz*ux - tx*uz, az = tx*uy - ty*ux;
+      const al = Math.sqrt(ax*ax+ay*ay+az*az) || 1; ax/=al; ay/=al; az/=al;
+      const bx = ty*az - tz*ay, by = tz*ax - tx*az, bz = tx*ay - ty*ax;
+      const r = this.radii[i];
+      for (let j = 0; j < R; j++) {
+        const ang = j/R * Math.PI*2, ca = Math.cos(ang), sa = Math.sin(ang);
+        const nx = ax*ca + bx*sa, ny = ay*ca + by*sa, nz = az*ca + bz*sa;
+        const k = (i*R + j)*3;
+        this.p[k] = src[p] + nx*r; this.p[k+1] = src[p+1] + ny*r; this.p[k+2] = src[p+2] + nz*r;
+        this.nm[k] = nx; this.nm[k+1] = ny; this.nm[k+2] = nz;
+      }
+    }
+    this.geo.attributes.position.needsUpdate = true;
+    this.geo.attributes.normal.needsUpdate = true;
+  }
+}
+
+/* rod: tapered graphite blank */
+const rodRadii = new Float32Array(RN), rodCols = new Float32Array(RN*3);
+for (let i = 0; i < RN; i++) {
+  const t = i/(RN-1);
+  rodRadii[i] = 0.0058 * (1 - 0.80*t) + 0.0010;
+  const c = new THREE.Color().setHSL(0.09, 0.10, 0.13 + 0.05*t);
+  rodCols[i*3] = c.r; rodCols[i*3+1] = c.g; rodCols[i*3+2] = c.b;
+}
+const rodTube = new Tube(RN, rodRadii, rodCols, 6);
+scene.add(rodTube.mesh);
+
+/* line: bright fly line fading into a pale leader */
+const lineRadii = new Float32Array(LN), lineCols = new Float32Array(LN*3);
+const cFly = new THREE.Color(0xd9a441), cLdr = new THREE.Color(0xdfe4de);
+for (let j = 0; j < LN; j++) {
+  const s = j/(LN-1), u = Math.max(0, (s - (1-P.leaderFrac)) / P.leaderFrac);
+  lineRadii[j] = 0.0055 * (1-u) + 0.0016;
+  const c = cFly.clone().lerp(cLdr, u);
+  lineCols[j*3] = c.r; lineCols[j*3+1] = c.g; lineCols[j*3+2] = c.b;
+}
+const lineTube = new Tube(LN, lineRadii, lineCols, 4);
+lineTube.mesh.material.roughness = 0.35;
+scene.add(lineTube.mesh);
+
+const fly = new THREE.Mesh(
+  new THREE.SphereGeometry(0.013, 8, 6),
+  new THREE.MeshStandardMaterial({ color: 0xf0e6cd, roughness: 0.8 })
+);
+scene.add(fly);
+
+/* cork grip + reel, parented to the hand */
+const handRig = new THREE.Group(); scene.add(handRig);
+const grip = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.017, 0.013, 0.20, 10),
+  new THREE.MeshStandardMaterial({ color: 0xc4a173, roughness: 0.95 })
+);
+grip.rotation.x = Math.PI/2; grip.position.z = 0.05; handRig.add(grip);
+const seat = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.014, 0.014, 0.07, 10),
+  new THREE.MeshStandardMaterial({ color: 0x6d5330, roughness: 0.4, metalness: 0.7 })
+);
+seat.rotation.x = Math.PI/2; seat.position.z = 0.175; handRig.add(seat);
+const reel = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.043, 0.043, 0.020, 16),
+  new THREE.MeshStandardMaterial({ color: 0x3c4a44, roughness: 0.35, metalness: 0.6 })
+);
+reel.position.set(0, -0.052, 0.20); handRig.add(reel);
+
+/* ── HUD ── */
+const hudCv = document.createElement('canvas'); hudCv.width = 512; hudCv.height = 300;
+const hx = hudCv.getContext('2d');
+const hudTex = new THREE.CanvasTexture(hudCv);
+hudTex.colorSpace = THREE.SRGBColorSpace;
+const hud = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.46, 0.27),
+  new THREE.MeshBasicMaterial({ map: hudTex, transparent: true })
+);
+hud.position.set(-0.52, 1.17, -0.66);
+hud.rotation.y = 0.55;
+scene.add(hud);
+
+const M = { bend: 0, tip: 0, drift: 0, last: 0, acc: 0 };
+function drawHUD() {
+  hx.clearRect(0,0,512,300);
+  hx.fillStyle = 'rgba(12,22,26,0.86)'; hx.fillRect(0,0,512,300);
+  hx.fillStyle = '#b5713f'; hx.fillRect(0,0,512,4);
+  hx.font = '700 17px "Space Mono", monospace';
+  const rows = [
+    ['LINE OUT',   P.lineOut.toFixed(1) + ' m'],
+    ['ROD BEND',   M.bend.toFixed(0) + '\u00B0'],
+    ['TIP SPEED',  M.tip.toFixed(1) + ' m/s'],
+    ['DRIFT',      M.drift.toFixed(0) + ' %'],
+    ['LAST CAST',  M.last ? M.last.toFixed(1) + ' m  \u00B1' + M.acc.toFixed(1) : '—'],
+  ];
+  rows.forEach(([k,v], i) => {
+    const y = 46 + i*40;
+    hx.fillStyle = '#7d8b8c'; hx.fillText(k, 26, y);
+    hx.fillStyle = '#e8e3d4'; hx.textAlign = 'right'; hx.fillText(v, 486, y); hx.textAlign = 'left';
+  });
+  hx.fillStyle = '#2a3a3e'; hx.fillRect(26, 252, 460, 1);
+  hx.font = '700 15px "Space Mono", monospace'; hx.fillStyle = '#b5713f';
+  hx.fillText('STIFF ' + P.stiffMul.toFixed(2) + '    DRAG ' + P.dragMul.toFixed(2), 26, 282);
+  hudTex.needsUpdate = true;
+}
+
+/* ────────────────────────────────────────────────────────────
+   CONTROLLERS
+   ──────────────────────────────────────────────────────────── */
+let rodGrip = null, offGrip = null, rodPad = null, offPad = null, rodSource = null;
+const gripA = renderer.xr.getControllerGrip(0), gripB = renderer.xr.getControllerGrip(1);
+scene.add(gripA, gripB);
+
+function bind(index, gripObj) {
+  const ctrl = renderer.xr.getController(index);
+  scene.add(ctrl);
+  ctrl.addEventListener('connected', e => {
+    const right = e.data.handedness !== 'left';
+    if (right) { rodGrip = gripObj; rodPad = e.data.gamepad; rodSource = e.data; handRig.visible = true; }
+    else       { offGrip = gripObj; offPad = e.data.gamepad; }
+  });
+  ctrl.addEventListener('disconnected', () => {
+    if (rodGrip === gripObj) { rodGrip = null; rodPad = null; }
+    if (offGrip === gripObj) { offGrip = null; offPad = null; }
+  });
+}
+bind(0, gripA); bind(1, gripB);
+
+const BUTT_Z = 0.175, NEXT_Z = BUTT_Z - ROD_SEG;
+const _off = new THREE.Vector3(), _q = new THREE.Quaternion();
+
+function handTargets() {
+  if (rodGrip) {
+    rodGrip.getWorldQuaternion(_q);
+    rodGrip.getWorldPosition(_k0);
+    handRig.position.copy(_k0); handRig.quaternion.copy(_q);
+    _k1.copy(_k0).add(_off.set(0, 0, NEXT_Z).applyQuaternion(_q));
+    _k0.add(_off.set(0, 0, BUTT_Z).applyQuaternion(_q));
+  } else {
+    // desktop fallback: mouse steers the grip
+    _q.setFromEuler(new THREE.Euler(mouse.y, mouse.x, 0, 'YXZ'));
+    _k0.set(0.28, 1.15, 0.10);
+    handRig.position.copy(_k0); handRig.quaternion.copy(_q);
+    _k1.copy(_k0).add(_off.set(0, 0, NEXT_Z).applyQuaternion(_q));
+    _k0.add(_off.set(0, 0, BUTT_Z).applyQuaternion(_q));
+  }
+}
+
+const mouse = { x: 0, y: -0.35 };
+addEventListener('mousemove', e => {
+  mouse.x = (e.clientX/innerWidth - 0.5) * 2.4;
+  mouse.y = (e.clientY/innerHeight - 0.5) * 2.0 - 0.35;
+});
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'KeyR') resetCast(); });
+addEventListener('keyup',   e => { keys[e.code] = false; });
+
+/* ────────────────────────────────────────────────────────────
+   RESET
+   ──────────────────────────────────────────────────────────── */
+function resetCast() {
+  handTargets();
+  _p0.copy(_k0); _p1.copy(_k1);
+  const dir = new THREE.Vector3().subVectors(_k1, _k0).normalize();
+  for (let i = 0; i < RN; i++) {
+    const p = i*3;
+    pos[p]   = _k0.x + dir.x*ROD_SEG*i;
+    pos[p+1] = _k0.y + dir.y*ROD_SEG*i;
+    pos[p+2] = _k0.z + dir.z*ROD_SEG*i;
+    vel[p] = vel[p+1] = vel[p+2] = 0;
+  }
+  const tipX = pos[(RN-1)*3], tipY = pos[(RN-1)*3+1], tipZ = pos[(RN-1)*3+2];
+  for (let j = 0; j < LN; j++) {
+    const p = (RN+j)*3, t = j/(LN-1);
+    pos[p]   = tipX;
+    pos[p+1] = tipY + (P.waterY - tipY) * Math.min(1, t*3);
+    pos[p+2] = tipZ - P.lineOut * t;
+    vel[p] = vel[p+1] = vel[p+2] = 0;
+  }
+  M.last = 0; M.acc = 0;
+}
+
+/* ────────────────────────────────────────────────────────────
+   LOOP
+   ──────────────────────────────────────────────────────────── */
+const clock = new THREE.Clock();
+let hudT = 0, hapT = 0, flyWasAir = true, started = false;
+
+function pulse(strength) {
+  if (!rodSource || !rodSource.gamepad) return;
+  const act = rodSource.gamepad.hapticActuators;
+  if (act && act[0]) { try { act[0].pulse(Math.min(1, strength), 60); } catch (e) {} }
+}
+
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 1/50);
+  if (!started) { resetCast(); started = true; }
+
+  /* input */
+  const trigger = rodPad ? rodPad.buttons[0]?.pressed : keys['Space'];
+  const gripBtn = rodPad ? rodPad.buttons[1]?.pressed : keys['KeyS'];
+  if (rodPad && rodPad.buttons[4]?.pressed) resetCast();
+  if (offPad && offPad.axes.length >= 4) {
+    const ax = offPad.axes[2], ay = offPad.axes[3];
+    if (Math.abs(ay) > 0.25) P.stiffMul = Math.min(2.0, Math.max(0.2, P.stiffMul - ay*dt*0.7));
+    if (Math.abs(ax) > 0.25) P.dragMul  = Math.min(3.0, Math.max(0.1, P.dragMul  + ax*dt*1.0));
+  }
+
+  handTargets();
+
+  /* shoot / strip line */
+  const tI = (RN-1)*3, nI = (RN+2)*3;
+  let dx = pos[nI]-pos[tI], dy = pos[nI+1]-pos[tI+1], dz = pos[nI+2]-pos[tI+2];
+  const dl = Math.sqrt(dx*dx+dy*dy+dz*dz) || 1; dx/=dl; dy/=dl; dz/=dl;
+  const pull = (vel[nI]-vel[tI])*dx + (vel[nI+1]-vel[tI+1])*dy + (vel[nI+2]-vel[tI+2])*dz;
+  let changed = false;
+  if (trigger && pull > 0.4) { P.lineOut += pull * dt * 0.55; changed = true; }
+  if (gripBtn)               { P.lineOut -= 2.2 * dt;         changed = true; }
+  if (changed) {
+    P.lineOut = Math.min(P.lineMax, Math.max(P.lineMin, P.lineOut));
+    rebuildLine();
+  }
+
+  physics(dt);
+
+  /* metrics */
+  let bend = 0;
+  for (let i = 1; i < RN-1; i++) {
+    const a = (i-1)*3, b = i*3, c = (i+1)*3;
+    let ux = pos[b]-pos[a], uy = pos[b+1]-pos[a+1], uz = pos[b+2]-pos[a+2];
+    let vx = pos[c]-pos[b], vy = pos[c+1]-pos[b+1], vz = pos[c+2]-pos[b+2];
+    const ul = Math.sqrt(ux*ux+uy*uy+uz*uz)||1, vl = Math.sqrt(vx*vx+vy*vy+vz*vz)||1;
+    bend += Math.acos(Math.max(-1, Math.min(1, (ux*vx+uy*vy+uz*vz)/(ul*vl))));
+  }
+  M.bend = bend * 180/Math.PI;
+  M.tip = Math.sqrt(vel[tI]*vel[tI] + vel[tI+1]*vel[tI+1] + vel[tI+2]*vel[tI+2]);
+
+  const fI = (N-1)*3;
+  const onWater = pos[fI+1] < P.waterY + 0.05;
+  if (onWater) {
+    const cu = currentAt(pos[fI+2]);
+    const slip = Math.sqrt((vel[fI]-cu)**2 + vel[fI+1]**2 + vel[fI+2]**2);
+    M.drift = Math.max(0, Math.min(100, 100*(1 - slip/0.45)));
+    if (flyWasAir) {
+      M.last = Math.sqrt(pos[fI]**2 + pos[fI+2]**2);
+      M.acc  = Math.sqrt((pos[fI]-ring.position.x)**2 + (pos[fI+2]-ring.position.z)**2);
+      flyWasAir = false;
+    }
+  } else { M.drift = 0; flyWasAir = true; }
+
+  /* haptics track rod load */
+  hapT += dt;
+  if (hapT > 0.07) { hapT = 0; if (M.bend > 6) pulse(Math.min(1, M.bend/55)); }
+
+  /* render */
+  rodTube.update(pos, 0);
+  lineTube.update(pos, RN);
+  fly.position.set(pos[fI], pos[fI+1], pos[fI+2]);
+  waterMat.uniforms.uTime.value += dt;
+  const t = clock.elapsedTime % 3;
+  ring.scale.setScalar(1 + t*0.5);
+  ring.material.opacity = 0.55 * Math.max(0, 1 - t/3);
+
+  hudT += dt;
+  if (hudT > 0.1) { hudT = 0; drawHUD(); }
+
+  renderer.render(scene, camera);
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ────────────────────────────────────────────────────────────
+   ENTER VR
+   ──────────────────────────────────────────────────────────── */
+const overlay = document.getElementById('overlay');
+const enterBtn = document.getElementById('enter');
+const hint = document.getElementById('hint');
+
+if (!navigator.xr) {
+  enterBtn.disabled = true;
+  enterBtn.textContent = 'WebXR unavailable';
+  hint.innerHTML = '<b>No WebXR here.</b> You can still fly the rod with the mouse — ' +
+    'Space shoots line, S strips in, R resets. Open this page in the Meta Quest Browser for the real thing.';
+} else {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    if (!ok) { enterBtn.disabled = true; enterBtn.textContent = 'Headset not detected'; }
+  });
+}
+
+enterBtn.addEventListener('click', async () => {
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'bounded-floor']
+    });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    renderer.xr.setFoveation(0.55);
+    await renderer.xr.setSession(session);
+    overlay.classList.add('gone');
+    started = false;
+    session.addEventListener('end', () => overlay.classList.remove('gone'));
+  } catch (err) {
+    hint.innerHTML = '<b>Could not start VR:</b> ' + err.message +
+      ' — check that the page is served over https and you are in the Quest Browser.';
+  }
+});
+</script>
+</body>
+</html>
