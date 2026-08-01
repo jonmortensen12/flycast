@@ -84,8 +84,8 @@ import * as THREE from 'three';
    1. CONSTANTS
    ════════════════════════════════════════════════════════════ */
 const P = {
-  stiffMul:0.85, dragMul:2.75, lineDens:1.85, shootGain:0.55,
-  reelSpeed:2.60, spoolDrag:1.00, buoyancy:1.00, stick:1.00, tippet:10.0,
+  stiffMul:0.85, dragMul:2.75, lineDens:1.85, shootGain:1.00, shootThresh:0.50,
+  reelSpeed:2.60, spoolDrag:1.00, buoyancy:1.00, stick:1.00, tippet:12.0,
   guideMu:0.16, lineVis:1.60, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.55,
   current:0.55, specks:0.45, speckSize:1.00, speckSpread:0.45, grade:1.00, vortex:1.00,
@@ -101,7 +101,8 @@ const MENU=[
   ['Line mass','lineDens',0.40,3.00,0.05],
   ['Guide friction','guideMu',0.00,0.60,0.01],
   ['Spool drag','spoolDrag',0.05,3.00,0.05],
-  ['Shoot freedom','shootGain',0.10,1.50,0.05],
+  ['Shoot freedom','shootGain',0.10,3.00,0.05],
+  ['Shoot threshold','shootThresh',0.00,3.00,0.05],
   ['Reel speed','reelSpeed',0.50,6.00,0.10],
   ['Line float','buoyancy',0.20,3.00,0.05],
   ['Surface stick','stick',0.00,4.00,0.10],
@@ -116,7 +117,7 @@ const MENU=[
   ['Current','current',0.10,1.40,0.05],
   ['River grade','grade',0.00,2.50,0.10],
   ['Speck density','specks',0.00,1.00,0.02],
-  ['Speck size','speckSize',0.20,4.00,0.10],
+  ['Speck size','speckSize',0.05,4.00,0.05],
   ['Speck spread','speckSpread',0.00,1.00,0.05],
   ['Eddy strength','vortex',0.00,2.50,0.10],
   ['— FISH —',null,0,0,0],
@@ -289,11 +290,15 @@ function solveBend(a,b,c,k){
   pos[C]+=dx*s*invM[c]*0.5;pos[C+1]+=dy*s*invM[c]*0.5;pos[C+2]+=dz*s*invM[c]*0.5;
   pos[B]-=dx*s*invM[b];    pos[B+1]-=dy*s*invM[b];    pos[B+2]-=dz*s*invM[b];
 }
-let tipStrain=0;
-function solveAll(){
+let tipStrain=0, tipRaw=0;
+function solveAll(iter){
   for(let i=0;i<RN-1;i++) solveDist(i,i+1,ROD_SEG,1.0);
   for(let i=1;i<RN-1;i++) solveBend(i-1,i,i+1,Math.min(1,bendK[i]*P.stiffMul));
   tipStrain=solveDist(RN-1,head,remSeg,1.0);
+  /* Only the FIRST iteration sees real stretch. Later iterations see the
+     converged residual, which is near zero — reading tension from those was
+     what made the line feel welded to the tip. */
+  if(iter===0) tipRaw=tipStrain;
   for(let i=head;i<N-1;i++) solveDist(i,i+1,SEG,1.0);
   for(let i=head+1;i<N-1;i++) solveBend(i-1,i,i+1,0.05);
 }
@@ -324,18 +329,45 @@ function applyWater(i,h,t){
     if(vel[p+1]<0&&pos[p+1]<=target+0.002) vel[p+1]=0;
   }
   vel[p+1]+=(target-pos[p+1])*40*P.buoyancy*h;
-  const sp=Math.sqrt(vel[p]**2+vel[p+1]**2+vel[p+2]**2);
-  const wd=1/(1+(9+6*P.stick)*h*sp+6*h);
-  vel[p]*=wd;vel[p+1]*=wd;vel[p+2]*=wd;
+  /* Drag acts on velocity RELATIVE TO THE MOVING WATER. Damping toward world
+     zero (what this used to do) fought the current and parked the line at a
+     fraction of the true flow speed. In the water's frame the line simply
+     relaxes to rest, i.e. it ends up travelling at exactly the current. */
   computeFlow(x,z);
-  const k=Math.min(1,7*h);
-  vel[p]  +=(flowX-vel[p])*k;
-  vel[p+2]+=(flowZ-vel[p+2])*k;
+  let rx=vel[p]-flowX, ry=vel[p+1], rz=vel[p+2]-flowZ;
+  const rsp=Math.sqrt(rx*rx+ry*ry+rz*rz);
+  const kd=1/(1+(14+10*P.stick)*h*rsp+(9+7*P.stick)*h);
+  rx*=kd;ry*=kd;rz*=kd;
+  vel[p]=flowX+rx;vel[p+1]=ry;vel[p+2]=flowZ+rz;
 }
 
 const _k0=new THREE.Vector3(),_k1=new THREE.Vector3(),_p0=new THREE.Vector3(),_p1=new THREE.Vector3();
 const SUB=7,ITER=5;
-let simTime=0;
+let simTime=0, shootRate=0;
+
+/* ---- payout through the tip guide, solved every substep ----
+   Real shooting is momentum: the flying line is moving away from the rod tip
+   faster than the tip is, and the only alternatives are to decelerate the
+   whole head of line or to feed it. Feed it, minus friction. */
+function payoutStep(h){
+  shootRate=0;
+  if(rodPinch||handMode===2) return;
+  const T=(RN-1)*3,H=head*3;
+  let dx=pos[H]-pos[T],dy=pos[H+1]-pos[T+1],dz=pos[H+2]-pos[T+2];
+  const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+  if(d<1e-6) return;
+  dx/=d;dy/=d;dz/=d;
+  const vr=(vel[H]-vel[T])*dx+(vel[H+1]-vel[T+1])*dy+(vel[H+2]-vel[T+2])*dz;
+  const over=Math.max(0,d-remSeg);
+  let feed=(Math.max(0,vr-P.shootThresh)*P.shootGain*shootResist)*h + over*0.5;
+  if(hooked) feed/=(1+P.spoolDrag*4);
+  if(feed<=1e-6) return;
+  feed=Math.min(feed,0.20);
+  const fromPool=Math.min(pooled,feed);
+  const fromSpool=(feed-fromPool)/(1+P.spoolDrag*2.5);   /* off the reel is harder */
+  const total=fromPool+fromSpool;
+  if(total>1e-6){ payOut(total); shootRate=total/h; }
+}
 
 function physics(dt){
   const h=dt/SUB;
@@ -357,7 +389,8 @@ function physics(dt){
       prd[p]=pos[p];prd[p+1]=pos[p+1];prd[p+2]=pos[p+2];
       pos[p]+=vel[p]*h;pos[p+1]+=vel[p+1]*h;pos[p+2]+=vel[p+2]*h;
     }
-    for(let it=0;it<ITER;it++) solveAll();
+    payoutStep(h);
+    for(let it=0;it<ITER;it++) solveAll(it);
     for(let i=2;i<RN;i++){const p=i*3;
       vel[p]=(pos[p]-prd[p])/h;vel[p+1]=(pos[p+1]-prd[p+1])/h;vel[p+2]=(pos[p+2]-prd[p+2])/h;}
     for(let i=head;i<N;i++){const p=i*3;
@@ -570,7 +603,7 @@ const speckMat=new THREE.ShaderMaterial({
     void main(){
       vA=alpha;
       vec4 mv=modelViewMatrix*vec4(position,1.0);
-      gl_PointSize=clamp(260.0*uSize/max(-mv.z,0.4),2.0*uSize,26.0*uSize);
+      gl_PointSize=clamp(260.0*uSize/max(-mv.z,0.4),1.0,26.0*uSize);
       gl_Position=projectionMatrix*mv;
     }`,
   fragmentShader:`
@@ -1020,6 +1053,7 @@ function drawHUD(){
     ['LINE OUT',lineOut.toFixed(1)+' m'],
     ['SLACK POOL',pooled.toFixed(1)+' m'],
     ['LEFT HAND',HANDTXT[handMode]+(rodPinch?' / CORK':'')],
+    ['SHOOTING',shootRate.toFixed(2)+' m/s'],
     ['OFF SPOOL',M.spool.toFixed(2)+' m/s'],
     ['GUIDE WRAP',(wrapTotal*180/Math.PI).toFixed(0)+'\u00B0  \u00D7'+shootResist.toFixed(2)],
     ['WADE DEPTH',M.depth.toFixed(2)+' m'],
@@ -1028,7 +1062,7 @@ function drawHUD(){
     ['FEEDING',feed+' of '+fishes.length],
     ['HOOKED',hooked?(hooked.stamina*100).toFixed(0)+' % left':'\u2014'],
   ];
-  rows.forEach(([k,v],i)=>{const y=40+i*35;
+  rows.forEach(([k,v],i)=>{const y=36+i*31;
     c.fillStyle='#7d8b8c';c.fillText(k,24,y);
     c.fillStyle='#e8e3d4';c.textAlign='right';c.fillText(v,488,y);c.textAlign='left';});
   if(noteT>0){c.fillStyle='#b5713f';c.font='700 16px "Space Mono",monospace';c.fillText(note,24,388);}
@@ -1322,10 +1356,6 @@ renderer.setAnimationLoop(()=>{
   }
 
   if(trigR>0.05&&!menuOpen) reelIn(P.reelSpeed*trigR*dt);
-  if(handMode!==2&&!hooked&&!rodPinch){
-    const shoot=Math.max(0,tipStrain)*P.shootGain*60*shootResist;
-    if(shoot>0.001) payOut(Math.min(shoot*dt,0.35));
-  }
 
   physics(dt);
   if(rodGrip) rodGrip.getWorldQuaternion(_q);
@@ -1343,7 +1373,11 @@ renderer.setAnimationLoop(()=>{
     bend+=Math.acos(Math.max(-1,Math.min(1,(ux*vx+uy*vy+uz*vz)/(ul*vl))));
   }
   M.bend=bend*180/Math.PI;
-  M.tension=Math.min(60,tipStrain*900);
+  {
+    const hs=dt/SUB, mEff=1/Math.max(invM[head],1e-6);
+    const inst=Math.min(200,(tipRaw/(hs*hs))*mEff);
+    M.tension+=(inst-M.tension)*Math.min(1,dt*12);      /* smoothed, it is noisy */
+  }
 
   const F=(N-1)*3,fx=pos[F],fy=pos[F+1],fz=pos[F+2];
   const film=filmY(fx,fz,simTime);
@@ -1441,8 +1475,8 @@ renderer.setAnimationLoop(()=>{
   for(let i=speckPhase;i<visible;i+=2){
     const p=i*3;
     computeFlow(spPos[p],spPos[p+2]);
-    spPos[p]+=flowX*dt*2;spPos[p+2]+=flowZ*dt*2;
-    spLife[i]-=dt*2;
+    spPos[p]+=flowX*dt;spPos[p+2]+=flowZ*dt;
+    spLife[i]-=dt;
     if(spPos[p]>_camW.x+34||spPos[p]<_camW.x-46||spLife[i]<0||
        bedDepth(spPos[p],spPos[p+2])<0.04){
       seedSpeck(i,_camW.x,Math.random()<P.speckSpread?1:0);
