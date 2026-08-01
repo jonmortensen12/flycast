@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v5 threaded</title>
+<title>Flycast — v6 tension</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -41,35 +41,35 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 05 · one line, eleven guides</p>
-    <h1>Flycast<br><em>threaded</em></h1>
+    <p class="eyebrow">Test rig 06 · tension at the spool</p>
+    <h1>Flycast<br><em>off the reel</em></h1>
   </div>
 
   <div class="cols">
     <div>
-      <h2>The line is continuous</h2>
-      <p>Reel → slack → your hand → stripping guide → nine snakes → tiptop → out.</p>
-      <p>Every guide turns the line, and every turn costs friction. Shooting fights the capstan.</p>
+      <h2>Grabbing line</h2>
+      <p>You now grab the <b>nearest point</b> on the line, wherever your hand is. Grab down by the reel and pull for maximum payout.</p>
+      <p>No direction to get right — it's tension on each side of your fingers that decides which way line moves.</p>
     </div>
     <div>
-      <h2>Slack is real now</h2>
-      <p>The loose line between reel and stripping guide is a simulated chain. It sags, piles on the gravel, and floats if you're wading.</p>
+      <h2>The cork clamp</h2>
+      <p><b>Right grip</b> traps the line against the cork. Release it and the line is completely free from spool to stripping guide.</p>
     </div>
     <div>
-      <h2>The river drops</h2>
-      <p>Pool-drop structure — the surface steps down through each riffle, and water accelerates over the lip.</p>
+      <h2>Specks</h2>
+      <p>Up to 4000, with size and spread controls. They recycle from a fixed pool, so they can't pile up.</p>
+      <p>Some respawn upstream, some seed on a moving grid around you — including in the dead water behind rocks.</p>
     </div>
     <div>
-      <h2>Surface film</h2>
-      <p>The line now sticks to the water. Peeling it off takes a real pull. <b>Surface stick</b> in the menu.</p>
+      <h2>Fixed</h2>
+      <p>Line no longer snags on invisible points in the air while reeling. That was stale geometry, not physics.</p>
     </div>
   </div>
 
   <button id="enter">Enter VR</button>
 
   <p class="note" id="hint">
-    Specks are back and there are 1600 of them, respawning around wherever you're standing so they never run out.
-    Some ride the film, some hang below it. Watch them stack behind the rocks.
+    Eddies behind the rocks now genuinely run backwards, so specks caught in them circulate instead of streaming past.
   </p>
 </div>
 
@@ -85,10 +85,10 @@ import * as THREE from 'three';
    ════════════════════════════════════════════════════════════ */
 const P = {
   stiffMul:0.85, dragMul:2.75, lineDens:1.85, shootGain:0.55,
-  reelSpeed:2.60, stripGain:1.35, buoyancy:1.00, stick:1.00, tippet:10.0,
+  reelSpeed:2.60, spoolDrag:1.00, buoyancy:1.00, stick:1.00, tippet:10.0,
   guideMu:0.16, lineVis:1.60, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.55,
-  current:0.55, specks:1.00, grade:1.00, vortex:1.00,
+  current:0.55, specks:0.45, speckSize:1.00, speckSpread:0.45, grade:1.00, vortex:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
   splashV:4.50, lineRad:0.50, spookT:5.00, fatigue:1.00,
@@ -100,9 +100,9 @@ const MENU=[
   ['Line air drag','dragMul',0.10,4.00,0.05],
   ['Line mass','lineDens',0.40,3.00,0.05],
   ['Guide friction','guideMu',0.00,0.60,0.01],
+  ['Spool drag','spoolDrag',0.05,3.00,0.05],
   ['Shoot freedom','shootGain',0.10,1.50,0.05],
   ['Reel speed','reelSpeed',0.50,6.00,0.10],
-  ['Strip gain','stripGain',0.50,3.00,0.05],
   ['Line float','buoyancy',0.20,3.00,0.05],
   ['Surface stick','stick',0.00,4.00,0.10],
   ['Line thickness','lineVis',0.50,4.00,0.10],
@@ -115,7 +115,9 @@ const MENU=[
   ['— RIVER —',null,0,0,0],
   ['Current','current',0.10,1.40,0.05],
   ['River grade','grade',0.00,2.50,0.10],
-  ['Speck density','specks',0.00,1.00,0.05],
+  ['Speck density','specks',0.00,1.00,0.02],
+  ['Speck size','speckSize',0.20,4.00,0.10],
+  ['Speck spread','speckSpread',0.00,1.00,0.05],
   ['Eddy strength','vortex',0.00,2.50,0.10],
   ['— FISH —',null,0,0,0],
   ['Show zones','showZones',0,1,1],
@@ -134,29 +136,22 @@ const MENU=[
   ['Fish power','fishPower',0.30,2.50,0.05],
 ];
 
-/* ---- rod, guides, line ---- */
 const RN=12, LN=96, N=RN+LN;
 const ROD_LEN=2.743, ROD_SEG=ROD_LEN/(RN-1);
 const SEG=0.24, LINE_MIN=2.2, LINE_MAX=(LN-1)*SEG-0.4;
-/* Dale Clemens spacing, 9 ft rod, stripper 27" from butt, first snake 4" below tip.
-   Fractions of blank length measured from the butt. */
 const GUIDE_S=[0.2500,0.3621,0.4660,0.5617,0.6492,0.7284,0.7994,0.8621,0.9167,0.9630,1.0000];
 const GUIDE_R=[0.038,0.030,0.024,0.020,0.017,0.015,0.014,0.013,0.012,0.011,0.010];
 const NG=GUIDE_S.length;
-const SN=26;                                  // slack-chain nodes, reel -> stripping guide
-const HAND_I=17;                              // which slack node your left hand holds
+const SN=30;
 
-/* ---- river ---- */
 const CZ=-9.0, HALFW=7.0, MAXDEPTH=1.5, VMAX=2.2;
 const DROPS=[{x:-46,h:0.20,w:1.8},{x:-25,h:0.16,w:1.5},{x:-6,h:0.22,w:1.2},
              {x:15,h:0.18,w:2.0},{x:38,h:0.21,w:1.6},{x:60,h:0.17,w:1.4}];
 const smoothstep=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
 function surfY(x){
   let y=-0.0075*x*P.grade;
-  for(let i=0;i<DROPS.length;i++){
-    const d=DROPS[i];
-    y-=d.h*P.grade*smoothstep(d.x-d.w,d.x+d.w,x);
-  }
+  for(let i=0;i<DROPS.length;i++){const d=DROPS[i];
+    y-=d.h*P.grade*smoothstep(d.x-d.w,d.x+d.w,x);}
   return y;
 }
 const bedDepth=(x,z)=>{
@@ -173,7 +168,6 @@ const ripple=(x,z,t)=>
   (Math.sin(x*1.7+t*2.3)*0.011+Math.sin(x*0.7+z*0.9+t*1.5)*0.017+Math.sin(z*2.4-t*1.1)*0.008)*0.55;
 const filmY=(x,z,t)=>surfY(x)+ripple(x,z,t);
 
-/* obstacles + shed vortices */
 const OBST=[
   {x:-7.0,z:-7.6,r:0.85,h:0.55,kind:'rock',sh:0,sgn:1},
   {x: 1.5,z:-10.4,r:1.05,h:0.42,kind:'rock',sh:0,sgn:-1},
@@ -189,7 +183,6 @@ function computeFlow(x,z){
   const u=(z-CZ)/HALFW,cross=Math.max(0,1-u*u);
   if(cross<=0.001){flowX=0;flowZ=0;return;}
   const d=Math.max(bedDepth(x,z),0.12);
-  /* continuity gives base speed; the surface slope adds a push over each lip */
   const slope=Math.max(0,(surfY(x-0.9)-surfY(x+0.9))/1.8);
   const s=Math.min(VMAX,(P.current/d)*(1+slope*7.0))*Math.pow(cross,0.35);
   let vx=s,vz=0;
@@ -199,21 +192,25 @@ function computeFlow(x,z){
     const infl=Math.max(0,1-(dd-o.r)/(o.r*2.4));
     if(infl<=0) continue;
     vz+=(dz/dd)*s*0.85*infl;
-    if(dx>0&&Math.abs(dz)<o.r*1.6) vx*=1-0.80*infl; else vx*=1+0.45*infl;
+    if(dx>0&&Math.abs(dz)<o.r*1.6){
+      vx*=1-0.85*infl;
+      vx-=s*0.30*infl;            /* true recirculation: the wake runs back upstream */
+      vz-=(dz/dd)*s*0.55*infl;    /* and pulls inward toward the rock */
+    } else vx*=1+0.45*infl;
   }
   if(P.vortex>0.01) for(let i=0;i<NV;i++){
-    const v=vort[i]; if(v.life<=0) continue;
+    const v=vort[i];if(v.life<=0)continue;
     const dx=x-v.x,dz=z-v.z,d2=dx*dx+dz*dz;
-    if(d2>v.r*v.r*4) continue;
+    if(d2>v.r*v.r*4)continue;
     const f=v.k*P.vortex*Math.exp(-d2/(v.r*v.r))*v.life;
-    vx+=-dz*f; vz+=dx*f;
+    vx+=-dz*f;vz+=dx*f;
   }
   flowX=vx;flowZ=vz;
 }
 const speedAt=(x,z)=>{computeFlow(x,z);return Math.hypot(flowX,flowZ);};
 
 /* ════════════════════════════════════════════════════════════
-   2. PARTICLES — rod + free line past the tip
+   2. PARTICLES
    ════════════════════════════════════════════════════════════ */
 const pos=new Float32Array(N*3),prd=new Float32Array(N*3),vel=new Float32Array(N*3);
 const invM=new Float32Array(N),dragK=new Float32Array(N),bendK=new Float32Array(N);
@@ -253,12 +250,12 @@ function computeHead(){
   }
   head=nh;remSeg=Math.max(0.02,lineOut-(k-1)*SEG);
 }
-function payOut(a){if(a<=0||rodPinch)return;
+function payOut(a){if(a<=0||rodPinch)return 0;
   const b=lineOut;lineOut=Math.min(LINE_MAX,lineOut+a);
-  pooled=Math.max(0,pooled-(lineOut-b));computeHead();}
-function stripIn(a){if(a<=0||rodPinch)return;
+  const used=lineOut-b;pooled=Math.max(0,pooled-used);computeHead();return used;}
+function stripIn(a){if(a<=0||rodPinch)return 0;
   const b=lineOut;lineOut=Math.max(LINE_MIN,lineOut-a);
-  pooled+=b-lineOut;computeHead();}
+  const got=b-lineOut;pooled+=got;computeHead();return got;}
 function reelIn(a){
   const fp=Math.min(pooled,a);pooled-=fp;
   const rest=a-fp;
@@ -266,7 +263,6 @@ function reelIn(a){
 }
 function setLineOut(v){lineOut=Math.min(LINE_MAX,Math.max(LINE_MIN,v));computeHead();}
 
-/* ---- slack chain: reel -> (hand) -> stripping guide ---- */
 const sPosA=new Float32Array(SN*3),sPrd=new Float32Array(SN*3),sVel=new Float32Array(SN*3);
 let slackRest=SEG;
 
@@ -315,7 +311,6 @@ function applyDrag(i,h,lo){
   const vt2=vt*fT;
   vel[p]=nx+vt2*tx;vel[p+1]=ny+vt2*ty;vel[p+2]=nz+vt2*tz;
 }
-/* surface film: floats hard, and resists being peeled off */
 const RIDE=0.010, BREAK=2.6;
 function applyWater(i,h,t){
   const p=i*3,x=pos[p],z=pos[p+2];
@@ -325,7 +320,6 @@ function applyWater(i,h,t){
   if(above>0.10) return;
   if(above<0){pos[p+1]=target;if(vel[p+1]<0)vel[p+1]=0;}
   else if(vel[p+1]<BREAK){
-    /* adhesion — the film holds it until you pull hard enough to break out */
     vel[p+1]-=P.stick*26*h*(1-above/0.10);
     if(vel[p+1]<0&&pos[p+1]<=target+0.002) vel[p+1]=0;
   }
@@ -369,13 +363,23 @@ function physics(dt){
     for(let i=head;i<N;i++){const p=i*3;
       vel[p]=(pos[p]-prd[p])/h;vel[p+1]=(pos[p+1]-prd[p+1])/h;vel[p+2]=(pos[p+2]-prd[p+2])/h;}
   }
-  /* line still inside the guides: drawn along the routed path, not free */
+  /* FIX: stowed nodes must be parked on the tip each frame, or the renderer
+     keeps drawing them wherever they were last deployed — the "line stuck in
+     mid-air" artifact, worst while reeling because that is when nodes stow. */
+  const T=(RN-1)*3,H=head*3;
+  for(let i=RN;i<head;i++){
+    const f=(i-RN+1)/(head-RN+1),p=i*3;
+    pos[p]  =pos[T]  +(pos[H]  -pos[T]  )*f;
+    pos[p+1]=pos[T+1]+(pos[H+1]-pos[T+1])*f;
+    pos[p+2]=pos[T+2]+(pos[H+2]-pos[T+2])*f;
+    vel[p]=vel[p+1]=vel[p+2]=0;
+  }
   _p0.copy(_k0);_p1.copy(_k1);
 }
 
 /* ---- guides ---- */
 const guidePos=new Float32Array(NG*3);
-const _gq=new THREE.Quaternion(),_gdown=new THREE.Vector3();
+const _q=new THREE.Quaternion(),_gdown=new THREE.Vector3();
 function updateGuides(rodQuat){
   _gdown.set(0,-1,0).applyQuaternion(rodQuat);
   for(let g=0;g<NG;g++){
@@ -388,20 +392,17 @@ function updateGuides(rodQuat){
     guidePos[k+2]=pos[A+2]+(pos[B+2]-pos[A+2])*t+_gdown.z*off;
   }
 }
-/* capstan: every turn through a guide multiplies the tension you must overcome */
-function computeWrap(entry){
-  let total=0;
-  let px=entry.x,py=entry.y,pz=entry.z;
+function computeWrap(ex,ey,ez){
+  let total=0,px=ex,py=ey,pz=ez;
   for(let g=0;g<NG;g++){
     const k=g*3;
     const nx=(g===NG-1)?pos[head*3]  :guidePos[k+3];
     const ny=(g===NG-1)?pos[head*3+1]:guidePos[k+4];
     const nz=(g===NG-1)?pos[head*3+2]:guidePos[k+5];
-    let ax=guidePos[k]-px,ay=guidePos[k+1]-py,az=guidePos[k+2]-pz;
-    let bx=nx-guidePos[k],by=ny-guidePos[k+1],bz=nz-guidePos[k+2];
+    const ax=guidePos[k]-px,ay=guidePos[k+1]-py,az=guidePos[k+2]-pz;
+    const bx=nx-guidePos[k],by=ny-guidePos[k+1],bz=nz-guidePos[k+2];
     const al=Math.hypot(ax,ay,az)||1,bl=Math.hypot(bx,by,bz)||1;
-    const c=(ax*bx+ay*by+az*bz)/(al*bl);
-    total+=Math.acos(Math.max(-1,Math.min(1,c)));
+    total+=Math.acos(Math.max(-1,Math.min(1,(ax*bx+ay*by+az*bz)/(al*bl))));
     px=guidePos[k];py=guidePos[k+1];pz=guidePos[k+2];
   }
   wrapTotal=total;
@@ -435,7 +436,6 @@ scene.add(new THREE.Mesh(new THREE.SphereGeometry(200,24,16),new THREE.ShaderMat
     void main(){gl_FragColor=vec4(mix(uLo,uHi,smoothstep(-0.1,0.7,vY)),1.0);
     #include <colorspace_fragment>}`})));
 
-/* GLSL twin of surfY so the mesh and the physics agree */
 const GLSL_SURF=`
 float surfY(float x){
   float y=-0.0075*x*uGrade;
@@ -443,7 +443,6 @@ float surfY(float x){
   return y;
 }`;
 
-/* streambed */
 let bedGeo,bedPosAttr;
 {
   bedGeo=new THREE.PlaneGeometry(170,64,180,74);
@@ -458,8 +457,7 @@ let bedGeo,bedPosAttr;
     col.push(c.r,c.g,c.b);
   }
   bedGeo.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
-  bedGeo.computeVertexNormals();
-  bedPosAttr=pa;
+  bedGeo.computeVertexNormals();bedPosAttr=pa;
   const bed=new THREE.Mesh(bedGeo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1}));
   bed.renderOrder=-1;scene.add(bed);
 }
@@ -472,7 +470,6 @@ function rebuildBed(){
   pa.needsUpdate=true;bedGeo.computeVertexNormals();
 }
 
-/* rocks + log */
 const obstMeshes=[];
 for(const o of OBST){
   let m;
@@ -494,13 +491,11 @@ for(const o of OBST){
 }
 function placeObstacles(){
   for(let i=0;i<OBST.length;i++){
-    const o=OBST[i];
-    obstMeshes[i].position.set(o.x,bedY(o.x,o.z)+o.h,o.z);
+    const o=OBST[i];obstMeshes[i].position.set(o.x,bedY(o.x,o.z)+o.h,o.z);
   }
 }
 placeObstacles();
 
-/* water */
 const waterMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,
   uniforms:{uTime:{value:0},uQ:{value:P.current},uGrade:{value:P.grade},
@@ -538,42 +533,53 @@ const waterMat=new THREE.ShaderMaterial({
   const w=new THREE.Mesh(g,waterMat);w.renderOrder=0;w.frustumCulled=false;scene.add(w);
 }
 
-/* ---- specks ---- */
-const SPECK=1600;
+/* ---- specks: fixed pool, recycled. Never allocated, so never accumulates. ---- */
+const SPECK=4000;
 const spPos=new Float32Array(SPECK*3),spDep=new Float32Array(SPECK),spLife=new Float32Array(SPECK);
 const spAlpha=new Float32Array(SPECK);
-function seedSpeck(i,cx,fresh){
+const GX=14, GZ=9;                       /* stratified cells around the angler */
+let cellCursor=0;
+function seedSpeck(i,cx,mode){
   const p=i*3;
-  spPos[p]  = fresh? cx-14-Math.random()*24 : cx-40+Math.random()*80;
-  spPos[p+2]= CZ+(Math.random()*2-1)*HALFW*0.98;
+  if(mode===1){
+    /* stratified grid seat: guarantees coverage everywhere near you,
+       including the dead water behind rocks that upstream drift never reaches */
+    const c=cellCursor++;
+    const gx=c%GX, gz=Math.floor(c/GX)%GZ;
+    spPos[p]  = cx-30+((gx+Math.random())/GX)*60;
+    spPos[p+2]= CZ+(((gz+Math.random())/GZ)*2-1)*HALFW*0.98;
+    spLife[i] = 5+Math.random()*10;
+  } else {
+    spPos[p]  = cx-14-Math.random()*26;
+    spPos[p+2]= CZ+(Math.random()*2-1)*HALFW*0.98;
+    spLife[i] = 14+Math.random()*22;
+  }
   spDep[i]  = Math.random()<0.55?0:-Math.random()*0.35;
   spPos[p+1]= surfY(spPos[p])+0.02+spDep[i];
-  spLife[i] = 14+Math.random()*22;
   spAlpha[i]= 0.55+Math.random()*0.45;
 }
-for(let i=0;i<SPECK;i++) seedSpeck(i,0,false);
+for(let i=0;i<SPECK;i++) seedSpeck(i,0,1);
 const speckGeo=new THREE.BufferGeometry();
 speckGeo.setAttribute('position',new THREE.BufferAttribute(spPos,3));
 speckGeo.setAttribute('alpha',new THREE.BufferAttribute(spAlpha,1));
 const speckMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,
-  uniforms:{uOpacity:{value:1}},
+  uniforms:{uSize:{value:1}},
   vertexShader:`
-    attribute float alpha; varying float vA;
+    attribute float alpha; varying float vA; uniform float uSize;
     void main(){
       vA=alpha;
       vec4 mv=modelViewMatrix*vec4(position,1.0);
-      gl_PointSize=clamp(260.0/max(-mv.z,0.4),2.5,18.0);
+      gl_PointSize=clamp(260.0*uSize/max(-mv.z,0.4),2.0*uSize,26.0*uSize);
       gl_Position=projectionMatrix*mv;
     }`,
   fragmentShader:`
-    uniform float uOpacity; varying float vA;
+    varying float vA;
     void main(){
       vec2 d=gl_PointCoord-0.5;
       float r=dot(d,d);
       if(r>0.25) discard;
-      float a=(1.0-smoothstep(0.06,0.25,r))*vA*uOpacity;
-      gl_FragColor=vec4(0.96,0.99,0.97,a);
+      gl_FragColor=vec4(0.96,0.99,0.97,(1.0-smoothstep(0.06,0.25,r))*vA);
     }`});
 const specks=new THREE.Points(speckGeo,speckMat);
 specks.frustumCulled=false;specks.renderOrder=2;scene.add(specks);
@@ -632,8 +638,7 @@ function troutGeometry(){
     const t=i/NX,h=0.125*prof(t),w=h*0.52,cx=(t-0.5)*1.0;
     for(let j=0;j<=NR;j++){
       const a=j/NR*Math.PI*2;
-      p.push(cx,Math.cos(a)*h,Math.sin(a)*w);
-      uv.push(t,j/NR);
+      p.push(cx,Math.cos(a)*h,Math.sin(a)*w);uv.push(t,j/NR);
     }
   }
   for(let i=0;i<NX;i++)for(let j=0;j<NR;j++){
@@ -671,7 +676,6 @@ function makeTrout(len){
   const eye2=eye.clone();eye2.position.z=-0.042;g.add(eye2);
   g.scale.setScalar(len);return g;
 }
-
 const LIES=[{x:-2.0,z:-7.2,len:0.40},{x:-6.2,z:-6.6,len:0.32},
             {x:2.6,z:-11.0,len:0.46},{x:7.4,z:-8.0,len:0.35}];
 let hooked=null;
@@ -689,9 +693,10 @@ function makeMarker(){
 class Trout{
   constructor(l){
     this.lie=new THREE.Vector3(l.x,0,l.z);this.len=l.len;
-    this.p=this.lie.clone();this.p.y=this.restY();
+    this.p=this.lie.clone();this.feeding=Math.random()<P.feedChance;
+    this.p.y=this.restY();
     this.state='holding';this.stamina=1;this.timer=0;
-    this.feeding=Math.random()<P.feedChance;this.feedT=4+Math.random()*8;
+    this.feedT=4+Math.random()*8;
     this.riseT=1+Math.random()*5;this.riseAnim=0;this.evaluated=false;
     this.run=new THREE.Vector3(-1,0,0);this.runT=0;
     this.mesh=makeTrout(l.len);scene.add(this.mesh);
@@ -724,7 +729,7 @@ class Trout{
       this.timer-=dt;
       const deep=surfY(this.p.x)-0.95;
       this.p.y+=(deep-this.p.y)*Math.min(1,dt*1.5);
-      if(this.timer<=0) this.reseat();
+      if(this.timer<=0)this.reseat();
     } else if(this.state==='landed'){
       this.timer-=dt;if(this.timer<=0)this.reseat();
     } else {
@@ -741,7 +746,7 @@ class Trout{
         this.riseAnim-=dt*1.5;
         const u=Math.sin(Math.max(0,this.riseAnim)*Math.PI);
         ty=ty*(1-u)+(surfY(this.p.x)-0.012)*u;
-        if(this.riseAnim>0.48&&this.riseAnim<0.54) spawnRing(this.p.x-0.05,this.p.z,0.9);
+        if(this.riseAnim>0.48&&this.riseAnim<0.54)spawnRing(this.p.x-0.05,this.p.z,0.9);
       }
       this.p.y+=(ty-this.p.y)*Math.min(1,dt*3);
     }
@@ -775,7 +780,6 @@ class Trout{
 }
 for(const l of LIES) fishes.push(new Trout(l));
 
-/* rings */
 const ringPool=[];
 for(let i=0;i<10;i++){
   const m=new THREE.Mesh(new THREE.TorusGeometry(0.30,0.010,5,26),
@@ -789,7 +793,6 @@ function spawnRing(x,z,scale){
   best.t=0;best.s=scale||1;best.m.position.set(x,surfY(x)+0.03,z);
 }
 
-/* zones */
 const zoneGrp=new THREE.Group();scene.add(zoneGrp);
 const zoneRings=[],zoneLanes=[];
 for(let i=0;i<LIES.length;i++){
@@ -886,8 +889,7 @@ lineTube.mesh.material.emissive=new THREE.Color(0x704400);
 lineTube.mesh.material.emissiveIntensity=0.35;
 lineTube.mesh.renderOrder=3;scene.add(lineTube.mesh);
 
-/* threaded section: slack chain + guide path, one tube */
-const THR_N=64;
+const THR_N=68;
 const thrPts=new Float32Array(THR_N*3);
 const thrRadii=new Float32Array(THR_N).fill(0.0040);
 const thrCols=new Float32Array(THR_N*3);
@@ -923,7 +925,8 @@ function resampleInto(out,n){
   }
 }
 
-/* guide rings */
+/* guide rings — torus normal is +Z, and the blank runs along local Z, so the
+   rod quaternion alone orients them. No extra 90 degree twist. */
 const guideMeshes=[];
 for(let g=0;g<NG;g++){
   const m=new THREE.Mesh(new THREE.TorusGeometry(GUIDE_R[g]*0.55,0.0016,4,10),
@@ -931,7 +934,6 @@ for(let g=0;g<NG;g++){
   scene.add(m);guideMeshes.push(m);
 }
 
-/* fly */
 const flyGrp=new THREE.Group();
 {
   const body=new THREE.Mesh(new THREE.SphereGeometry(0.011,8,6),
@@ -949,11 +951,10 @@ const flyWake=new THREE.Mesh(new THREE.RingGeometry(0.90,1.0,20),
   new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0,depthWrite:false}));
 flyWake.rotation.x=-Math.PI/2;flyWake.renderOrder=5;scene.add(flyWake);
 
-/* hands */
+/* ---- rod hand ---- */
 const handRig=new THREE.Group();scene.add(handRig);
-const reelMesh=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.043,0.020,16),
-  new THREE.MeshStandardMaterial({color:0x3c4a44,roughness:0.35,metalness:0.6}));
-const reelLip=new THREE.Object3D();reelLip.position.set(0,-0.030,0.20);
+const reelLip=new THREE.Object3D();reelLip.position.set(0,-0.076,0.20);
+const corkTop=new THREE.Object3D();corkTop.position.set(0,-0.016,-0.045);
 {
   const grip=new THREE.Mesh(new THREE.CylinderGeometry(0.017,0.013,0.20,10),
     new THREE.MeshStandardMaterial({color:0xc4a173,roughness:0.95}));
@@ -961,8 +962,19 @@ const reelLip=new THREE.Object3D();reelLip.position.set(0,-0.030,0.20);
   const seat=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.014,0.07,10),
     new THREE.MeshStandardMaterial({color:0x6d5330,roughness:0.4,metalness:0.7}));
   seat.rotation.x=Math.PI/2;seat.position.z=0.175;
-  reelMesh.position.set(0,-0.052,0.20);
-  handRig.add(grip,seat,reelMesh,reelLip);
+  /* reel: spool axis is horizontal and across the rod, so the cylinder's
+     Y axis has to lie along local X */
+  const reelMesh=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.043,0.022,18),
+    new THREE.MeshStandardMaterial({color:0x3c4a44,roughness:0.35,metalness:0.6}));
+  reelMesh.rotation.z=Math.PI/2;
+  reelMesh.position.set(0,-0.055,0.20);
+  const spool=new THREE.Mesh(new THREE.CylinderGeometry(0.026,0.026,0.026,14),
+    new THREE.MeshStandardMaterial({color:0x22302c,roughness:0.5,metalness:0.4}));
+  spool.rotation.z=Math.PI/2;spool.position.set(0,-0.055,0.20);
+  const foot=new THREE.Mesh(new THREE.BoxGeometry(0.014,0.030,0.05),
+    new THREE.MeshStandardMaterial({color:0x3c4a44,roughness:0.4,metalness:0.6}));
+  foot.position.set(0,-0.026,0.20);
+  handRig.add(grip,seat,reelMesh,spool,foot,reelLip,corkTop);
 }
 const leftHand=new THREE.Mesh(new THREE.SphereGeometry(0.035,10,8),
   new THREE.MeshStandardMaterial({color:0xc9a882,roughness:0.9}));
@@ -981,7 +993,7 @@ const netGrp=new THREE.Group();netGrp.visible=false;scene.add(netGrp);
   netGrp.add(hoop,mesh,handle);
 }
 
-/* panels */
+/* ---- panels ---- */
 function makePanel(w,h,cw,ch){
   const cv=document.createElement('canvas');cv.width=cw;cv.height=ch;
   const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;
@@ -996,7 +1008,7 @@ menu.mesh.position.set(0,1.42,-0.85);menu.mesh.visible=false;player.add(menu.mes
 
 let note='',noteT=0;
 function say(s){note=s;noteT=3.6;}
-const M={bend:0,drift:0,tension:0,depth:0};
+const M={bend:0,drift:0,tension:0,depth:0,spool:0};
 const HANDTXT=['free','routing','pinched'];
 function drawHUD(){
   const c=hud.cx;c.clearRect(0,0,512,400);
@@ -1008,6 +1020,7 @@ function drawHUD(){
     ['LINE OUT',lineOut.toFixed(1)+' m'],
     ['SLACK POOL',pooled.toFixed(1)+' m'],
     ['LEFT HAND',HANDTXT[handMode]+(rodPinch?' / CORK':'')],
+    ['OFF SPOOL',M.spool.toFixed(2)+' m/s'],
     ['GUIDE WRAP',(wrapTotal*180/Math.PI).toFixed(0)+'\u00B0  \u00D7'+shootResist.toFixed(2)],
     ['WADE DEPTH',M.depth.toFixed(2)+' m'],
     ['DRIFT',hooked?'\u2014':M.drift.toFixed(0)+' %'],
@@ -1015,10 +1028,10 @@ function drawHUD(){
     ['FEEDING',feed+' of '+fishes.length],
     ['HOOKED',hooked?(hooked.stamina*100).toFixed(0)+' % left':'\u2014'],
   ];
-  rows.forEach(([k,v],i)=>{const y=42+i*38;
+  rows.forEach(([k,v],i)=>{const y=40+i*35;
     c.fillStyle='#7d8b8c';c.fillText(k,24,y);
     c.fillStyle='#e8e3d4';c.textAlign='right';c.fillText(v,488,y);c.textAlign='left';});
-  if(noteT>0){c.fillStyle='#b5713f';c.font='700 16px "Space Mono",monospace';c.fillText(note,24,384);}
+  if(noteT>0){c.fillStyle='#b5713f';c.font='700 16px "Space Mono",monospace';c.fillText(note,24,388);}
   hud.tex.needsUpdate=true;
 }
 let menuOpen=false,menuSel=1,stickReady=true;
@@ -1066,7 +1079,7 @@ function bind(i,g){
 bind(0,gA);bind(1,gB);
 
 const BUTT_Z=0.175,NEXT_Z=BUTT_Z-ROD_SEG;
-const _off=new THREE.Vector3(),_q=new THREE.Quaternion();
+const _off=new THREE.Vector3();
 const mouse={x:0,y:-0.35};
 addEventListener('mousemove',e=>{mouse.x=(e.clientX/innerWidth-0.5)*2.4;mouse.y=(e.clientY/innerHeight-0.5)*2.0-0.35;});
 const keys={};
@@ -1086,8 +1099,9 @@ function handTargets(){
 }
 
 /* ════════════════════════════════════════════════════════════
-   7. SLACK CHAIN
+   7. SLACK CHAIN — reel to stripping guide, with movable clamps
    ════════════════════════════════════════════════════════════ */
+let handIdx=-1, corkIdx=-1;
 function initSlack(reelP,stripP){
   for(let i=0;i<SN;i++){
     const t=i/(SN-1),p=i*3;
@@ -1097,49 +1111,61 @@ function initSlack(reelP,stripP){
     sVel[p]=sVel[p+1]=sVel[p+2]=0;
   }
 }
-function slackStep(dt,reelP,stripP,handP){
+function nearestSlackNode(x,y,z){
+  let best=-1,bd=1e9;
+  for(let i=1;i<SN-1;i++){
+    const p=i*3;
+    const d=(sPosA[p]-x)**2+(sPosA[p+1]-y)**2+(sPosA[p+2]-z)**2;
+    if(d<bd){bd=d;best=i;}
+  }
+  return {i:best,d:Math.sqrt(bd)};
+}
+function isPinned(i,handP,corkP){
+  return (handP&&i===handIdx)||(corkP&&i===corkIdx);
+}
+function slackStep(dt,reelP,stripP,handP,corkP){
   const straight=Math.hypot(stripP.x-reelP.x,stripP.y-reelP.y,stripP.z-reelP.z);
   slackRest=(straight+pooled)/(SN-1);
   const h=dt/2;
   for(let s=0;s<2;s++){
     for(let i=1;i<SN-1;i++){
-      if(handP&&i===HAND_I) continue;
+      if(isPinned(i,handP,corkP)) continue;
       const p=i*3;
       sVel[p+1]-=9.81*h;
       sVel[p]*=0.985;sVel[p+1]*=0.985;sVel[p+2]*=0.985;
       sPrd[p]=sPosA[p];sPrd[p+1]=sPosA[p+1];sPrd[p+2]=sPosA[p+2];
       sPosA[p]+=sVel[p]*h;sPosA[p+1]+=sVel[p+1]*h;sPosA[p+2]+=sVel[p+2]*h;
     }
-    /* pins */
     sPosA[0]=reelP.x;sPosA[1]=reelP.y;sPosA[2]=reelP.z;
     const L=(SN-1)*3;
     sPosA[L]=stripP.x;sPosA[L+1]=stripP.y;sPosA[L+2]=stripP.z;
-    if(handP){const q=HAND_I*3;sPosA[q]=handP.x;sPosA[q+1]=handP.y;sPosA[q+2]=handP.z;}
+    if(handP&&handIdx>0){const q=handIdx*3;sPosA[q]=handP.x;sPosA[q+1]=handP.y;sPosA[q+2]=handP.z;}
+    if(corkP&&corkIdx>0){const q=corkIdx*3;sPosA[q]=corkP.x;sPosA[q+1]=corkP.y;sPosA[q+2]=corkP.z;}
     for(let it=0;it<4;it++){
       for(let i=0;i<SN-1;i++){
         const A=i*3,B=A+3;
-        const fixedA=(i===0)||(handP&&i===HAND_I);
-        const fixedB=(i+1===SN-1)||(handP&&i+1===HAND_I);
-        if(fixedA&&fixedB) continue;
-        let dx=sPosA[B]-sPosA[A],dy=sPosA[B+1]-sPosA[A+1],dz=sPosA[B+2]-sPosA[A+2];
+        const fa=(i===0)||isPinned(i,handP,corkP);
+        const fb=(i+1===SN-1)||isPinned(i+1,handP,corkP);
+        if(fa&&fb) continue;
+        const dx=sPosA[B]-sPosA[A],dy=sPosA[B+1]-sPosA[A+1],dz=sPosA[B+2]-sPosA[A+2];
         const d=Math.hypot(dx,dy,dz);if(d<1e-9)continue;
-        if(d<=slackRest) continue;                     // rope: only resists stretching
+        if(d<=slackRest) continue;
         const corr=(d-slackRest)/d;
-        const wa=fixedA?0:(fixedB?1:0.5),wb=fixedB?0:(fixedA?1:0.5);
+        const wa=fa?0:(fb?1:0.5),wb=fb?0:(fa?1:0.5);
         sPosA[A]+=dx*corr*wa;sPosA[A+1]+=dy*corr*wa;sPosA[A+2]+=dz*corr*wa;
         sPosA[B]-=dx*corr*wb;sPosA[B+1]-=dy*corr*wb;sPosA[B+2]-=dz*corr*wb;
       }
       for(let i=1;i<SN-1;i++){
-        if(handP&&i===HAND_I) continue;
+        if(isPinned(i,handP,corkP)) continue;
         const p=i*3,gy=bedY(sPosA[p],sPosA[p+2]);
-        const film=filmY(sPosA[p],sPosA[p+2],simTime)+0.008;
-        const floor=Math.max(gy+0.008, bedDepth(sPosA[p],sPosA[p+2])>0.05?film:-1e9);
+        const wet=bedDepth(sPosA[p],sPosA[p+2])>0.05;
+        const floor=wet?Math.max(gy+0.008,filmY(sPosA[p],sPosA[p+2],simTime)+0.008):gy+0.008;
         if(sPosA[p+1]<floor) sPosA[p+1]=floor;
       }
     }
     for(let i=1;i<SN-1;i++){
-      if(handP&&i===HAND_I){const p=i*3;sVel[p]=sVel[p+1]=sVel[p+2]=0;continue;}
       const p=i*3;
+      if(isPinned(i,handP,corkP)){sVel[p]=sVel[p+1]=sVel[p+2]=0;continue;}
       sVel[p]=(sPosA[p]-sPrd[p])/h;
       sVel[p+1]=(sPosA[p+1]-sPrd[p+1])/h;
       sVel[p+2]=(sPosA[p+2]-sPrd[p+2])/h;
@@ -1150,6 +1176,7 @@ function slackStep(dt,reelP,stripP,handP){
 /* ════════════════════════════════════════════════════════════
    8. RESET
    ════════════════════════════════════════════════════════════ */
+const _reel=new THREE.Vector3(),_cork=new THREE.Vector3(),_strip=new THREE.Vector3();
 function resetCast(){
   handTargets();_p0.copy(_k0);_p1.copy(_k1);
   const dx=(_k1.x-_k0.x)/ROD_SEG,dy=(_k1.y-_k0.y)/ROD_SEG,dz=(_k1.z-_k0.z)/ROD_SEG;
@@ -1165,11 +1192,11 @@ function resetCast(){
     pos[p+2]=pos[T+2]-lineOut*t;
     vel[p]=vel[p+1]=vel[p+2]=0;}
   invM[N-1]=1/baseM[N-1];
-  handRig.updateMatrixWorld(true);
-  reelLip.getWorldPosition(_reel);
   updateGuides(_q);
-  _tmp.set(guidePos[0],guidePos[1],guidePos[2]);
-  initSlack(_reel,_tmp);
+  reelLip.getWorldPosition(_reel);
+  _strip.set(guidePos[0],guidePos[1],guidePos[2]);
+  initSlack(_reel,_strip);
+  handIdx=-1;corkIdx=-1;
   if(hooked){hooked.reseat();hooked=null;}
 }
 
@@ -1178,9 +1205,8 @@ function resetCast(){
    ════════════════════════════════════════════════════════════ */
 const clock=new THREE.Clock();
 let started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
-let prevY=false,prevA=false,prevB=false,lhValid=false,lastGrade=P.grade;
-const _lh=new THREE.Vector3(),_lhPrev=new THREE.Vector3(),_toTip=new THREE.Vector3(),_d=new THREE.Vector3();
-const _reel=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_tmp=new THREE.Vector3();
+let prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandMode=0,prevRodPinch=false;
+const _lh=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3();
 
 function pulse(s){
   if(!rodSrc||!rodSrc.gamepad)return;
@@ -1221,6 +1247,7 @@ renderer.setAnimationLoop(()=>{
       if(key==='lineDens')refreshLineMass();
       if(key==='current')waterMat.uniforms.uQ.value=P.current;
       if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
+      if(key==='speckSize')speckMat.uniforms.uSize.value=P.speckSize;
     }
   } else if(Math.hypot(ax,ay)>0.15){
     camera.getWorldQuaternion(_camQ);
@@ -1236,17 +1263,17 @@ renderer.setAnimationLoop(()=>{
   }
   camera.getWorldPosition(_camW);
   {
-    const fx=_camW.x-player.position.x, fz=_camW.z-player.position.z;
-    const gx=player.position.x+fx, gz=player.position.z+fz;
-    const gy=bedY(gx,gz), lim=surfY(gx)-1.15;
+    const gy=bedY(_camW.x,_camW.z),lim=surfY(_camW.x)-1.15;
     player.position.y=Math.max(lim,gy);
-    M.depth=Math.max(0,surfY(gx)-gy);
+    M.depth=Math.max(0,surfY(_camW.x)-gy);
   }
   if(Math.abs(P.grade-lastGrade)>0.005){lastGrade=P.grade;rebuildBed();placeObstacles();}
 
   handTargets();
+  reelLip.getWorldPosition(_reel);
+  corkTop.getWorldPosition(_cork);
 
-  /* ---- left hand ---- */
+  /* ---- left hand: grab the nearest point on the line ---- */
   handMode=menuOpen?0:(trigL>0.85?2:(trigL>0.15?1:0));
   const haveLeft=!!offGrip;
   if(haveLeft){
@@ -1254,19 +1281,45 @@ renderer.setAnimationLoop(()=>{
     leftHand.position.copy(_lh);leftHand.visible=!netOn;
     leftHand.material.color.setHex(handMode===2?0xd98f4f:handMode===1?0xa8b4a0:0xc9a882);
     netGrp.visible=netOn;
-    if(netOn){netGrp.position.copy(_lh);offGrip.getWorldQuaternion(_q);netGrp.quaternion.copy(_q);}
+    if(netOn){netGrp.position.copy(_lh);offGrip.getWorldQuaternion(_camQ);netGrp.quaternion.copy(_camQ);}
   } else {leftHand.visible=false;netGrp.visible=false;}
 
-  if(handMode===2&&haveLeft){
-    if(lhValid){
-      const T=(RN-1)*3;
-      _toTip.set(pos[T]-_lh.x,pos[T+1]-_lh.y,pos[T+2]-_lh.z).normalize();
-      _d.subVectors(_lh,_lhPrev);
-      const along=_d.dot(_toTip)*P.stripGain*(hooked?0.6:1);
-      if(along>1e-5) payOut(along*shootResist); else if(along<-1e-5) stripIn(-along);
+  const handActive=handMode>0&&haveLeft&&!netOn;
+  if(handActive&&prevHandMode===0){
+    const n=nearestSlackNode(_lh.x,_lh.y,_lh.z);
+    handIdx=n.d<0.55?n.i:-1;                       /* must actually be near the line */
+    if(handIdx<0) say('no line there to grab');
+  }
+  if(!handActive) handIdx=-1;
+  prevHandMode=handActive?handMode:0;
+
+  /* ---- cork clamp ---- */
+  if(rodPinch&&!prevRodPinch){
+    const n=nearestSlackNode(_cork.x,_cork.y,_cork.z);
+    corkIdx=n.i;
+  }
+  if(!rodPinch) corkIdx=-1;
+  prevRodPinch=rodPinch;
+
+  /* ---- tension-driven transfer, no direction guessing ----
+     Over-stretch on the reel side pulls line off the spool.
+     Over-stretch on the rod side drags line back in through the guides. */
+  M.spool=0;
+  if(handMode===2&&handIdx>0){
+    const q=handIdx*3;
+    const Lr=slackRest*handIdx;
+    const Dr=Math.hypot(_lh.x-_reel.x,_lh.y-_reel.y,_lh.z-_reel.z);
+    if(Dr>Lr){
+      const ex=(Dr-Lr)/Math.max(P.spoolDrag,0.05);
+      pooled+=Math.min(ex,0.5);
+      M.spool=Math.min(ex,0.5)/Math.max(dt,1e-3);
     }
-    _lhPrev.copy(_lh);lhValid=true;
-  } else lhValid=false;
+    const stopIdx=(corkIdx>0&&corkIdx>handIdx)?corkIdx:SN-1;
+    const anchor=(stopIdx===SN-1)?_strip:_cork;
+    const Lt=slackRest*(stopIdx-handIdx);
+    const Dt=Math.hypot(_lh.x-anchor.x,_lh.y-anchor.y,_lh.z-anchor.z);
+    if(Dt>Lt&&stopIdx===SN-1) stripIn(Math.min(Dt-Lt,0.5));
+  }
 
   if(trigR>0.05&&!menuOpen) reelIn(P.reelSpeed*trigR*dt);
   if(handMode!==2&&!hooked&&!rodPinch){
@@ -1275,14 +1328,12 @@ renderer.setAnimationLoop(()=>{
   }
 
   physics(dt);
-  rodGrip?rodGrip.getWorldQuaternion(_q):null;
+  if(rodGrip) rodGrip.getWorldQuaternion(_q);
   updateGuides(_q);
-  _tmp.set(guidePos[0],guidePos[1],guidePos[2]);
-  computeWrap(_tmp);
-  reelLip.getWorldPosition(_reel);
-  slackStep(dt,_reel,_tmp,(handMode>0&&haveLeft&&!netOn)?_lh:null);
+  _strip.set(guidePos[0],guidePos[1],guidePos[2]);
+  computeWrap(_strip.x,_strip.y,_strip.z);
+  slackStep(dt,_reel,_strip,handIdx>0?_lh:null,corkIdx>0?_cork:null);
 
-  /* ---- metrics ---- */
   let bend=0;
   for(let i=1;i<RN-1;i++){
     const a=(i-1)*3,b=i*3,c=(i+1)*3;
@@ -1294,7 +1345,6 @@ renderer.setAnimationLoop(()=>{
   M.bend=bend*180/Math.PI;
   M.tension=Math.min(60,tipStrain*900);
 
-  /* ---- fly ---- */
   const F=(N-1)*3,fx=pos[F],fy=pos[F+1],fz=pos[F+2];
   const film=filmY(fx,fz,simTime);
   const onWater=fy<film+0.06&&bedDepth(fx,fz)>0.02;
@@ -1367,7 +1417,6 @@ renderer.setAnimationLoop(()=>{
     else if(M.bend>6)pulse(Math.min(1,M.bend/55)*0.7);}
   noteT-=dt;
 
-  /* ---- vortex shedding ---- */
   if(P.vortex>0.01) for(const o of OBST){
     o.sh-=dt;
     if(o.sh<=0){
@@ -1384,9 +1433,8 @@ renderer.setAnimationLoop(()=>{
     v.life-=dt*0.30;
   }
 
-  /* ---- specks: half the field per frame, respawned around the angler ---- */
+  /* ---- specks ---- */
   const visible=Math.floor(SPECK*Math.max(0,Math.min(1,P.specks)));
-  speckMat.uniforms.uOpacity.value=1;
   specks.visible=visible>2;
   speckGeo.setDrawRange(0,visible);
   speckPhase^=1;
@@ -1395,14 +1443,15 @@ renderer.setAnimationLoop(()=>{
     computeFlow(spPos[p],spPos[p+2]);
     spPos[p]+=flowX*dt*2;spPos[p+2]+=flowZ*dt*2;
     spLife[i]-=dt*2;
-    if(spPos[p]>_camW.x+34||spLife[i]<0||bedDepth(spPos[p],spPos[p+2])<0.04){
-      seedSpeck(i,_camW.x,true);continue;
+    if(spPos[p]>_camW.x+34||spPos[p]<_camW.x-46||spLife[i]<0||
+       bedDepth(spPos[p],spPos[p+2])<0.04){
+      seedSpeck(i,_camW.x,Math.random()<P.speckSpread?1:0);
+      continue;
     }
     spPos[p+1]=filmY(spPos[p],spPos[p+2],simTime)+0.014+spDep[i];
   }
   speckGeo.attributes.position.needsUpdate=true;
 
-  /* ---- zones ---- */
   zoneGrp.visible=P.showZones>0.5;
   if(zoneGrp.visible) for(let i=0;i<fishes.length;i++){
     const f=fishes[i],sy=surfY(f.p.x);
@@ -1438,7 +1487,6 @@ renderer.setAnimationLoop(()=>{
     const k=g*3;
     guideMeshes[g].position.set(guidePos[k],guidePos[k+1],guidePos[k+2]);
     guideMeshes[g].quaternion.copy(_q);
-    guideMeshes[g].rotateX(Math.PI/2);
   }
 
   flyGrp.position.set(fx,fy,fz);
@@ -1469,7 +1517,7 @@ const overlay=document.getElementById('overlay'),enterBtn=document.getElementByI
 if(!navigator.xr){
   enterBtn.disabled=true;enterBtn.textContent='WebXR unavailable';
   hint.innerHTML='<b>No WebXR here.</b> Mouse aims, Space reels, F routes / Shift pinches line, '+
-    'C traps at the cork, N nets, M menu, R resets. Open in the Meta Quest Browser for the real thing.';
+    'C clamps at the cork, N nets, M menu, R resets. Open in the Meta Quest Browser for the real thing.';
 } else {
   navigator.xr.isSessionSupported('immersive-vr').then(ok=>{
     if(!ok){enterBtn.disabled=true;enterBtn.textContent='Headset not detected';}});
