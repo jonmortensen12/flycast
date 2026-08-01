@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v4 the run</title>
+<title>Flycast — v5 threaded</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -14,7 +14,7 @@
     font-family:"Space Mono",ui-monospace,monospace;overflow:hidden}
   canvas{display:block}
   #overlay{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;
-    padding:5vmin;gap:1.5rem;overflow-y:auto;
+    padding:5vmin;gap:1.4rem;overflow-y:auto;
     background:radial-gradient(120% 90% at 20% 0%,var(--slate2) 0%,var(--slate) 60%)}
   #overlay.gone{display:none}
   h1{font-family:"Fraunces",Georgia,serif;font-weight:300;font-size:clamp(2.2rem,7.5vmin,4.4rem);
@@ -41,37 +41,35 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 04 · wading, rocks, rising fish</p>
-    <h1>Flycast<br><em>the run</em></h1>
+    <p class="eyebrow">Test rig 05 · one line, eleven guides</p>
+    <h1>Flycast<br><em>threaded</em></h1>
   </div>
 
   <div class="cols">
     <div>
-      <h2>Moving</h2>
-      <p><b>Left stick</b> walks. You can wade in — the bed drops away and deep water slows you down.</p>
-      <p>You can't go over about chest deep.</p>
+      <h2>The line is continuous</h2>
+      <p>Reel → slack → your hand → stripping guide → nine snakes → tiptop → out.</p>
+      <p>Every guide turns the line, and every turn costs friction. Shooting fights the capstan.</p>
     </div>
     <div>
-      <h2>Line hands</h2>
-      <p><b>Right side button</b> traps the line against the cork. Everything above the pool locks.</p>
-      <p><b>Left trigger</b>: half routes, full pinches. <b>Right trigger</b> reels.</p>
+      <h2>Slack is real now</h2>
+      <p>The loose line between reel and stripping guide is a simulated chain. It sags, piles on the gravel, and floats if you're wading.</p>
     </div>
     <div>
-      <h2>The net</h2>
-      <p><b>Left side button</b> brings up the net. Get a tired fish inside it to land him.</p>
+      <h2>The river drops</h2>
+      <p>Pool-drop structure — the surface steps down through each riffle, and water accelerates over the lip.</p>
     </div>
     <div>
-      <h2>Reading fish</h2>
-      <p>Feeding trout nose the surface for naturals. Those are the ones that will eat.</p>
-      <p>A fly landing above a fish can drift down into him — no need to drop it in a box.</p>
+      <h2>Surface film</h2>
+      <p>The line now sticks to the water. Peeling it off takes a real pull. <b>Surface stick</b> in the menu.</p>
     </div>
   </div>
 
   <button id="enter">Enter VR</button>
 
   <p class="note" id="hint">
-    <b>Y</b> opens the menu. Line mass now defaults to 1.85 and the line runs on 96 segments with a smoothed
-    render, so the tip should stop looking like linked sticks.
+    Specks are back and there are 1600 of them, respawning around wherever you're standing so they never run out.
+    Some ride the film, some hang below it. Watch them stack behind the rocks.
   </p>
 </div>
 
@@ -87,24 +85,26 @@ import * as THREE from 'three';
    ════════════════════════════════════════════════════════════ */
 const P = {
   stiffMul:0.85, dragMul:2.75, lineDens:1.85, shootGain:0.55,
-  reelSpeed:2.60, stripGain:1.35, buoyancy:1.00, tippet:10.0,
-  lineVis:1.60, flySize:1.80, haptics:1.00,
+  reelSpeed:2.60, stripGain:1.35, buoyancy:1.00, stick:1.00, tippet:10.0,
+  guideMu:0.16, lineVis:1.60, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.55,
-  current:0.55, flecks:1.00,
+  current:0.55, specks:1.00, grade:1.00, vortex:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
   splashV:4.50, lineRad:0.50, spookT:5.00, fatigue:1.00,
   riseRate:0.55, feedChance:0.60, nonFeedMult:0.15, fishPower:1.00,
 };
-const MENU = [
+const MENU=[
   ['— ROD & LINE —',null,0,0,0],
   ['Rod stiffness','stiffMul',0.20,2.00,0.05],
-  ['Line drag','dragMul',0.10,4.00,0.05],
+  ['Line air drag','dragMul',0.10,4.00,0.05],
   ['Line mass','lineDens',0.40,3.00,0.05],
+  ['Guide friction','guideMu',0.00,0.60,0.01],
   ['Shoot freedom','shootGain',0.10,1.50,0.05],
   ['Reel speed','reelSpeed',0.50,6.00,0.10],
   ['Strip gain','stripGain',0.50,3.00,0.05],
   ['Line float','buoyancy',0.20,3.00,0.05],
+  ['Surface stick','stick',0.00,4.00,0.10],
   ['Line thickness','lineVis',0.50,4.00,0.10],
   ['Fly size','flySize',0.50,4.00,0.10],
   ['Tippet (N)','tippet',2.00,30.0,0.50],
@@ -114,7 +114,9 @@ const MENU = [
   ['Net radius','netRadius',0.25,1.20,0.05],
   ['— RIVER —',null,0,0,0],
   ['Current','current',0.10,1.40,0.05],
-  ['Surface streaks','flecks',0.00,2.00,0.10],
+  ['River grade','grade',0.00,2.50,0.10],
+  ['Speck density','specks',0.00,1.00,0.05],
+  ['Eddy strength','vortex',0.00,2.50,0.10],
   ['— FISH —',null,0,0,0],
   ['Show zones','showZones',0,1,1],
   ['Show markers','showMarkers',0,1,1],
@@ -132,54 +134,86 @@ const MENU = [
   ['Fish power','fishPower',0.30,2.50,0.05],
 ];
 
-/* rod + line resolution */
+/* ---- rod, guides, line ---- */
 const RN=12, LN=96, N=RN+LN;
-const ROD_LEN=2.74, ROD_SEG=ROD_LEN/(RN-1);
+const ROD_LEN=2.743, ROD_SEG=ROD_LEN/(RN-1);
 const SEG=0.24, LINE_MIN=2.2, LINE_MAX=(LN-1)*SEG-0.4;
-const STRIP_GUIDE=4;
+/* Dale Clemens spacing, 9 ft rod, stripper 27" from butt, first snake 4" below tip.
+   Fractions of blank length measured from the butt. */
+const GUIDE_S=[0.2500,0.3621,0.4660,0.5617,0.6492,0.7284,0.7994,0.8621,0.9167,0.9630,1.0000];
+const GUIDE_R=[0.038,0.030,0.024,0.020,0.017,0.015,0.014,0.013,0.012,0.011,0.010];
+const NG=GUIDE_S.length;
+const SN=26;                                  // slack-chain nodes, reel -> stripping guide
+const HAND_I=17;                              // which slack node your left hand holds
 
-/* river */
-const CZ=-9.0, HALFW=7.0, MAXDEPTH=1.5, VMAX=1.9;
-const OBST=[
-  {x:-7.0,z:-7.6,r:0.85,h:0.55,kind:'rock'},
-  {x: 1.5,z:-10.4,r:1.05,h:0.42,kind:'rock'},
-  {x: 6.5,z:-6.9,r:0.62,h:0.30,kind:'rock'},
-  {x:-3.0,z:-12.2,r:1.60,h:0.26,kind:'log'},
-];
+/* ---- river ---- */
+const CZ=-9.0, HALFW=7.0, MAXDEPTH=1.5, VMAX=2.2;
+const DROPS=[{x:-46,h:0.20,w:1.8},{x:-25,h:0.16,w:1.5},{x:-6,h:0.22,w:1.2},
+             {x:15,h:0.18,w:2.0},{x:38,h:0.21,w:1.6},{x:60,h:0.17,w:1.4}];
+const smoothstep=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
+function surfY(x){
+  let y=-0.0075*x*P.grade;
+  for(let i=0;i<DROPS.length;i++){
+    const d=DROPS[i];
+    y-=d.h*P.grade*smoothstep(d.x-d.w,d.x+d.w,x);
+  }
+  return y;
+}
 const bedDepth=(x,z)=>{
-  const u=(z-CZ)/HALFW, cross=Math.max(0,1-u*u);
+  const u=(z-CZ)/HALFW,cross=Math.max(0,1-u*u);
   return MAXDEPTH*cross*(0.55+0.45*Math.sin(x*0.13+1.3));
 };
-let flowX=0, flowZ=0;
+function bedY(x,z){
+  const u=(z-CZ)/HALFW,s=surfY(x);
+  if(Math.abs(u)<1) return s-bedDepth(x,z);
+  if(u>=1) return s+Math.min(0.30,(u-1)*0.28);
+  return s+0.05+Math.min(2.6,(Math.abs(u)-1)*3.0);
+}
+const ripple=(x,z,t)=>
+  (Math.sin(x*1.7+t*2.3)*0.011+Math.sin(x*0.7+z*0.9+t*1.5)*0.017+Math.sin(z*2.4-t*1.1)*0.008)*0.55;
+const filmY=(x,z,t)=>surfY(x)+ripple(x,z,t);
+
+/* obstacles + shed vortices */
+const OBST=[
+  {x:-7.0,z:-7.6,r:0.85,h:0.55,kind:'rock',sh:0,sgn:1},
+  {x: 1.5,z:-10.4,r:1.05,h:0.42,kind:'rock',sh:0,sgn:-1},
+  {x: 6.5,z:-6.9,r:0.62,h:0.30,kind:'rock',sh:0,sgn:1},
+  {x:-3.0,z:-12.2,r:1.60,h:0.26,kind:'log',sh:0,sgn:-1},
+];
+const NV=16, vort=[];
+for(let i=0;i<NV;i++) vort.push({x:0,z:0,r:1,k:0,life:0});
+let vNext=0;
+
+let flowX=0,flowZ=0;
 function computeFlow(x,z){
-  const u=(z-CZ)/HALFW, cross=Math.max(0,1-u*u);
+  const u=(z-CZ)/HALFW,cross=Math.max(0,1-u*u);
   if(cross<=0.001){flowX=0;flowZ=0;return;}
-  const s=Math.min(VMAX,P.current/Math.max(bedDepth(x,z),0.12))*Math.pow(cross,0.35);
-  let vx=s, vz=0;
+  const d=Math.max(bedDepth(x,z),0.12);
+  /* continuity gives base speed; the surface slope adds a push over each lip */
+  const slope=Math.max(0,(surfY(x-0.9)-surfY(x+0.9))/1.8);
+  const s=Math.min(VMAX,(P.current/d)*(1+slope*7.0))*Math.pow(cross,0.35);
+  let vx=s,vz=0;
   for(let i=0;i<OBST.length;i++){
-    const o=OBST[i], dx=x-o.x, dz=z-o.z;
-    const d=Math.hypot(dx,dz)||1e-4;
-    if(d<o.r){vx*=0.04;vz*=0.04;continue;}
-    const infl=Math.max(0,1-(d-o.r)/(o.r*2.4));
+    const o=OBST[i],dx=x-o.x,dz=z-o.z,dd=Math.hypot(dx,dz)||1e-4;
+    if(dd<o.r){vx*=0.04;vz*=0.04;continue;}
+    const infl=Math.max(0,1-(dd-o.r)/(o.r*2.4));
     if(infl<=0) continue;
-    vz+=(dz/d)*s*0.85*infl;
-    if(dx>0&&Math.abs(dz)<o.r*1.6) vx*=1-0.80*infl;   // dead eddy behind
-    else vx*=1+0.45*infl;                              // squeezed at the shoulders
+    vz+=(dz/dd)*s*0.85*infl;
+    if(dx>0&&Math.abs(dz)<o.r*1.6) vx*=1-0.80*infl; else vx*=1+0.45*infl;
   }
-  flowX=vx; flowZ=vz;
+  if(P.vortex>0.01) for(let i=0;i<NV;i++){
+    const v=vort[i]; if(v.life<=0) continue;
+    const dx=x-v.x,dz=z-v.z,d2=dx*dx+dz*dz;
+    if(d2>v.r*v.r*4) continue;
+    const f=v.k*P.vortex*Math.exp(-d2/(v.r*v.r))*v.life;
+    vx+=-dz*f; vz+=dx*f;
+  }
+  flowX=vx;flowZ=vz;
 }
 const speedAt=(x,z)=>{computeFlow(x,z);return Math.hypot(flowX,flowZ);};
-const waveAt=(x,z,t)=>
-  (Math.sin(x*1.7+t*2.3)*0.011+Math.sin(x*0.7+z*0.9+t*1.5)*0.017+Math.sin(z*2.4-t*1.1)*0.008)*0.55;
-function groundY(x,z){
-  const u=(z-CZ)/HALFW;
-  if(Math.abs(u)<1) return -bedDepth(x,z);
-  if(u>=1) return Math.min(0.30,(u-1)*0.28);
-  return 0.05+Math.min(2.6,(Math.abs(u)-1)*3.0);
-}
 
 /* ════════════════════════════════════════════════════════════
-   2. PARTICLES
+   2. PARTICLES — rod + free line past the tip
    ════════════════════════════════════════════════════════════ */
 const pos=new Float32Array(N*3),prd=new Float32Array(N*3),vel=new Float32Array(N*3);
 const invM=new Float32Array(N),dragK=new Float32Array(N),bendK=new Float32Array(N);
@@ -202,13 +236,13 @@ for(let j=0;j<LN;j++){
 function refreshLineMass(){
   for(let i=RN;i<N;i++){
     const m=baseM[i]*(i===N-1?1:P.lineDens);
-    invM[i]=1/m; dragK[i]=0.5*1.2*1.1*baseA[i]/m;
+    invM[i]=1/m;dragK[i]=0.5*1.2*1.1*baseA[i]/m;
   }
 }
 refreshLineMass();
 
-let lineOut=8.0, head=0, remSeg=SEG, pooled=0;
-let handMode=0, rodPinch=false;
+let lineOut=8.0,head=0,remSeg=SEG,pooled=1.5;
+let handMode=0,rodPinch=false,wrapTotal=0,shootResist=1;
 function computeHead(){
   const k=Math.min(LN-1,Math.max(1,Math.floor((lineOut-1e-5)/SEG)+1));
   const nh=N-1-k;
@@ -217,29 +251,33 @@ function computeHead(){
     pos[p]=pos[q];pos[p+1]=pos[q+1];pos[p+2]=pos[q+2];
     vel[p]=vel[q];vel[p+1]=vel[q+1];vel[p+2]=vel[q+2];
   }
-  head=nh; remSeg=Math.max(0.02,lineOut-(k-1)*SEG);
+  head=nh;remSeg=Math.max(0.02,lineOut-(k-1)*SEG);
 }
-function payOut(a){ if(a<=0||rodPinch)return;
-  const b=lineOut; lineOut=Math.min(LINE_MAX,lineOut+a);
-  pooled=Math.max(0,pooled-(lineOut-b)); computeHead(); }
-function stripIn(a){ if(a<=0||rodPinch)return;
-  const b=lineOut; lineOut=Math.max(LINE_MIN,lineOut-a);
-  pooled+=b-lineOut; computeHead(); }
+function payOut(a){if(a<=0||rodPinch)return;
+  const b=lineOut;lineOut=Math.min(LINE_MAX,lineOut+a);
+  pooled=Math.max(0,pooled-(lineOut-b));computeHead();}
+function stripIn(a){if(a<=0||rodPinch)return;
+  const b=lineOut;lineOut=Math.max(LINE_MIN,lineOut-a);
+  pooled+=b-lineOut;computeHead();}
 function reelIn(a){
-  const fp=Math.min(pooled,a); pooled-=fp;
+  const fp=Math.min(pooled,a);pooled-=fp;
   const rest=a-fp;
   if(rest>0&&!rodPinch){lineOut=Math.max(LINE_MIN,lineOut-rest);computeHead();}
 }
 function setLineOut(v){lineOut=Math.min(LINE_MAX,Math.max(LINE_MIN,v));computeHead();}
 
+/* ---- slack chain: reel -> (hand) -> stripping guide ---- */
+const sPosA=new Float32Array(SN*3),sPrd=new Float32Array(SN*3),sVel=new Float32Array(SN*3);
+let slackRest=SEG;
+
 /* ════════════════════════════════════════════════════════════
    3. SOLVER
    ════════════════════════════════════════════════════════════ */
 function solveDist(a,b,rest,k){
-  const w=invM[a]+invM[b]; if(w===0) return 0;
+  const w=invM[a]+invM[b];if(w===0)return 0;
   const A=a*3,B=b*3;
   let dx=pos[B]-pos[A],dy=pos[B+1]-pos[A+1],dz=pos[B+2]-pos[A+2];
-  const d=Math.sqrt(dx*dx+dy*dy+dz*dz); if(d<1e-9) return 0;
+  const d=Math.sqrt(dx*dx+dy*dy+dz*dz);if(d<1e-9)return 0;
   const err=d-rest,s=(err/d)*k/w;
   dx*=s;dy*=s;dz*=s;
   pos[A]+=dx*invM[a];pos[A+1]+=dy*invM[a];pos[A+2]+=dz*invM[a];
@@ -247,7 +285,7 @@ function solveDist(a,b,rest,k){
   return Math.max(0,err);
 }
 function solveBend(a,b,c,k){
-  const w=invM[a]*0.25+invM[b]+invM[c]*0.25; if(w<=0) return;
+  const w=invM[a]*0.25+invM[b]+invM[c]*0.25;if(w<=0)return;
   const A=a*3,B=b*3,C=c*3;
   const dx=pos[B]-(pos[A]+pos[C])*0.5,dy=pos[B+1]-(pos[A+1]+pos[C+1])*0.5,dz=pos[B+2]-(pos[A+2]+pos[C+2])*0.5;
   const s=k/w;
@@ -261,13 +299,12 @@ function solveAll(){
   for(let i=1;i<RN-1;i++) solveBend(i-1,i,i+1,Math.min(1,bendK[i]*P.stiffMul));
   tipStrain=solveDist(RN-1,head,remSeg,1.0);
   for(let i=head;i<N-1;i++) solveDist(i,i+1,SEG,1.0);
-  /* a touch of bending stiffness in the line kills the linked-stick look near the tip */
   for(let i=head+1;i<N-1;i++) solveBend(i-1,i,i+1,0.05);
 }
 function applyDrag(i,h,lo){
   const p=i*3,a=Math.max(i-1,lo)*3,b=Math.min(i+1,N-1)*3;
   let tx=pos[b]-pos[a],ty=pos[b+1]-pos[a+1],tz=pos[b+2]-pos[a+2];
-  let tl=Math.sqrt(tx*tx+ty*ty+tz*tz); if(tl<1e-8) return;
+  let tl=Math.sqrt(tx*tx+ty*ty+tz*tz);if(tl<1e-8)return;
   tx/=tl;ty/=tl;tz/=tl;
   const vx=vel[p],vy=vel[p+1],vz=vel[p+2],vt=vx*tx+vy*ty+vz*tz;
   let nx=vx-vt*tx,ny=vy-vt*ty,nz=vz-vt*tz;
@@ -278,17 +315,23 @@ function applyDrag(i,h,lo){
   const vt2=vt*fT;
   vel[p]=nx+vt2*tx;vel[p+1]=ny+vt2*ty;vel[p+2]=nz+vt2*tz;
 }
-/* hard float: the line physically cannot go under the surface */
-const RIDE=0.011;
+/* surface film: floats hard, and resists being peeled off */
+const RIDE=0.010, BREAK=2.6;
 function applyWater(i,h,t){
   const p=i*3,x=pos[p],z=pos[p+2];
   if(bedDepth(x,z)<=0.02) return;
-  const target=waveAt(x,z,t)+RIDE;
-  if(pos[p+1]>target+0.005) return;
-  if(pos[p+1]<target){ pos[p+1]=target; if(vel[p+1]<0) vel[p+1]=0; }
+  const target=filmY(x,z,t)+RIDE;
+  const above=pos[p+1]-target;
+  if(above>0.10) return;
+  if(above<0){pos[p+1]=target;if(vel[p+1]<0)vel[p+1]=0;}
+  else if(vel[p+1]<BREAK){
+    /* adhesion — the film holds it until you pull hard enough to break out */
+    vel[p+1]-=P.stick*26*h*(1-above/0.10);
+    if(vel[p+1]<0&&pos[p+1]<=target+0.002) vel[p+1]=0;
+  }
   vel[p+1]+=(target-pos[p+1])*40*P.buoyancy*h;
   const sp=Math.sqrt(vel[p]**2+vel[p+1]**2+vel[p+2]**2);
-  const wd=1/(1+9*h*sp+6*h);
+  const wd=1/(1+(9+6*P.stick)*h*sp+6*h);
   vel[p]*=wd;vel[p+1]*=wd;vel[p+2]*=wd;
   computeFlow(x,z);
   const k=Math.min(1,7*h);
@@ -309,13 +352,13 @@ function physics(dt){
     pos[3]=_p1.x+(_k1.x-_p1.x)*a;pos[4]=_p1.y+(_k1.y-_p1.y)*a;pos[5]=_p1.z+(_k1.z-_p1.z)*a;
     for(let i=2;i<RN;i++){
       const p=i*3;
-      vel[p+1]-=9.81*h; applyDrag(i,h,0);
+      vel[p+1]-=9.81*h;applyDrag(i,h,0);
       prd[p]=pos[p];prd[p+1]=pos[p+1];prd[p+2]=pos[p+2];
       pos[p]+=vel[p]*h;pos[p+1]+=vel[p+1]*h;pos[p+2]+=vel[p+2]*h;
     }
     for(let i=head;i<N;i++){
       const p=i*3;
-      vel[p+1]-=9.81*h; applyDrag(i,h,head); applyWater(i,h,simTime);
+      vel[p+1]-=9.81*h;applyDrag(i,h,head);applyWater(i,h,simTime);
       if(i===N-1&&hooked) hooked.drive(h);
       prd[p]=pos[p];prd[p+1]=pos[p+1];prd[p+2]=pos[p+2];
       pos[p]+=vel[p]*h;pos[p+1]+=vel[p+1]*h;pos[p+2]+=vel[p+2]*h;
@@ -326,18 +369,47 @@ function physics(dt){
     for(let i=head;i<N;i++){const p=i*3;
       vel[p]=(pos[p]-prd[p])/h;vel[p+1]=(pos[p+1]-prd[p+1])/h;vel[p+2]=(pos[p+2]-prd[p+2])/h;}
   }
-  const T=(RN-1)*3,H=head*3;
-  for(let i=RN;i<head;i++){
-    const f=(i-RN+1)/(head-RN+1),p=i*3;
-    pos[p]=pos[T]+(pos[H]-pos[T])*f;
-    pos[p+1]=pos[T+1]+(pos[H+1]-pos[T+1])*f;
-    pos[p+2]=pos[T+2]+(pos[H+2]-pos[T+2])*f;
-  }
+  /* line still inside the guides: drawn along the routed path, not free */
   _p0.copy(_k0);_p1.copy(_k1);
 }
 
+/* ---- guides ---- */
+const guidePos=new Float32Array(NG*3);
+const _gq=new THREE.Quaternion(),_gdown=new THREE.Vector3();
+function updateGuides(rodQuat){
+  _gdown.set(0,-1,0).applyQuaternion(rodQuat);
+  for(let g=0;g<NG;g++){
+    const f=GUIDE_S[g]*(RN-1);
+    const a=Math.min(RN-1,Math.floor(f)),b=Math.min(RN-1,a+1),t=f-a;
+    const A=a*3,B=b*3,k=g*3;
+    const off=g===NG-1?0.004:GUIDE_R[g]*0.55;
+    guidePos[k]  =pos[A]  +(pos[B]  -pos[A]  )*t+_gdown.x*off;
+    guidePos[k+1]=pos[A+1]+(pos[B+1]-pos[A+1])*t+_gdown.y*off;
+    guidePos[k+2]=pos[A+2]+(pos[B+2]-pos[A+2])*t+_gdown.z*off;
+  }
+}
+/* capstan: every turn through a guide multiplies the tension you must overcome */
+function computeWrap(entry){
+  let total=0;
+  let px=entry.x,py=entry.y,pz=entry.z;
+  for(let g=0;g<NG;g++){
+    const k=g*3;
+    const nx=(g===NG-1)?pos[head*3]  :guidePos[k+3];
+    const ny=(g===NG-1)?pos[head*3+1]:guidePos[k+4];
+    const nz=(g===NG-1)?pos[head*3+2]:guidePos[k+5];
+    let ax=guidePos[k]-px,ay=guidePos[k+1]-py,az=guidePos[k+2]-pz;
+    let bx=nx-guidePos[k],by=ny-guidePos[k+1],bz=nz-guidePos[k+2];
+    const al=Math.hypot(ax,ay,az)||1,bl=Math.hypot(bx,by,bz)||1;
+    const c=(ax*bx+ay*by+az*bz)/(al*bl);
+    total+=Math.acos(Math.max(-1,Math.min(1,c)));
+    px=guidePos[k];py=guidePos[k+1];pz=guidePos[k+2];
+  }
+  wrapTotal=total;
+  shootResist=Math.exp(-P.guideMu*total);
+}
+
 /* ════════════════════════════════════════════════════════════
-   4. RENDERER + SCENE ROOT
+   4. SCENE
    ════════════════════════════════════════════════════════════ */
 const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
 renderer.setSize(innerWidth,innerHeight);
@@ -349,8 +421,7 @@ const scene=new THREE.Scene();
 scene.fog=new THREE.Fog(0xa8b7b0,32,130);
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.03,400);
 camera.position.set(0,1.55,0.6);
-const player=new THREE.Group();          // locomotion rig
-player.add(camera); scene.add(player);
+const player=new THREE.Group();player.add(camera);scene.add(player);
 
 scene.add(new THREE.HemisphereLight(0xe2ece9,0x33443a,2.0));
 const sun=new THREE.DirectionalLight(0xfff1d8,2.0);sun.position.set(-16,20,-4);scene.add(sun);
@@ -364,69 +435,92 @@ scene.add(new THREE.Mesh(new THREE.SphereGeometry(200,24,16),new THREE.ShaderMat
     void main(){gl_FragColor=vec4(mix(uLo,uHi,smoothstep(-0.1,0.7,vY)),1.0);
     #include <colorspace_fragment>}`})));
 
+/* GLSL twin of surfY so the mesh and the physics agree */
+const GLSL_SURF=`
+float surfY(float x){
+  float y=-0.0075*x*uGrade;
+  ${DROPS.map(d=>`y-=${d.h.toFixed(3)}*uGrade*smoothstep(${(d.x-d.w).toFixed(2)},${(d.x+d.w).toFixed(2)},x);`).join('\n  ')}
+  return y;
+}`;
+
 /* streambed */
+let bedGeo,bedPosAttr;
 {
-  const g=new THREE.PlaneGeometry(170,64,170,70);
-  g.rotateX(-Math.PI/2); g.translate(0,0,CZ);
-  const pa=g.attributes.position,col=[];
+  bedGeo=new THREE.PlaneGeometry(170,64,180,74);
+  bedGeo.rotateX(-Math.PI/2);bedGeo.translate(0,0,CZ);
+  const pa=bedGeo.attributes.position,col=[];
   const gravel=new THREE.Color(0x8a8071),grass=new THREE.Color(0x53663f),silt=new THREE.Color(0x46402f);
   for(let i=0;i<pa.count;i++){
     const x=pa.getX(i),z=pa.getZ(i),u=(z-CZ)/HALFW,d=bedDepth(x,z);
-    let y=groundY(x,z);
-    y+=Math.sin(x*2.3+z*1.7)*0.025+Math.sin(x*0.6-z*1.1)*0.045;
-    pa.setY(i,y);
+    pa.setY(i,bedY(x,z)+Math.sin(x*2.3+z*1.7)*0.025+Math.sin(x*0.6-z*1.1)*0.045);
     const c=Math.abs(u)<1?gravel.clone().lerp(silt,Math.min(1,d/1.4))
                          :gravel.clone().lerp(grass,Math.min(1,(Math.abs(u)-1)*1.6));
     col.push(c.r,c.g,c.b);
   }
-  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
-  g.computeVertexNormals();
-  const bed=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1}));
-  bed.renderOrder=-1; scene.add(bed);
+  bedGeo.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+  bedGeo.computeVertexNormals();
+  bedPosAttr=pa;
+  const bed=new THREE.Mesh(bedGeo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1}));
+  bed.renderOrder=-1;scene.add(bed);
+}
+function rebuildBed(){
+  const pa=bedPosAttr;
+  for(let i=0;i<pa.count;i++){
+    const x=pa.getX(i),z=pa.getZ(i);
+    pa.setY(i,bedY(x,z)+Math.sin(x*2.3+z*1.7)*0.025+Math.sin(x*0.6-z*1.1)*0.045);
+  }
+  pa.needsUpdate=true;bedGeo.computeVertexNormals();
 }
 
-/* rocks + a sunken log */
+/* rocks + log */
+const obstMeshes=[];
 for(const o of OBST){
+  let m;
   if(o.kind==='rock'){
-    const g=new THREE.SphereGeometry(o.r,10,7);
-    const pa=g.attributes.position;
+    const g=new THREE.SphereGeometry(o.r,10,7),pa=g.attributes.position;
     for(let i=0;i<pa.count;i++){
       const x=pa.getX(i),y=pa.getY(i),z=pa.getZ(i);
       const n=1+Math.sin(x*5.1)*0.09+Math.sin(y*4.3+z*3.7)*0.11;
       pa.setXYZ(i,x*n,y*n*0.72,z*n);
     }
     g.computeVertexNormals();
-    const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x6d6a5f,roughness:0.95}));
-    m.position.set(o.x,-bedDepth(o.x,o.z)+o.h,o.z);
-    scene.add(m);
+    m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x6d6a5f,roughness:0.95}));
   } else {
-    const m=new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.19,o.r*2.2,8),
+    m=new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.19,o.r*2.2,8),
       new THREE.MeshStandardMaterial({color:0x4e4231,roughness:1}));
-    m.rotation.z=Math.PI/2; m.rotation.y=0.35;
-    m.position.set(o.x,-bedDepth(o.x,o.z)+o.h,o.z);
-    scene.add(m);
+    m.rotation.z=Math.PI/2;m.rotation.y=0.35;
+  }
+  scene.add(m);obstMeshes.push(m);
+}
+function placeObstacles(){
+  for(let i=0;i<OBST.length;i++){
+    const o=OBST[i];
+    obstMeshes[i].position.set(o.x,bedY(o.x,o.z)+o.h,o.z);
   }
 }
+placeObstacles();
 
 /* water */
 const waterMat=new THREE.ShaderMaterial({
-  transparent:true, depthWrite:true,
-  uniforms:{uTime:{value:0},uQ:{value:P.current},
+  transparent:true,depthWrite:false,
+  uniforms:{uTime:{value:0},uQ:{value:P.current},uGrade:{value:P.grade},
     uDeep:{value:new THREE.Color(0x1d3f43)},uShal:{value:new THREE.Color(0x53897a)},
-    uFast:{value:new THREE.Color(0x92b3ab)}},
+    uFast:{value:new THREE.Color(0x9ab9b0)}},
   vertexShader:`
-    uniform float uTime,uQ; varying float vD,vS;
+    uniform float uTime,uQ,uGrade; varying float vD,vS;
+    ${GLSL_SURF}
     void main(){
       vec4 wp=modelMatrix*vec4(position,1.0);
       float u=(wp.z-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
       float cross=max(0.0,1.0-u*u);
       float d=${MAXDEPTH.toFixed(2)}*cross*(0.55+0.45*sin(wp.x*0.13+1.3));
-      float s=min(${VMAX.toFixed(1)},uQ/max(d,0.12))*pow(max(cross,0.0001),0.35);
+      float slope=max(0.0,(surfY(wp.x-0.9)-surfY(wp.x+0.9))/1.8);
+      float s=min(${VMAX.toFixed(1)},(uQ/max(d,0.12))*(1.0+slope*7.0))*pow(max(cross,0.0001),0.35);
       float h=(sin(wp.x*1.7+uTime*2.3)*0.011
               +sin(wp.x*0.7+wp.z*0.9+uTime*1.5)*0.017
               +sin(wp.z*2.4-uTime*1.1)*0.008)*0.55;
-      wp.y+=h*(0.3+s*0.5);
-      vD=d; vS=s;
+      wp.y=surfY(wp.x)+h*(0.3+s*0.5);
+      vD=d;vS=s;
       gl_Position=projectionMatrix*viewMatrix*wp;
     }`,
   fragmentShader:`
@@ -434,188 +528,183 @@ const waterMat=new THREE.ShaderMaterial({
     void main(){
       if(vD<0.02) discard;
       vec3 c=mix(uShal,uDeep,clamp(vD/1.5,0.0,1.0));
-      c=mix(c,uFast,smoothstep(0.35,1.5,vS)*0.5);
-      gl_FragColor=vec4(c,clamp(0.34+vD*0.30,0.0,0.78));
+      c=mix(c,uFast,smoothstep(0.4,1.7,vS)*0.5);
+      gl_FragColor=vec4(c,clamp(0.34+vD*0.30,0.0,0.76));
       #include <colorspace_fragment>
     }`});
 {
-  const g=new THREE.PlaneGeometry(170,20,180,60);
-  g.rotateX(-Math.PI/2); g.translate(0,0,CZ);
-  const w=new THREE.Mesh(g,waterMat); w.renderOrder=0; scene.add(w);
+  const g=new THREE.PlaneGeometry(170,20,200,64);
+  g.rotateX(-Math.PI/2);g.translate(0,0,CZ);
+  const w=new THREE.Mesh(g,waterMat);w.renderOrder=0;w.frustumCulled=false;scene.add(w);
 }
 
-/* ---- current streaks: instanced quads that ride the real flow ---- */
-const STREAK=300;
-const sPos=new Float32Array(STREAK*3), sAge=new Float32Array(STREAK);
-const streakTex=(()=>{
-  const c=document.createElement('canvas');c.width=64;c.height=16;
-  const g=c.getContext('2d');
-  const lg=g.createLinearGradient(0,0,64,0);
-  lg.addColorStop(0,'rgba(255,255,255,0)');lg.addColorStop(0.45,'rgba(255,255,255,0.95)');
-  lg.addColorStop(1,'rgba(255,255,255,0)');
-  g.fillStyle=lg;
-  g.beginPath();g.ellipse(32,8,32,7,0,0,Math.PI*2);g.fill();
-  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;
-})();
-const streakGeo=new THREE.PlaneGeometry(1,1); streakGeo.rotateX(-Math.PI/2);
-const streakMat=new THREE.MeshBasicMaterial({map:streakTex,transparent:true,
-  depthWrite:false,depthTest:true,opacity:0.9,color:0xffffff});
-const streaks=new THREE.InstancedMesh(streakGeo,streakMat,STREAK);
-streaks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-streaks.frustumCulled=false; streaks.renderOrder=3; scene.add(streaks);
-function seedStreak(i,spread){
+/* ---- specks ---- */
+const SPECK=1600;
+const spPos=new Float32Array(SPECK*3),spDep=new Float32Array(SPECK),spLife=new Float32Array(SPECK);
+const spAlpha=new Float32Array(SPECK);
+function seedSpeck(i,cx,fresh){
   const p=i*3;
-  sPos[p]  = spread? -80+Math.random()*160 : -82-Math.random()*8;
-  sPos[p+2]= CZ+(Math.random()*2-1)*HALFW*0.97;
-  sPos[p+1]= 0.02;
-  sAge[i]  = 6+Math.random()*10;
+  spPos[p]  = fresh? cx-14-Math.random()*24 : cx-40+Math.random()*80;
+  spPos[p+2]= CZ+(Math.random()*2-1)*HALFW*0.98;
+  spDep[i]  = Math.random()<0.55?0:-Math.random()*0.35;
+  spPos[p+1]= surfY(spPos[p])+0.02+spDep[i];
+  spLife[i] = 14+Math.random()*22;
+  spAlpha[i]= 0.55+Math.random()*0.45;
 }
-for(let i=0;i<STREAK;i++) seedStreak(i,true);
-const _dummy=new THREE.Object3D();
+for(let i=0;i<SPECK;i++) seedSpeck(i,0,false);
+const speckGeo=new THREE.BufferGeometry();
+speckGeo.setAttribute('position',new THREE.BufferAttribute(spPos,3));
+speckGeo.setAttribute('alpha',new THREE.BufferAttribute(spAlpha,1));
+const speckMat=new THREE.ShaderMaterial({
+  transparent:true,depthWrite:false,
+  uniforms:{uOpacity:{value:1}},
+  vertexShader:`
+    attribute float alpha; varying float vA;
+    void main(){
+      vA=alpha;
+      vec4 mv=modelViewMatrix*vec4(position,1.0);
+      gl_PointSize=clamp(260.0/max(-mv.z,0.4),2.5,18.0);
+      gl_Position=projectionMatrix*mv;
+    }`,
+  fragmentShader:`
+    uniform float uOpacity; varying float vA;
+    void main(){
+      vec2 d=gl_PointCoord-0.5;
+      float r=dot(d,d);
+      if(r>0.25) discard;
+      float a=(1.0-smoothstep(0.06,0.25,r))*vA*uOpacity;
+      gl_FragColor=vec4(0.96,0.99,0.97,a);
+    }`});
+const specks=new THREE.Points(speckGeo,speckMat);
+specks.frustumCulled=false;specks.renderOrder=2;scene.add(specks);
 
 /* ════════════════════════════════════════════════════════════
-   5. RAINBOW TROUT
+   5. TROUT
    ════════════════════════════════════════════════════════════ */
 const troutTex=(()=>{
   const W=512,H=256,c=document.createElement('canvas');c.width=W;c.height=H;
   const g=c.getContext('2d');
-  /* v runs around the body: 0 = spine, 0.25 = left flank, 0.5 = belly, 0.75 = right flank */
   for(let y=0;y<H;y++){
-    const v=y/H;
-    const dBelly=Math.abs(v-0.5);          // 0 at belly, 0.5 at spine
+    const v=y/H,dB=Math.abs(v-0.5);
     let col;
-    if(dBelly>0.40)      col='#3d5340';    // dark olive back
-    else if(dBelly>0.32) col='#5c7355';
-    else if(dBelly>0.22) col='#93a191';    // flank
-    else if(dBelly>0.13) col='#c9cfc4';    // silver
-    else                 col='#eae5da';    // belly
-    g.fillStyle=col; g.fillRect(0,y,W,1);
+    if(dB>0.40)      col='#3d5340';
+    else if(dB>0.32) col='#5c7355';
+    else if(dB>0.22) col='#93a191';
+    else if(dB>0.13) col='#c9cfc4';
+    else             col='#eae5da';
+    g.fillStyle=col;g.fillRect(0,y,W,1);
   }
-  /* the rainbow stripe, on both flanks */
   for(const cv of [0.25,0.75]){
-    const y=cv*H;
-    const lg=g.createLinearGradient(0,y-16,0,y+16);
+    const y=cv*H,lg=g.createLinearGradient(0,y-16,0,y+16);
     lg.addColorStop(0,'rgba(198,86,110,0)');
     lg.addColorStop(0.5,'rgba(206,92,116,0.72)');
     lg.addColorStop(1,'rgba(198,86,110,0)');
-    g.fillStyle=lg; g.fillRect(40,y-16,W-40,32);
+    g.fillStyle=lg;g.fillRect(40,y-16,W-40,32);
   }
-  /* spots — dense along the back, sparser down the flanks, none on the belly */
   g.fillStyle='#22301f';
   for(let i=0;i<620;i++){
-    const v=Math.random();
-    const dB=Math.abs(v-0.5);
+    const v=Math.random(),dB=Math.abs(v-0.5);
     if(dB<0.16) continue;
     if(Math.random()>(dB-0.14)*3.6) continue;
-    const x=30+Math.random()*(W-40), y=v*H;
-    const r=0.9+Math.random()*2.4;
+    const x=30+Math.random()*(W-40),y=v*H,r=0.9+Math.random()*2.4;
     g.globalAlpha=0.45+Math.random()*0.45;
     g.beginPath();g.ellipse(x,y,r,r*0.8,0,0,Math.PI*2);g.fill();
   }
   g.globalAlpha=1;
-  /* gill plate blush */
-  const gg=g.createRadialGradient(46,H*0.25,2,46,H*0.25,34);
-  gg.addColorStop(0,'rgba(203,96,110,0.55)');gg.addColorStop(1,'rgba(203,96,110,0)');
-  g.fillStyle=gg;g.fillRect(0,0,120,H);
-  const gg2=g.createRadialGradient(46,H*0.75,2,46,H*0.75,34);
-  gg2.addColorStop(0,'rgba(203,96,110,0.55)');gg2.addColorStop(1,'rgba(203,96,110,0)');
-  g.fillStyle=gg2;g.fillRect(0,0,120,H);
-  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+  for(const cv of [0.25,0.75]){
+    const gg=g.createRadialGradient(46,H*cv,2,46,H*cv,34);
+    gg.addColorStop(0,'rgba(203,96,110,0.55)');gg.addColorStop(1,'rgba(203,96,110,0)');
+    g.fillStyle=gg;g.fillRect(0,0,120,H);
+  }
+  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;
 })();
 const troutBodyMat=new THREE.MeshStandardMaterial({map:troutTex,roughness:0.34,metalness:0.18});
 const finMat=new THREE.MeshStandardMaterial({color:0x74805f,roughness:0.7,
   transparent:true,opacity:0.9,side:THREE.DoubleSide});
-
-/* parametric body: swept ellipse along +X, clean UVs for the texture above */
 function troutGeometry(){
-  const NX=26,NR=12;
-  const p=[],uv=[],idx=[];
+  const NX=26,NR=12,p=[],uv=[],idx=[];
   const prof=t=>{
     const base=Math.pow(Math.sin(Math.PI*Math.min(1,t*0.99+0.01)),0.62);
-    const ped =t>0.78?1-((t-0.78)/0.22)*0.78:1;      // caudal peduncle pinch
+    const ped=t>0.78?1-((t-0.78)/0.22)*0.78:1;
     return base*ped;
   };
   for(let i=0;i<=NX;i++){
-    const t=i/NX, h=0.125*prof(t), w=h*0.52;
-    const cx=(t-0.5)*1.0;
+    const t=i/NX,h=0.125*prof(t),w=h*0.52,cx=(t-0.5)*1.0;
     for(let j=0;j<=NR;j++){
       const a=j/NR*Math.PI*2;
-      p.push(cx, Math.cos(a)*h - (Math.sin(a*0+0)*0), Math.sin(a)*w);
-      uv.push(t, j/NR);
+      p.push(cx,Math.cos(a)*h,Math.sin(a)*w);
+      uv.push(t,j/NR);
     }
   }
   for(let i=0;i<NX;i++)for(let j=0;j<NR;j++){
-    const a=i*(NR+1)+j,b=a+1,c=a+NR+1,d=c+1;
-    idx.push(a,c,b, b,c,d);
-  }
+    const a=i*(NR+1)+j,b=a+1,c=a+NR+1,d=c+1;idx.push(a,c,b,b,c,d);}
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
   g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
-  g.setIndex(idx); g.computeVertexNormals();
-  return g;
+  g.setIndex(idx);g.computeVertexNormals();return g;
 }
 const TROUT_GEO=troutGeometry();
 function finShape(pts){
-  const s=new THREE.Shape();
-  s.moveTo(pts[0][0],pts[0][1]);
-  for(let i=1;i<pts.length;i++) s.lineTo(pts[i][0],pts[i][1]);
+  const s=new THREE.Shape();s.moveTo(pts[0][0],pts[0][1]);
+  for(let i=1;i<pts.length;i++)s.lineTo(pts[i][0],pts[i][1]);
   return new THREE.ShapeGeometry(s);
 }
 function makeTrout(len){
   const g=new THREE.Group();
-  const body=new THREE.Mesh(TROUT_GEO,troutBodyMat);
-  g.add(body);
-  /* caudal — forked, on its own pivot so it can sway */
-  const tailPivot=new THREE.Group(); tailPivot.position.x=0.485;
-  const caudal=new THREE.Mesh(finShape([[0,0],[0.13,0.115],[0.085,0],[0.13,-0.115],[0,0]]),finMat);
-  tailPivot.add(caudal); g.add(tailPivot); g.userData.tail=tailPivot;
+  g.add(new THREE.Mesh(TROUT_GEO,troutBodyMat));
+  const tailPivot=new THREE.Group();tailPivot.position.x=0.485;
+  tailPivot.add(new THREE.Mesh(finShape([[0,0],[0.13,0.115],[0.085,0],[0.13,-0.115],[0,0]]),finMat));
+  g.add(tailPivot);g.userData.tail=tailPivot;
   const dorsal=new THREE.Mesh(finShape([[-0.05,0],[0.02,0.085],[0.07,0]]),finMat);
-  dorsal.rotation.y=Math.PI/2; dorsal.position.set(0.02,0.10,0); g.add(dorsal);
-  const adipose=new THREE.Mesh(finShape([[-0.02,0],[0.0,0.032],[0.025,0]]),finMat);
-  adipose.rotation.y=Math.PI/2; adipose.position.set(0.33,0.072,0); g.add(adipose);
+  dorsal.rotation.y=Math.PI/2;dorsal.position.set(0.02,0.10,0);g.add(dorsal);
+  const adipose=new THREE.Mesh(finShape([[-0.02,0],[0,0.032],[0.025,0]]),finMat);
+  adipose.rotation.y=Math.PI/2;adipose.position.set(0.33,0.072,0);g.add(adipose);
   const anal=new THREE.Mesh(finShape([[-0.03,0],[0.01,-0.06],[0.05,0]]),finMat);
-  anal.rotation.y=Math.PI/2; anal.position.set(0.24,-0.075,0); g.add(anal);
+  anal.rotation.y=Math.PI/2;anal.position.set(0.24,-0.075,0);g.add(anal);
   for(const s of [1,-1]){
     const pec=new THREE.Mesh(finShape([[0,0],[0.07,-0.045],[0.09,0.01]]),finMat);
-    pec.position.set(-0.24,-0.03,0.055*s); pec.rotation.x=s*0.5; pec.rotation.z=-0.2;
-    g.add(pec);
+    pec.position.set(-0.24,-0.03,0.055*s);pec.rotation.x=s*0.5;pec.rotation.z=-0.2;g.add(pec);
   }
-  const eye=new THREE.Mesh(new THREE.SphereGeometry(0.014,6,5),
-    new THREE.MeshStandardMaterial({color:0x11140f,roughness:0.2}));
-  eye.position.set(-0.40,0.028,0.042); g.add(eye);
-  const eye2=eye.clone(); eye2.position.z=-0.042; g.add(eye2);
-  g.scale.setScalar(len);
-  return g;
+  const eyeMat=new THREE.MeshStandardMaterial({color:0x11140f,roughness:0.2});
+  const eye=new THREE.Mesh(new THREE.SphereGeometry(0.014,6,5),eyeMat);
+  eye.position.set(-0.40,0.028,0.042);g.add(eye);
+  const eye2=eye.clone();eye2.position.z=-0.042;g.add(eye2);
+  g.scale.setScalar(len);return g;
 }
 
-/* ---- fish behaviour ---- */
-const LIES=[
-  {x:-2.0,z:-7.2,len:0.40},
-  {x:-6.2,z:-6.6,len:0.32},
-  {x: 2.6,z:-11.0,len:0.46},
-  {x: 7.4,z:-8.0,len:0.35},
-];
+const LIES=[{x:-2.0,z:-7.2,len:0.40},{x:-6.2,z:-6.6,len:0.32},
+            {x:2.6,z:-11.0,len:0.46},{x:7.4,z:-8.0,len:0.35}];
 let hooked=null;
 const fishes=[];
+function makeMarker(){
+  const g=new THREE.Group();
+  const stem=new THREE.Mesh(new THREE.CylinderGeometry(0.005,0.005,0.85,5),
+    new THREE.MeshBasicMaterial({color:0x4fd18b}));
+  stem.position.y=0.42;
+  const head=new THREE.Mesh(new THREE.OctahedronGeometry(0.075),
+    new THREE.MeshBasicMaterial({color:0x4fd18b}));
+  head.position.y=0.92;
+  g.add(stem,head);return g;
+}
 class Trout{
   constructor(l){
-    this.lie=new THREE.Vector3(l.x,0,l.z); this.len=l.len;
-    this.p=this.lie.clone();
-    this.p.y=-Math.min(0.42,bedDepth(l.x,l.z)*0.5);
-    this.state='holding'; this.stamina=1; this.timer=0;
-    this.feeding=Math.random()<P.feedChance;
-    this.feedT=4+Math.random()*8;
-    this.riseT=1+Math.random()*5; this.riseAnim=0;
-    this.evaluated=false;
-    this.run=new THREE.Vector3(-1,0,0); this.runT=0;
-    this.mesh=makeTrout(l.len); scene.add(this.mesh);
-    this.marker=makeMarker(); scene.add(this.marker);
+    this.lie=new THREE.Vector3(l.x,0,l.z);this.len=l.len;
+    this.p=this.lie.clone();this.p.y=this.restY();
+    this.state='holding';this.stamina=1;this.timer=0;
+    this.feeding=Math.random()<P.feedChance;this.feedT=4+Math.random()*8;
+    this.riseT=1+Math.random()*5;this.riseAnim=0;this.evaluated=false;
+    this.run=new THREE.Vector3(-1,0,0);this.runT=0;
+    this.mesh=makeTrout(l.len);scene.add(this.mesh);
+    this.marker=makeMarker();scene.add(this.marker);
   }
-  restY(){ return -Math.min(0.42,bedDepth(this.p.x,this.p.z)*(this.feeding?0.36:0.62)); }
+  restY(){
+    const x=this.p?this.p.x:this.lie.x,z=this.p?this.p.z:this.lie.z;
+    return surfY(x)-Math.min(0.42,bedDepth(x,z)*(this.feeding?0.36:0.62));
+  }
   drive(h){
     const p=(N-1)*3;
     let ax=pos[0]-pos[p],az=pos[2]-pos[p+2];
-    const dl=Math.hypot(ax,az)||1; ax/=dl;az/=dl;
+    const dl=Math.hypot(ax,az)||1;ax/=dl;az/=dl;
     this.runT-=h;
     if(this.runT<=0){
       this.runT=0.8+Math.random()*1.7;
@@ -626,51 +715,47 @@ class Trout{
     computeFlow(pos[p],pos[p+2]);
     vel[p]  +=this.run.x*pw*h+flowX*0.5*h;
     vel[p+2]+=this.run.z*pw*h+flowZ*0.5*h;
-    vel[p+1]+=(-0.25-pos[p+1])*4*h;
+    vel[p+1]+=(surfY(pos[p])-0.25-pos[p+1])*4*h;
   }
   update(dt,t){
     if(this.state==='hooked'){
-      const F=(N-1)*3;
-      this.p.set(pos[F],pos[F+1],pos[F+2]);
+      const F=(N-1)*3;this.p.set(pos[F],pos[F+1],pos[F+2]);
     } else if(this.state==='spooked'){
       this.timer-=dt;
-      this.p.y+=(-0.95-this.p.y)*Math.min(1,dt*1.5);
+      const deep=surfY(this.p.x)-0.95;
+      this.p.y+=(deep-this.p.y)*Math.min(1,dt*1.5);
       if(this.timer<=0) this.reseat();
     } else if(this.state==='landed'){
-      this.timer-=dt; if(this.timer<=0) this.reseat();
+      this.timer-=dt;if(this.timer<=0)this.reseat();
     } else {
       this.feedT-=dt;
-      if(this.feedT<=0){ this.feeding=Math.random()<P.feedChance; this.feedT=8+Math.random()*14; }
+      if(this.feedT<=0){this.feeding=Math.random()<P.feedChance;this.feedT=8+Math.random()*14;}
       this.p.x=this.lie.x+Math.sin(t*0.6+this.lie.z)*0.10;
       this.p.z=this.lie.z+Math.sin(t*0.37+this.lie.x)*0.14;
       let ty=this.restY();
       if(this.feeding){
         this.riseT-=dt*P.riseRate*2;
-        if(this.riseT<=0&&this.riseAnim<=0){ this.riseAnim=1.0; this.riseT=2.5+Math.random()*5; }
+        if(this.riseT<=0&&this.riseAnim<=0){this.riseAnim=1.0;this.riseT=2.5+Math.random()*5;}
       }
       if(this.riseAnim>0){
         this.riseAnim-=dt*1.5;
-        const u=Math.sin(Math.max(0,this.riseAnim)*Math.PI);   // 0 -> 1 -> 0
-        ty=ty*(1-u)+(-0.012)*u;                                // nose breaks the film
+        const u=Math.sin(Math.max(0,this.riseAnim)*Math.PI);
+        ty=ty*(1-u)+(surfY(this.p.x)-0.012)*u;
         if(this.riseAnim>0.48&&this.riseAnim<0.54) spawnRing(this.p.x-0.05,this.p.z,0.9);
       }
       this.p.y+=(ty-this.p.y)*Math.min(1,dt*3);
     }
-    /* mesh */
     const m=this.mesh;
     m.visible=this.state!=='spooked';
     m.position.copy(this.p);
-    const hd=this.state==='hooked'
-      ? Math.atan2(-vel[(N-1)*3+2],-vel[(N-1)*3])
-      : Math.PI + Math.atan2(0,1)*0;
+    const hd=this.state==='hooked'?Math.atan2(-vel[(N-1)*3+2],-vel[(N-1)*3]):Math.PI;
     m.rotation.y+=((hd-m.rotation.y+Math.PI*3)%(Math.PI*2)-Math.PI)*Math.min(1,dt*3);
     m.rotation.z=this.state==='hooked'?Math.sin(t*9)*0.22:Math.sin(t*1.6+this.lie.x)*0.04;
     m.rotation.x=this.riseAnim>0?-0.35*Math.sin(Math.max(0,this.riseAnim)*Math.PI):0;
     const beat=this.state==='hooked'?11:(this.feeding?3.4:1.9);
     m.userData.tail.rotation.y=Math.sin(t*beat+this.lie.z)*(this.state==='hooked'?0.55:0.28);
-    /* marker */
     this.marker.visible=P.showMarkers>0.5&&this.state!=='spooked';
-    this.marker.position.set(this.p.x,Math.max(this.p.y,0.02),this.p.z);
+    this.marker.position.set(this.p.x,Math.max(this.p.y,surfY(this.p.x)+0.02),this.p.z);
     this.marker.children[1].position.y=0.92+Math.sin(t*2.2+this.lie.x)*0.05;
     const col=this.state==='hooked'?0xe0b04a:this.state==='landed'?0x6ea8d1:
               this.feeding?0x4fd18b:0x8a8f86;
@@ -678,68 +763,56 @@ class Trout{
     this.marker.children[1].material.color.setHex(col);
   }
   spook(msg,mult){
-    this.state='spooked'; this.timer=P.spookT*(mult||1);
+    this.state='spooked';this.timer=P.spookT*(mult||1);
     if(hooked===this){hooked=null;invM[N-1]=1/baseM[N-1];}
     say(msg);
   }
   reseat(){
-    this.state='holding'; this.stamina=1; this.timer=0; this.evaluated=false;
-    this.p.copy(this.lie); this.p.y=this.restY();
+    this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
+    this.p.copy(this.lie);this.p.y=this.restY();
     if(hooked===this){hooked=null;invM[N-1]=1/baseM[N-1];}
   }
 }
-function makeMarker(){
-  const g=new THREE.Group();
-  const stem=new THREE.Mesh(new THREE.CylinderGeometry(0.005,0.005,0.85,5),
-    new THREE.MeshBasicMaterial({color:0x4fd18b}));
-  stem.position.y=0.42;
-  const head=new THREE.Mesh(new THREE.OctahedronGeometry(0.075),
-    new THREE.MeshBasicMaterial({color:0x4fd18b}));
-  head.position.y=0.92;
-  g.add(stem,head); return g;
-}
 for(const l of LIES) fishes.push(new Trout(l));
 
-/* ---- rings ---- */
-const RINGS=10, ringPool=[];
-for(let i=0;i<RINGS;i++){
+/* rings */
+const ringPool=[];
+for(let i=0;i<10;i++){
   const m=new THREE.Mesh(new THREE.TorusGeometry(0.30,0.010,5,26),
     new THREE.MeshBasicMaterial({color:0xf0f4ef,transparent:true,opacity:0,depthWrite:false}));
-  m.rotation.x=-Math.PI/2; m.renderOrder=4; scene.add(m);
-  ringPool.push({m,t:99,s:1}); }
+  m.rotation.x=-Math.PI/2;m.renderOrder=5;scene.add(m);
+  ringPool.push({m,t:99,s:1});
+}
 function spawnRing(x,z,scale){
   let best=ringPool[0];
   for(const r of ringPool) if(r.t>best.t) best=r;
-  best.t=0; best.s=scale||1; best.m.position.set(x,0.03,z);
+  best.t=0;best.s=scale||1;best.m.position.set(x,surfY(x)+0.03,z);
 }
 
-/* ---- zones ---- */
-const zoneGrp=new THREE.Group(); scene.add(zoneGrp);
-const zoneRings=[], zoneLanes=[];
+/* zones */
+const zoneGrp=new THREE.Group();scene.add(zoneGrp);
+const zoneRings=[],zoneLanes=[];
 for(let i=0;i<LIES.length;i++){
   const r=new THREE.Mesh(new THREE.RingGeometry(0.94,1.0,40),
     new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true,opacity:0.8,
       side:THREE.DoubleSide,depthWrite:false}));
-  r.rotation.x=-Math.PI/2; r.renderOrder=4; zoneGrp.add(r); zoneRings.push(r);
+  r.rotation.x=-Math.PI/2;r.renderOrder=5;zoneGrp.add(r);zoneRings.push(r);
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(4*3),3));
-  const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xe0c26a,
-    transparent:true,opacity:0.55}));
-  l.renderOrder=4; zoneGrp.add(l); zoneLanes.push(l);
+  const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xe0c26a,transparent:true,opacity:0.55}));
+  l.renderOrder=5;zoneGrp.add(l);zoneLanes.push(l);
 }
 
-/* ---- tube renderer with Catmull-Rom smoothing ---- */
+/* ---- tube renderer ---- */
 class Tube{
   constructor(n,radii,colors,R=5,smooth=1){
-    this.n=n;this.R=R;this.radii=radii;this.smooth=smooth;
-    this.m=(n-1)*smooth+1;
-    this.pathBuf=new Float32Array(this.m*3);
-    this.radBuf=new Float32Array(this.m);
+    this.n=n;this.R=R;this.smooth=smooth;this.m=(n-1)*smooth+1;
+    this.pathBuf=new Float32Array(this.m*3);this.radBuf=new Float32Array(this.m);
     const V=this.m*R;
     this.p=new Float32Array(V*3);this.nm=new Float32Array(V*3);
     const col=new Float32Array(V*3),idx=[];
     for(let i=0;i<this.m;i++){
-      const f=i/(this.m-1)*(n-1), a=Math.min(n-1,Math.floor(f)), t=f-a, b=Math.min(n-1,a+1);
+      const f=i/(this.m-1)*(n-1),a=Math.min(n-1,Math.floor(f)),t=f-a,b=Math.min(n-1,a+1);
       this.radBuf[i]=radii[a]+(radii[b]-radii[a])*t;
       for(let j=0;j<R;j++){const k=(i*R+j)*3;
         col[k]  =colors[a*3]  +(colors[b*3]  -colors[a*3])*t;
@@ -754,16 +827,15 @@ class Tube{
     g.setAttribute('color',new THREE.BufferAttribute(col,3));
     g.setIndex(idx);this.geo=g;
     this.mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.45}));
-    this.mesh.frustumCulled=false;
-    this.radScale=1;
+    this.mesh.frustumCulled=false;this.radScale=1;
   }
   resample(src,off){
     const n=this.n,S=this.smooth,pb=this.pathBuf;
     for(let i=0;i<this.m;i++){
-      const f=i/S, a=Math.floor(f), t=f-a;
+      const f=i/S,a=Math.floor(f),t=f-a;
       if(a>=n-1){const q=(off+n-1)*3,k=i*3;pb[k]=src[q];pb[k+1]=src[q+1];pb[k+2]=src[q+2];continue;}
       const i0=(off+Math.max(0,a-1))*3,i1=(off+a)*3,i2=(off+Math.min(n-1,a+1))*3,i3=(off+Math.min(n-1,a+2))*3;
-      const k=i*3, t2=t*t, t3=t2*t;
+      const k=i*3,t2=t*t,t3=t2*t;
       for(let c=0;c<3;c++){
         const p0=src[i0+c],p1=src[i1+c],p2=src[i2+c],p3=src[i3+c];
         pb[k+c]=0.5*((2*p1)+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t2+(-p0+3*p1-3*p2+p3)*t3);
@@ -772,14 +844,14 @@ class Tube{
   }
   update(src,off){
     this.resample(src,off);
-    const src2=this.pathBuf,n=this.m,R=this.R,rs=this.radScale;
+    const s2=this.pathBuf,n=this.m,R=this.R,rs=this.radScale;
     for(let i=0;i<n;i++){
       const p=i*3,a=Math.max(i-1,0)*3,b=Math.min(i+1,n-1)*3;
-      let tx=src2[b]-src2[a],ty=src2[b+1]-src2[a+1],tz=src2[b+2]-src2[a+2];
+      let tx=s2[b]-s2[a],ty=s2[b+1]-s2[a+1],tz=s2[b+2]-s2[a+2];
       let tl=Math.sqrt(tx*tx+ty*ty+tz*tz);
       if(tl<1e-7){tx=0;ty=1;tz=0;tl=1;}
       tx/=tl;ty/=tl;tz/=tl;
-      let ux=0,uy=1,uz=0; if(Math.abs(ty)>0.985){ux=1;uy=0;uz=0;}
+      let ux=0,uy=1,uz=0;if(Math.abs(ty)>0.985){ux=1;uy=0;uz=0;}
       let axx=ty*uz-tz*uy,ayy=tz*ux-tx*uz,azz=tx*uy-ty*ux;
       const al=Math.sqrt(axx*axx+ayy*ayy+azz*azz)||1;axx/=al;ayy/=al;azz/=al;
       const bx=ty*azz-tz*ayy,by=tz*axx-tx*azz,bz=tx*ayy-ty*axx;
@@ -787,7 +859,7 @@ class Tube{
       for(let j=0;j<R;j++){
         const an=j/R*Math.PI*2,ca=Math.cos(an),sa=Math.sin(an);
         const nx=axx*ca+bx*sa,ny=ayy*ca+by*sa,nz=azz*ca+bz*sa,k=(i*R+j)*3;
-        this.p[k]=src2[p]+nx*r;this.p[k+1]=src2[p+1]+ny*r;this.p[k+2]=src2[p+2]+nz*r;
+        this.p[k]=s2[p]+nx*r;this.p[k+1]=s2[p+1]+ny*r;this.p[k+2]=s2[p+2]+nz*r;
         this.nm[k]=nx;this.nm[k+1]=ny;this.nm[k+2]=nz;
       }
     }
@@ -802,8 +874,8 @@ for(let i=0;i<RN;i++){const t=i/(RN-1);
   rodCols[i*3]=c.r;rodCols[i*3+1]=c.g;rodCols[i*3+2]=c.b;}
 const rodTube=new Tube(RN,rodRadii,rodCols,6,2);scene.add(rodTube.mesh);
 
-const lineRadii=new Float32Array(LN),lineCols=new Float32Array(LN*3);
 const cFly=new THREE.Color(0xffb320),cLdr=new THREE.Color(0xfff0c8);
+const lineRadii=new Float32Array(LN),lineCols=new Float32Array(LN*3);
 for(let j=0;j<LN;j++){const s=j/(LN-1),u=Math.max(0,(s-(1-LEADER))/LEADER);
   lineRadii[j]=0.0040*(1-u)+0.0016;
   const c=cFly.clone().lerp(cLdr,u);
@@ -812,63 +884,54 @@ const lineTube=new Tube(LN,lineRadii,lineCols,4,2);
 lineTube.mesh.material.roughness=0.30;
 lineTube.mesh.material.emissive=new THREE.Color(0x704400);
 lineTube.mesh.material.emissiveIntensity=0.35;
-lineTube.mesh.renderOrder=2;
-scene.add(lineTube.mesh);
+lineTube.mesh.renderOrder=3;scene.add(lineTube.mesh);
 
-/* backline */
-const BACK_N=44;
-const backPts=new Float32Array(BACK_N*3);
-const backRadii=new Float32Array(BACK_N).fill(0.0040);
-const backCols=new Float32Array(BACK_N*3);
-for(let i=0;i<BACK_N;i++){backCols[i*3]=cFly.r;backCols[i*3+1]=cFly.g;backCols[i*3+2]=cFly.b;}
-const backTube=new Tube(BACK_N,backRadii,backCols,4,1);
-backTube.mesh.material.roughness=0.30;
-backTube.mesh.material.emissive=new THREE.Color(0x704400);
-backTube.mesh.material.emissiveIntensity=0.35;
-scene.add(backTube.mesh);
+/* threaded section: slack chain + guide path, one tube */
+const THR_N=64;
+const thrPts=new Float32Array(THR_N*3);
+const thrRadii=new Float32Array(THR_N).fill(0.0040);
+const thrCols=new Float32Array(THR_N*3);
+for(let i=0;i<THR_N;i++){thrCols[i*3]=cFly.r;thrCols[i*3+1]=cFly.g;thrCols[i*3+2]=cFly.b;}
+const thrTube=new Tube(THR_N,thrRadii,thrCols,4,1);
+thrTube.mesh.material.roughness=0.30;
+thrTube.mesh.material.emissive=new THREE.Color(0x704400);
+thrTube.mesh.material.emissiveIntensity=0.35;
+scene.add(thrTube.mesh);
 
-const path=[];
-function pushPt(x,y,z){path.push(x,y,z);}
-function buildBackline(reelP,handP,corkP){
-  path.length=0;
-  pushPt(reelP.x,reelP.y,reelP.z);
-  const endP=handP||corkP;
-  if(pooled>0.06){
-    const dip=Math.min(1.15,pooled*0.20);
-    for(let s=1;s<=3;s++){
-      const t=s/4,w=Math.sin(t*Math.PI);
-      pushPt(reelP.x+(endP.x-reelP.x)*t+Math.sin(s*2.1)*0.06*dip,
-             Math.max(groundY(reelP.x,reelP.z)+0.03, reelP.y+(endP.y-reelP.y)*t-dip*w),
-             reelP.z+(endP.z-reelP.z)*t+Math.cos(s*1.7)*0.06*dip);
-    }
-  }
-  if(handP) pushPt(handP.x,handP.y,handP.z);
-  pushPt(corkP.x,corkP.y,corkP.z);
-  for(let i=STRIP_GUIDE;i<RN;i++) pushPt(pos[i*3],pos[i*3+1],pos[i*3+2]);
-  const m=path.length/3;
-  let total=0; const seg=new Float32Array(m);
+const rawPath=[];
+function resampleInto(out,n){
+  const m=rawPath.length/3;
+  let total=0;const seg=new Float32Array(m);
   for(let i=1;i<m;i++){
     const a=(i-1)*3,b=i*3;
-    seg[i]=Math.hypot(path[b]-path[a],path[b+1]-path[a+1],path[b+2]-path[a+2]);
+    seg[i]=Math.hypot(rawPath[b]-rawPath[a],rawPath[b+1]-rawPath[a+1],rawPath[b+2]-rawPath[a+2]);
     total+=seg[i];
   }
   if(total<1e-4){
-    for(let i=0;i<BACK_N;i++){const k=i*3;backPts[k]=path[0];backPts[k+1]=path[1];backPts[k+2]=path[2];}
+    for(let i=0;i<n;i++){const k=i*3;out[k]=rawPath[0];out[k+1]=rawPath[1];out[k+2]=rawPath[2];}
     return;
   }
   let idx=1,acc=0;
-  for(let i=0;i<BACK_N;i++){
-    const target=total*i/(BACK_N-1);
+  for(let i=0;i<n;i++){
+    const target=total*i/(n-1);
     while(idx<m-1&&acc+seg[idx]<target){acc+=seg[idx];idx++;}
     const t=seg[idx]>1e-6?(target-acc)/seg[idx]:0;
     const a=(idx-1)*3,b=idx*3,k=i*3;
-    backPts[k]  =path[a]  +(path[b]  -path[a])*t;
-    backPts[k+1]=path[a+1]+(path[b+1]-path[a+1])*t;
-    backPts[k+2]=path[a+2]+(path[b+2]-path[a+2])*t;
+    out[k]  =rawPath[a]  +(rawPath[b]  -rawPath[a])*t;
+    out[k+1]=rawPath[a+1]+(rawPath[b+1]-rawPath[a+1])*t;
+    out[k+2]=rawPath[a+2]+(rawPath[b+2]-rawPath[a+2])*t;
   }
 }
 
-/* ---- the fly: body + hi-vis post so you can actually find it ---- */
+/* guide rings */
+const guideMeshes=[];
+for(let g=0;g<NG;g++){
+  const m=new THREE.Mesh(new THREE.TorusGeometry(GUIDE_R[g]*0.55,0.0016,4,10),
+    new THREE.MeshStandardMaterial({color:0x9aa3a0,roughness:0.35,metalness:0.75}));
+  scene.add(m);guideMeshes.push(m);
+}
+
+/* fly */
 const flyGrp=new THREE.Group();
 {
   const body=new THREE.Mesh(new THREE.SphereGeometry(0.011,8,6),
@@ -881,16 +944,16 @@ const flyGrp=new THREE.Group();
   post.position.y=0.020;
   flyGrp.add(body,hackle,post);
 }
-flyGrp.renderOrder=3; scene.add(flyGrp);
+flyGrp.renderOrder=4;scene.add(flyGrp);
 const flyWake=new THREE.Mesh(new THREE.RingGeometry(0.90,1.0,20),
   new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0,depthWrite:false}));
-flyWake.rotation.x=-Math.PI/2; flyWake.renderOrder=4; scene.add(flyWake);
+flyWake.rotation.x=-Math.PI/2;flyWake.renderOrder=5;scene.add(flyWake);
 
-/* ---- hands ---- */
+/* hands */
 const handRig=new THREE.Group();scene.add(handRig);
 const reelMesh=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.043,0.020,16),
   new THREE.MeshStandardMaterial({color:0x3c4a44,roughness:0.35,metalness:0.6}));
-const corkAnchor=new THREE.Object3D(); corkAnchor.position.set(0,-0.018,0.09);
+const reelLip=new THREE.Object3D();reelLip.position.set(0,-0.030,0.20);
 {
   const grip=new THREE.Mesh(new THREE.CylinderGeometry(0.017,0.013,0.20,10),
     new THREE.MeshStandardMaterial({color:0xc4a173,roughness:0.95}));
@@ -899,14 +962,13 @@ const corkAnchor=new THREE.Object3D(); corkAnchor.position.set(0,-0.018,0.09);
     new THREE.MeshStandardMaterial({color:0x6d5330,roughness:0.4,metalness:0.7}));
   seat.rotation.x=Math.PI/2;seat.position.z=0.175;
   reelMesh.position.set(0,-0.052,0.20);
-  handRig.add(grip,seat,reelMesh,corkAnchor);
+  handRig.add(grip,seat,reelMesh,reelLip);
 }
 const leftHand=new THREE.Mesh(new THREE.SphereGeometry(0.035,10,8),
   new THREE.MeshStandardMaterial({color:0xc9a882,roughness:0.9}));
 scene.add(leftHand);
 
-/* net */
-const netGrp=new THREE.Group(); netGrp.visible=false; scene.add(netGrp);
+const netGrp=new THREE.Group();netGrp.visible=false;scene.add(netGrp);
 {
   const hoop=new THREE.Mesh(new THREE.TorusGeometry(0.30,0.014,6,22),
     new THREE.MeshStandardMaterial({color:0x8a6a42,roughness:0.8}));
@@ -915,19 +977,19 @@ const netGrp=new THREE.Group(); netGrp.visible=false; scene.add(netGrp);
   mesh.rotation.x=Math.PI;
   const handle=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.012,0.34,8),
     new THREE.MeshStandardMaterial({color:0x8a6a42,roughness:0.85}));
-  handle.position.set(0,0,0.20); handle.rotation.x=Math.PI/2;
+  handle.position.set(0,0,0.20);handle.rotation.x=Math.PI/2;
   netGrp.add(hoop,mesh,handle);
 }
 
-/* ---- panels ---- */
+/* panels */
 function makePanel(w,h,cw,ch){
   const cv=document.createElement('canvas');cv.width=cw;cv.height=ch;
   const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;
   const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),
     new THREE.MeshBasicMaterial({map:tex,transparent:true,depthTest:false}));
-  m.renderOrder=20; return{cv,cx:cv.getContext('2d'),tex,mesh:m};
+  m.renderOrder=20;return{cv,cx:cv.getContext('2d'),tex,mesh:m};
 }
-const hud=makePanel(0.44,0.32,512,380);
+const hud=makePanel(0.44,0.34,512,400);
 hud.mesh.position.set(-0.56,1.16,-0.64);hud.mesh.rotation.y=0.58;player.add(hud.mesh);
 const menu=makePanel(0.62,0.58,600,560);
 menu.mesh.position.set(0,1.42,-0.85);menu.mesh.visible=false;player.add(menu.mesh);
@@ -937,8 +999,8 @@ function say(s){note=s;noteT=3.6;}
 const M={bend:0,drift:0,tension:0,depth:0};
 const HANDTXT=['free','routing','pinched'];
 function drawHUD(){
-  const c=hud.cx;c.clearRect(0,0,512,380);
-  c.fillStyle='rgba(12,22,26,0.86)';c.fillRect(0,0,512,380);
+  const c=hud.cx;c.clearRect(0,0,512,400);
+  c.fillStyle='rgba(12,22,26,0.86)';c.fillRect(0,0,512,400);
   c.fillStyle='#b5713f';c.fillRect(0,0,512,4);
   c.font='700 17px "Space Mono",monospace';
   const feed=fishes.filter(f=>f.feeding&&f.state==='holding').length;
@@ -946,16 +1008,17 @@ function drawHUD(){
     ['LINE OUT',lineOut.toFixed(1)+' m'],
     ['SLACK POOL',pooled.toFixed(1)+' m'],
     ['LEFT HAND',HANDTXT[handMode]+(rodPinch?' / CORK':'')],
+    ['GUIDE WRAP',(wrapTotal*180/Math.PI).toFixed(0)+'\u00B0  \u00D7'+shootResist.toFixed(2)],
     ['WADE DEPTH',M.depth.toFixed(2)+' m'],
     ['DRIFT',hooked?'\u2014':M.drift.toFixed(0)+' %'],
     ['TENSION',M.tension.toFixed(1)+' N'],
     ['FEEDING',feed+' of '+fishes.length],
     ['HOOKED',hooked?(hooked.stamina*100).toFixed(0)+' % left':'\u2014'],
   ];
-  rows.forEach(([k,v],i)=>{const y=44+i*38;
+  rows.forEach(([k,v],i)=>{const y=42+i*38;
     c.fillStyle='#7d8b8c';c.fillText(k,24,y);
     c.fillStyle='#e8e3d4';c.textAlign='right';c.fillText(v,488,y);c.textAlign='left';});
-  if(noteT>0){c.fillStyle='#b5713f';c.font='700 16px "Space Mono",monospace';c.fillText(note,24,362);}
+  if(noteT>0){c.fillStyle='#b5713f';c.font='700 16px "Space Mono",monospace';c.fillText(note,24,384);}
   hud.tex.needsUpdate=true;
 }
 let menuOpen=false,menuSel=1,stickReady=true;
@@ -993,12 +1056,12 @@ let rodGrip=null,offGrip=null,rodPad=null,offPad=null,rodSrc=null;
 const gA=renderer.xr.getControllerGrip(0),gB=renderer.xr.getControllerGrip(1);
 player.add(gA,gB);
 function bind(i,g){
-  const c=renderer.xr.getController(i); player.add(c);
+  const c=renderer.xr.getController(i);player.add(c);
   c.addEventListener('connected',e=>{
     if(e.data.handedness!=='left'){rodGrip=g;rodPad=e.data.gamepad;rodSrc=e.data;}
     else{offGrip=g;offPad=e.data.gamepad;}});
   c.addEventListener('disconnected',()=>{
-    if(rodGrip===g){rodGrip=null;rodPad=null;} if(offGrip===g){offGrip=null;offPad=null;}});
+    if(rodGrip===g){rodGrip=null;rodPad=null;}if(offGrip===g){offGrip=null;offPad=null;}});
 }
 bind(0,gA);bind(1,gB);
 
@@ -1015,7 +1078,7 @@ addEventListener('keyup',e=>{keys[e.code]=false;});
 function handTargets(){
   if(rodGrip){rodGrip.getWorldQuaternion(_q);rodGrip.getWorldPosition(_k0);}
   else{_q.setFromEuler(new THREE.Euler(mouse.y,mouse.x,0,'YXZ'));
-       _k0.set(player.position.x+0.28,1.15,player.position.z+0.10);}
+       _k0.set(player.position.x+0.28,player.position.y+1.15,player.position.z+0.10);}
   handRig.position.copy(_k0);handRig.quaternion.copy(_q);
   handRig.updateMatrixWorld(true);
   _k1.copy(_k0).add(_off.set(0,0,NEXT_Z).applyQuaternion(_q));
@@ -1023,7 +1086,69 @@ function handTargets(){
 }
 
 /* ════════════════════════════════════════════════════════════
-   7. RESET
+   7. SLACK CHAIN
+   ════════════════════════════════════════════════════════════ */
+function initSlack(reelP,stripP){
+  for(let i=0;i<SN;i++){
+    const t=i/(SN-1),p=i*3;
+    sPosA[p]  =reelP.x+(stripP.x-reelP.x)*t;
+    sPosA[p+1]=reelP.y+(stripP.y-reelP.y)*t-0.12*Math.sin(t*Math.PI);
+    sPosA[p+2]=reelP.z+(stripP.z-reelP.z)*t;
+    sVel[p]=sVel[p+1]=sVel[p+2]=0;
+  }
+}
+function slackStep(dt,reelP,stripP,handP){
+  const straight=Math.hypot(stripP.x-reelP.x,stripP.y-reelP.y,stripP.z-reelP.z);
+  slackRest=(straight+pooled)/(SN-1);
+  const h=dt/2;
+  for(let s=0;s<2;s++){
+    for(let i=1;i<SN-1;i++){
+      if(handP&&i===HAND_I) continue;
+      const p=i*3;
+      sVel[p+1]-=9.81*h;
+      sVel[p]*=0.985;sVel[p+1]*=0.985;sVel[p+2]*=0.985;
+      sPrd[p]=sPosA[p];sPrd[p+1]=sPosA[p+1];sPrd[p+2]=sPosA[p+2];
+      sPosA[p]+=sVel[p]*h;sPosA[p+1]+=sVel[p+1]*h;sPosA[p+2]+=sVel[p+2]*h;
+    }
+    /* pins */
+    sPosA[0]=reelP.x;sPosA[1]=reelP.y;sPosA[2]=reelP.z;
+    const L=(SN-1)*3;
+    sPosA[L]=stripP.x;sPosA[L+1]=stripP.y;sPosA[L+2]=stripP.z;
+    if(handP){const q=HAND_I*3;sPosA[q]=handP.x;sPosA[q+1]=handP.y;sPosA[q+2]=handP.z;}
+    for(let it=0;it<4;it++){
+      for(let i=0;i<SN-1;i++){
+        const A=i*3,B=A+3;
+        const fixedA=(i===0)||(handP&&i===HAND_I);
+        const fixedB=(i+1===SN-1)||(handP&&i+1===HAND_I);
+        if(fixedA&&fixedB) continue;
+        let dx=sPosA[B]-sPosA[A],dy=sPosA[B+1]-sPosA[A+1],dz=sPosA[B+2]-sPosA[A+2];
+        const d=Math.hypot(dx,dy,dz);if(d<1e-9)continue;
+        if(d<=slackRest) continue;                     // rope: only resists stretching
+        const corr=(d-slackRest)/d;
+        const wa=fixedA?0:(fixedB?1:0.5),wb=fixedB?0:(fixedA?1:0.5);
+        sPosA[A]+=dx*corr*wa;sPosA[A+1]+=dy*corr*wa;sPosA[A+2]+=dz*corr*wa;
+        sPosA[B]-=dx*corr*wb;sPosA[B+1]-=dy*corr*wb;sPosA[B+2]-=dz*corr*wb;
+      }
+      for(let i=1;i<SN-1;i++){
+        if(handP&&i===HAND_I) continue;
+        const p=i*3,gy=bedY(sPosA[p],sPosA[p+2]);
+        const film=filmY(sPosA[p],sPosA[p+2],simTime)+0.008;
+        const floor=Math.max(gy+0.008, bedDepth(sPosA[p],sPosA[p+2])>0.05?film:-1e9);
+        if(sPosA[p+1]<floor) sPosA[p+1]=floor;
+      }
+    }
+    for(let i=1;i<SN-1;i++){
+      if(handP&&i===HAND_I){const p=i*3;sVel[p]=sVel[p+1]=sVel[p+2]=0;continue;}
+      const p=i*3;
+      sVel[p]=(sPosA[p]-sPrd[p])/h;
+      sVel[p+1]=(sPosA[p+1]-sPrd[p+1])/h;
+      sVel[p+2]=(sPosA[p+2]-sPrd[p+2])/h;
+    }
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   8. RESET
    ════════════════════════════════════════════════════════════ */
 function resetCast(){
   handTargets();_p0.copy(_k0);_p1.copy(_k1);
@@ -1031,26 +1156,31 @@ function resetCast(){
   for(let i=0;i<RN;i++){const p=i*3;
     pos[p]=_k0.x+dx*ROD_SEG*i;pos[p+1]=_k0.y+dy*ROD_SEG*i;pos[p+2]=_k0.z+dz*ROD_SEG*i;
     vel[p]=vel[p+1]=vel[p+2]=0;}
-  setLineOut(8.0); pooled=1.5;
+  setLineOut(8.0);pooled=1.5;
   const T=(RN-1)*3;
   for(let i=RN;i<N;i++){
     const p=i*3,t=Math.max(0,(i-head)/Math.max(1,N-1-head));
     pos[p]=pos[T]+t*0.6;
-    pos[p+1]=pos[T+1]+(0.02-pos[T+1])*Math.min(1,t*2.5);
+    pos[p+1]=pos[T+1]+(surfY(pos[T])+0.02-pos[T+1])*Math.min(1,t*2.5);
     pos[p+2]=pos[T+2]-lineOut*t;
     vel[p]=vel[p+1]=vel[p+2]=0;}
   invM[N-1]=1/baseM[N-1];
+  handRig.updateMatrixWorld(true);
+  reelLip.getWorldPosition(_reel);
+  updateGuides(_q);
+  _tmp.set(guidePos[0],guidePos[1],guidePos[2]);
+  initSlack(_reel,_tmp);
   if(hooked){hooked.reseat();hooked=null;}
 }
 
 /* ════════════════════════════════════════════════════════════
-   8. LOOP
+   9. LOOP
    ════════════════════════════════════════════════════════════ */
 const clock=new THREE.Clock();
-let started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0;
-let prevY=false,prevA=false,prevB=false,lhValid=false;
+let started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
+let prevY=false,prevA=false,prevB=false,lhValid=false,lastGrade=P.grade;
 const _lh=new THREE.Vector3(),_lhPrev=new THREE.Vector3(),_toTip=new THREE.Vector3(),_d=new THREE.Vector3();
-const _reel=new THREE.Vector3(),_cork=new THREE.Vector3(),_camQ=new THREE.Quaternion();
+const _reel=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_tmp=new THREE.Vector3();
 
 function pulse(s){
   if(!rodSrc||!rodSrc.gamepad)return;
@@ -1063,7 +1193,6 @@ renderer.setAnimationLoop(()=>{
   if(!started){resetCast();started=true;}
   const t=simTime;
 
-  /* ---- input ---- */
   const trigR=rodPad?(rodPad.buttons[0]?.value??0):(keys['Space']?1:0);
   const trigL=offPad?(offPad.buttons[0]?.value??0):(keys['ShiftLeft']?1:keys['KeyF']?0.5:0);
   rodPinch=rodPad?!!rodPad.buttons[1]?.pressed:!!keys['KeyC'];
@@ -1071,45 +1200,49 @@ renderer.setAnimationLoop(()=>{
   const aBtn=rodPad?!!rodPad.buttons[4]?.pressed:false;
   const bBtn=rodPad?!!rodPad.buttons[5]?.pressed:false;
   const yBtn=offPad?!!offPad.buttons[5]?.pressed:false;
-  if(aBtn&&!prevA)resetCast(); prevA=aBtn;
-  if(bBtn&&!prevB){for(const f of fishes)f.reseat();say('fish reset');} prevB=bBtn;
-  if(yBtn&&!prevY){menuOpen=!menuOpen;menu.mesh.visible=menuOpen;} prevY=yBtn;
+  if(aBtn&&!prevA)resetCast();prevA=aBtn;
+  if(bBtn&&!prevB){for(const f of fishes)f.reseat();say('fish reset');}prevB=bBtn;
+  if(yBtn&&!prevY){menuOpen=!menuOpen;menu.mesh.visible=menuOpen;}prevY=yBtn;
 
   const ax=offPad&&offPad.axes.length>=4?offPad.axes[2]:0;
   const ay=offPad&&offPad.axes.length>=4?offPad.axes[3]:0;
 
   if(menuOpen){
-    /* dominant-axis + return-to-centre: no more phantom downs */
     const mag=Math.hypot(ax,ay);
     if(mag<0.30) stickReady=true;
     if(stickReady&&mag>0.72&&Math.abs(ay)>Math.abs(ax)*1.6){
       let s=menuSel;
-      do{ s=(s+(ay>0?1:-1)+MENU.length)%MENU.length; } while(MENU[s][1]===null);
-      menuSel=s; stickReady=false;
+      do{s=(s+(ay>0?1:-1)+MENU.length)%MENU.length;}while(MENU[s][1]===null);
+      menuSel=s;stickReady=false;
     }
     if(Math.abs(ax)>0.3&&Math.abs(ax)>Math.abs(ay)*1.2&&MENU[menuSel][1]){
       const[,key,mn,mx,st]=MENU[menuSel];
       P[key]=Math.min(mx,Math.max(mn,P[key]+Math.sign(ax)*st*dt*7));
       if(key==='lineDens')refreshLineMass();
       if(key==='current')waterMat.uniforms.uQ.value=P.current;
+      if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
     }
   } else if(Math.hypot(ax,ay)>0.15){
-    /* ---- locomotion ---- */
     camera.getWorldQuaternion(_camQ);
     const e=new THREE.Euler().setFromQuaternion(_camQ,'YXZ');
-    const yaw=e.y, sp=P.moveSpeed;
-    const fwd=-ay, str=ax;
-    let vx=(Math.sin(yaw)*fwd+Math.cos(yaw)*str);
-    let vz=(Math.cos(yaw)*fwd-Math.sin(yaw)*str);
-    const camW=new THREE.Vector3(); camera.getWorldPosition(camW);
-    const wade=Math.max(0,-groundY(camW.x,camW.z));
+    const yaw=e.y,fwd=-ay,str=ax;
+    const vx=Math.sin(yaw)*fwd+Math.cos(yaw)*str;
+    const vz=Math.cos(yaw)*fwd-Math.sin(yaw)*str;
+    camera.getWorldPosition(_camW);
+    const wade=Math.max(0,surfY(_camW.x)-bedY(_camW.x,_camW.z));
     const slow=1/(1+wade*1.6);
-    player.position.x+=vx*sp*slow*dt;
-    player.position.z+=vz*sp*slow*dt;
-    const gy=groundY(player.position.x+ (camW.x-player.position.x), player.position.z+(camW.z-player.position.z));
-    player.position.y=Math.max(-1.15,Math.min(gy,0.30));
+    player.position.x+=vx*P.moveSpeed*slow*dt;
+    player.position.z+=vz*P.moveSpeed*slow*dt;
   }
-  M.depth=Math.max(0,-player.position.y);
+  camera.getWorldPosition(_camW);
+  {
+    const fx=_camW.x-player.position.x, fz=_camW.z-player.position.z;
+    const gx=player.position.x+fx, gz=player.position.z+fz;
+    const gy=bedY(gx,gz), lim=surfY(gx)-1.15;
+    player.position.y=Math.max(lim,gy);
+    M.depth=Math.max(0,surfY(gx)-gy);
+  }
+  if(Math.abs(P.grade-lastGrade)>0.005){lastGrade=P.grade;rebuildBed();placeObstacles();}
 
   handTargets();
 
@@ -1118,12 +1251,11 @@ renderer.setAnimationLoop(()=>{
   const haveLeft=!!offGrip;
   if(haveLeft){
     offGrip.getWorldPosition(_lh);
-    leftHand.position.copy(_lh);
-    leftHand.visible=!netOn;
+    leftHand.position.copy(_lh);leftHand.visible=!netOn;
     leftHand.material.color.setHex(handMode===2?0xd98f4f:handMode===1?0xa8b4a0:0xc9a882);
     netGrp.visible=netOn;
-    if(netOn){ netGrp.position.copy(_lh); offGrip.getWorldQuaternion(_q); netGrp.quaternion.copy(_q); }
-  } else { leftHand.visible=false; netGrp.visible=false; }
+    if(netOn){netGrp.position.copy(_lh);offGrip.getWorldQuaternion(_q);netGrp.quaternion.copy(_q);}
+  } else {leftHand.visible=false;netGrp.visible=false;}
 
   if(handMode===2&&haveLeft){
     if(lhValid){
@@ -1131,18 +1263,24 @@ renderer.setAnimationLoop(()=>{
       _toTip.set(pos[T]-_lh.x,pos[T+1]-_lh.y,pos[T+2]-_lh.z).normalize();
       _d.subVectors(_lh,_lhPrev);
       const along=_d.dot(_toTip)*P.stripGain*(hooked?0.6:1);
-      if(along>1e-5) payOut(along); else if(along<-1e-5) stripIn(-along);
+      if(along>1e-5) payOut(along*shootResist); else if(along<-1e-5) stripIn(-along);
     }
     _lhPrev.copy(_lh);lhValid=true;
   } else lhValid=false;
 
   if(trigR>0.05&&!menuOpen) reelIn(P.reelSpeed*trigR*dt);
   if(handMode!==2&&!hooked&&!rodPinch){
-    const shoot=Math.max(0,tipStrain)*P.shootGain*60;
+    const shoot=Math.max(0,tipStrain)*P.shootGain*60*shootResist;
     if(shoot>0.001) payOut(Math.min(shoot*dt,0.35));
   }
 
   physics(dt);
+  rodGrip?rodGrip.getWorldQuaternion(_q):null;
+  updateGuides(_q);
+  _tmp.set(guidePos[0],guidePos[1],guidePos[2]);
+  computeWrap(_tmp);
+  reelLip.getWorldPosition(_reel);
+  slackStep(dt,_reel,_tmp,(handMode>0&&haveLeft&&!netOn)?_lh:null);
 
   /* ---- metrics ---- */
   let bend=0;
@@ -1156,10 +1294,10 @@ renderer.setAnimationLoop(()=>{
   M.bend=bend*180/Math.PI;
   M.tension=Math.min(60,tipStrain*900);
 
-  /* ---- fly on the water ---- */
+  /* ---- fly ---- */
   const F=(N-1)*3,fx=pos[F],fy=pos[F+1],fz=pos[F+2];
-  const surf=waveAt(fx,fz,simTime);
-  const onWater=fy<surf+0.06&&bedDepth(fx,fz)>0.02;
+  const film=filmY(fx,fz,simTime);
+  const onWater=fy<film+0.06&&bedDepth(fx,fz)>0.02;
   computeFlow(fx,fz);
   const slip=Math.hypot(vel[F]-flowX,vel[F+1],vel[F+2]-flowZ);
 
@@ -1171,12 +1309,13 @@ renderer.setAnimationLoop(()=>{
         const speed=Math.hypot(vel[F],vel[F+1],vel[F+2]);
         spawnRing(fx,fz,0.6);
         for(const f of fishes){
-          if(f.state!=='holding') continue;
+          if(f.state!=='holding')continue;
           f.evaluated=false;
           let lined=false;
           for(let i=head;i<N-6;i++){
             const p=i*3;
-            if(pos[p+1]<surf+0.07&&Math.hypot(pos[p]-f.p.x,pos[p+2]-f.p.z)<P.lineRad){lined=true;break;}
+            if(pos[p+1]<filmY(pos[p],pos[p+2],simTime)+0.07&&
+               Math.hypot(pos[p]-f.p.x,pos[p+2]-f.p.z)<P.lineRad){lined=true;break;}
           }
           const near=Math.hypot(fx-f.p.x,fz-f.p.z);
           if(lined) f.spook('lined one \u2014 put down',1);
@@ -1187,44 +1326,39 @@ renderer.setAnimationLoop(()=>{
     } else {M.drift=0;flyAir=true;}
   }
 
-  /* ---- the take: evaluated as the fly drifts through, not where it lands ---- */
   if(!hooked&&onWater&&!flyAir&&driftT>0.20){
     const avgSlip=driftAcc/Math.max(driftT,0.01);
     for(const f of fishes){
-      if(f.state!=='holding') continue;
+      if(f.state!=='holding')continue;
       const near=Math.hypot(fx-f.p.x,fz-f.p.z);
-      if(near>P.takeRadius){ if(near>P.takeRadius*1.6) f.evaluated=false; continue; }
-      if(f.evaluated) continue;
+      if(near>P.takeRadius){if(near>P.takeRadius*1.6)f.evaluated=false;continue;}
+      if(f.evaluated)continue;
       f.evaluated=true;
       const clean=avgSlip<P.maxSlip&&slip<P.maxSlip*0.9;
       const chance=(f.feeding?1:P.nonFeedMult)*(clean?1:0.06);
       if(Math.random()<chance){
-        f.state='hooked'; f.stamina=1; f.runT=0; hooked=f;
+        f.state='hooked';f.stamina=1;f.runT=0;hooked=f;
         invM[N-1]=1/(0.30+f.len*0.9);
-        say('EAT \u2014 he\u2019s on'); pulse(1.0); spawnRing(fx,fz,1.2);
-      } else {
-        say(!clean?'drag \u2014 refused':(f.feeding?'he looked and passed':'that one isn\u2019t feeding'));
-      }
+        say('EAT \u2014 he\u2019s on');pulse(1.0);spawnRing(fx,fz,1.2);
+      } else say(!clean?'drag \u2014 refused':(f.feeding?'he looked and passed':'that one isn\u2019t feeding'));
     }
   }
 
-  /* ---- fight ---- */
   if(hooked){
     hooked.stamina=Math.max(0,hooked.stamina-M.tension*0.0075*P.fatigue*dt-dt*0.012);
     if(M.tension>P.tippet){
       hooked.spook('tippet popped',1);
-      invM[N-1]=1/baseM[N-1]; hooked=null; pulse(1.0);
+      invM[N-1]=1/baseM[N-1];hooked=null;pulse(1.0);
     } else if(netOn&&haveLeft){
       const d=Math.hypot(fx-_lh.x,fy-_lh.y,fz-_lh.z);
       if(d<P.netRadius&&hooked.stamina<0.45){
-        hooked.state='landed'; hooked.timer=4;
+        hooked.state='landed';hooked.timer=4;
         say('netted him \u2014 '+(hooked.len*100).toFixed(0)+' cm');
-        invM[N-1]=1/baseM[N-1]; hooked=null; pulse(0.6);
-      } else if(d<P.netRadius){ say('too green for the net \u2014 tire him out'); }
+        invM[N-1]=1/baseM[N-1];hooked=null;pulse(0.6);
+      } else if(d<P.netRadius) say('too green for the net');
     }
     M.drift=0;
   }
-
   for(const f of fishes) f.update(dt,t);
 
   hapT+=dt;
@@ -1233,46 +1367,58 @@ renderer.setAnimationLoop(()=>{
     else if(M.bend>6)pulse(Math.min(1,M.bend/55)*0.7);}
   noteT-=dt;
 
-  /* ---- streaks ---- */
-  streaks.visible=P.flecks>0.02;
-  streakMat.opacity=0.9*Math.min(1,P.flecks);
-  if(streaks.visible){
-    for(let i=0;i<STREAK;i++){
-      const p=i*3;
-      computeFlow(sPos[p],sPos[p+2]);
-      const sp=Math.hypot(flowX,flowZ);
-      sPos[p]+=flowX*dt; sPos[p+2]+=flowZ*dt;
-      sAge[i]-=dt;
-      if(sPos[p]>82||sp<=0.02||sAge[i]<0||bedDepth(sPos[p],sPos[p+2])<0.05){seedStreak(i,false);continue;}
-      sPos[p+1]=0.022+waveAt(sPos[p],sPos[p+2],simTime);
-      _dummy.position.set(sPos[p],sPos[p+1],sPos[p+2]);
-      _dummy.rotation.set(0,-Math.atan2(flowZ,flowX),0);
-      const len=0.22+sp*0.55;
-      _dummy.scale.set(len,1,0.085+sp*0.03);
-      _dummy.updateMatrix();
-      streaks.setMatrixAt(i,_dummy.matrix);
+  /* ---- vortex shedding ---- */
+  if(P.vortex>0.01) for(const o of OBST){
+    o.sh-=dt;
+    if(o.sh<=0){
+      o.sh=0.55+o.r*0.5;o.sgn=-o.sgn;
+      const v=vort[vNext];vNext=(vNext+1)%NV;
+      v.x=o.x+o.r*1.15;v.z=o.z+o.sgn*o.r*0.75;
+      v.r=o.r*0.85;v.k=o.sgn*0.55/o.r;v.life=1;
     }
-    streaks.instanceMatrix.needsUpdate=true;
   }
+  for(const v of vort){
+    if(v.life<=0)continue;
+    computeFlow(v.x,v.z);
+    v.x+=flowX*dt*0.85;v.z+=flowZ*dt*0.85;
+    v.life-=dt*0.30;
+  }
+
+  /* ---- specks: half the field per frame, respawned around the angler ---- */
+  const visible=Math.floor(SPECK*Math.max(0,Math.min(1,P.specks)));
+  speckMat.uniforms.uOpacity.value=1;
+  specks.visible=visible>2;
+  speckGeo.setDrawRange(0,visible);
+  speckPhase^=1;
+  for(let i=speckPhase;i<visible;i+=2){
+    const p=i*3;
+    computeFlow(spPos[p],spPos[p+2]);
+    spPos[p]+=flowX*dt*2;spPos[p+2]+=flowZ*dt*2;
+    spLife[i]-=dt*2;
+    if(spPos[p]>_camW.x+34||spLife[i]<0||bedDepth(spPos[p],spPos[p+2])<0.04){
+      seedSpeck(i,_camW.x,true);continue;
+    }
+    spPos[p+1]=filmY(spPos[p],spPos[p+2],simTime)+0.014+spDep[i];
+  }
+  speckGeo.attributes.position.needsUpdate=true;
 
   /* ---- zones ---- */
   zoneGrp.visible=P.showZones>0.5;
   if(zoneGrp.visible) for(let i=0;i<fishes.length;i++){
-    const f=fishes[i];
+    const f=fishes[i],sy=surfY(f.p.x);
     zoneRings[i].visible=f.state==='holding';
-    zoneRings[i].position.set(f.p.x,0.028,f.p.z);
+    zoneRings[i].position.set(f.p.x,sy+0.028,f.p.z);
     zoneRings[i].scale.setScalar(P.takeRadius);
     zoneRings[i].material.color.setHex(f.feeding?0x4fd18b:0x7d8b8c);
     const a=zoneLanes[i].geometry.attributes.position.array;
-    a[0]=f.p.x;a[1]=0.03;a[2]=f.p.z-P.latTol;
-    a[3]=f.p.x-P.upMax;a[4]=0.03;a[5]=f.p.z-P.latTol;
-    a[6]=f.p.x;a[7]=0.03;a[8]=f.p.z+P.latTol;
-    a[9]=f.p.x-P.upMax;a[10]=0.03;a[11]=f.p.z+P.latTol;
+    a[0]=f.p.x;a[1]=sy+0.03;a[2]=f.p.z-P.latTol;
+    a[3]=f.p.x-P.upMax;a[4]=surfY(f.p.x-P.upMax)+0.03;a[5]=f.p.z-P.latTol;
+    a[6]=f.p.x;a[7]=sy+0.03;a[8]=f.p.z+P.latTol;
+    a[9]=f.p.x-P.upMax;a[10]=surfY(f.p.x-P.upMax)+0.03;a[11]=f.p.z+P.latTol;
     zoneLanes[i].geometry.attributes.position.needsUpdate=true;
     zoneLanes[i].visible=f.state==='holding';
   }
 
-  /* ---- rings ---- */
   for(const r of ringPool){
     r.t+=dt;
     r.m.scale.setScalar((0.35+r.t*0.9)*r.s);
@@ -1281,18 +1427,26 @@ renderer.setAnimationLoop(()=>{
   }
 
   /* ---- render ---- */
-  lineTube.radScale=P.lineVis; backTube.radScale=P.lineVis;
+  lineTube.radScale=P.lineVis;thrTube.radScale=P.lineVis;
   rodTube.update(pos,0);lineTube.update(pos,RN);
-  reelMesh.getWorldPosition(_reel); corkAnchor.getWorldPosition(_cork);
-  buildBackline(_reel,handMode>0&&haveLeft&&!netOn?_lh:null,_cork);
-  backTube.update(backPts,0);
+  rawPath.length=0;
+  for(let i=0;i<SN;i++){const p=i*3;rawPath.push(sPosA[p],sPosA[p+1],sPosA[p+2]);}
+  for(let g=1;g<NG;g++){const k=g*3;rawPath.push(guidePos[k],guidePos[k+1],guidePos[k+2]);}
+  resampleInto(thrPts,THR_N);
+  thrTube.update(thrPts,0);
+  for(let g=0;g<NG;g++){
+    const k=g*3;
+    guideMeshes[g].position.set(guidePos[k],guidePos[k+1],guidePos[k+2]);
+    guideMeshes[g].quaternion.copy(_q);
+    guideMeshes[g].rotateX(Math.PI/2);
+  }
 
   flyGrp.position.set(fx,fy,fz);
   flyGrp.scale.setScalar(P.flySize);
   flyGrp.visible=!hooked;
   flyWake.visible=onWater&&!hooked;
   if(flyWake.visible){
-    flyWake.position.set(fx,0.026,fz);
+    flyWake.position.set(fx,film+0.016,fz);
     flyWake.scale.setScalar(0.05+P.flySize*0.03);
     flyWake.material.opacity=0.35;
   }
@@ -1309,7 +1463,7 @@ addEventListener('resize',()=>{
 });
 
 /* ════════════════════════════════════════════════════════════
-   9. ENTER VR
+   10. ENTER VR
    ════════════════════════════════════════════════════════════ */
 const overlay=document.getElementById('overlay'),enterBtn=document.getElementById('enter'),hint=document.getElementById('hint');
 if(!navigator.xr){
