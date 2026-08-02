@@ -92,7 +92,7 @@ const P = {
   reelSpeed:2.60, reelPower:60.0, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
-  current:0.55, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:1.00,
+  current:0.55, speckGPU:1, speckTravel:7.0, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
   splashV:4.50, lineRad:0.50, spookT:5.00, fatigue:1.00,
@@ -147,7 +147,9 @@ const MENU=[
   ['— RIVER —',null,0,0,0,''],
   ['Current','current',0.10,1.40,0.05,'Discharge per unit width. Speed is this divided by depth, so raising it speeds the whole river.'],
   ['River grade','grade',0.00,2.50,0.10,'Steepness of the reach and the size of the drops between pools. Rebuilds the bed live.'],
-  ['Speck density','specks',0.00,1.00,0.02,'How many drifting specks are shown, out of 4000.'],
+  ['GPU specks','speckGPU',0,1,1,'0 runs the original CPU specks — real particles carried by the flow, capped at 4000 because each one costs a flow evaluation in JavaScript. 1 moves the whole thing into a shader: each speck re-integrates its own short streamline every frame, up to 20000 of them, for no CPU cost at all. Toggle freely; nothing else changes.'],
+  ['Speck travel s','speckTravel',2.00,20.0,0.50,'GPU specks only. How many seconds of drift each speck traces before fading out and starting again. Longer reads as transport down the river; shorter reads as local flow direction.'],
+  ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 20000 on the GPU path.'],
   ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck.'],
   ['Speck range','speckRange',6.00,45.0,1.00,'How far upstream and downstream specks are kept, in metres. A shorter range packs the same count into less river, so you can read the flow with far fewer of them.'],
   ['Speck spread','speckSpread',0.00,1.00,0.05,'Share of specks respawning on a grid around you rather than drifting from upstream. Raise it to see flow in dead water.'],
@@ -949,6 +951,113 @@ const speckMat=new THREE.ShaderMaterial({
 const specks=new THREE.Points(speckGeo,speckMat);
 specks.frustumCulled=false;specks.renderOrder=2;scene.add(specks);
 
+
+/* ---- GPU specks ----------------------------------------------------------
+   Stateless: nothing is stored per particle and nothing is updated on the CPU.
+   Each vertex knows a seed point and a phase offset, and every frame the vertex
+   shader re-integrates that seed forward through the same analytic flow field
+   the physics uses, for `age` seconds. Deterministic, so the motion is smooth
+   frame to frame, and it costs the CPU exactly zero.
+   The flow function below is generated from the same JS obstacle list, so it
+   cannot drift out of step with computeFlow(). --------------------------------*/
+const GSPECK=20000;
+const GLSL_FLOW=`
+${OBST.map((o,i)=>`const vec4 OB${i}=vec4(${o.x.toFixed(2)},${o.z.toFixed(2)},${o.r.toFixed(3)},${o.kind==='log'?'1.0':'0.0'});`).join('\n')}
+float depthAt(vec2 p){
+  float u=(p.y-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
+  float cr=max(0.0,1.0-u*u);
+  return ${MAXDEPTH.toFixed(2)}*cr*(0.55+0.45*sin(p.x*0.13+1.3));
+}
+vec2 obstacle(vec2 p, vec4 o, vec2 v, float s){
+  vec2 d=p-o.xy;
+  float dd=max(length(d),1e-4);
+  if(dd<o.z) return v*0.04;
+  float infl=max(0.0,1.0-(dd-o.z)/(o.z*2.4));
+  if(infl<=0.0) return v;
+  v.y+=(d.y/dd)*s*0.85*infl;
+  if(d.x>0.0&&abs(d.y)<o.z*1.6){
+    v.x*=1.0-0.85*infl; v.x-=s*0.30*infl; v.y-=(d.y/dd)*s*0.55*infl;
+  } else v.x*=1.0+0.45*infl;
+  return v;
+}
+vec2 flowAt(vec2 p){
+  float u=(p.y-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
+  float cr=max(0.0,1.0-u*u);
+  if(cr<=0.001) return vec2(0.0);
+  float d=max(depthAt(p),0.12);
+  float slope=max(0.0,(surfY(p.x-0.9)-surfY(p.x+0.9))/1.8);
+  float s=min(${VMAX.toFixed(1)},(uQ/d)*(1.0+slope*7.0))*pow(max(cr,1e-4),0.35);
+  vec2 v=vec2(s,0.0);
+  v=obstacle(p,OB0,v,s); v=obstacle(p,OB1,v,s);
+  v=obstacle(p,OB2,v,s); v=obstacle(p,OB3,v,s);
+  for(int i=0;i<8;i++){
+    vec4 vo=uVort[i];
+    if(vo.w==0.0) continue;
+    vec2 dd=p-vo.xy;
+    float d2=dot(dd,dd);
+    if(d2>vo.z*vo.z*4.0) continue;
+    float f=vo.w*exp(-d2/(vo.z*vo.z));
+    v+=vec2(-dd.y,dd.x)*f;
+  }
+  return v;
+}`;
+const gSpeckGeo=new THREE.BufferGeometry();
+{
+  const seed=new Float32Array(GSPECK*2), misc=new Float32Array(GSPECK*2);
+  for(let i=0;i<GSPECK;i++){
+    seed[i*2]=Math.random()*2-1;
+    seed[i*2+1]=Math.random()*2-1;
+    misc[i*2]=Math.random();                       /* phase offset */
+    misc[i*2+1]=Math.random()<0.55?0:-Math.random()*0.35;   /* depth below film */
+  }
+  gSpeckGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(GSPECK*3),3));
+  gSpeckGeo.setAttribute('aSeed',new THREE.BufferAttribute(seed,2));
+  gSpeckGeo.setAttribute('aMisc',new THREE.BufferAttribute(misc,2));
+  gSpeckGeo.boundingSphere=new THREE.Sphere(new THREE.Vector3(),500);
+}
+const gSpeckMat=new THREE.ShaderMaterial({
+  transparent:true,depthWrite:false,
+  uniforms:{
+    uTime:{value:0}, uSize:{value:P.speckSize}, uQ:{value:P.current}, uGrade:{value:P.grade},
+    uOriginX:{value:0}, uRange:{value:P.speckRange}, uTravel:{value:P.speckTravel},
+    uVort:{value:Array.from({length:8},()=>new THREE.Vector4(0,0,1,0))},
+  },
+  vertexShader:`
+    attribute vec2 aSeed; attribute vec2 aMisc;
+    uniform float uTime,uSize,uQ,uGrade,uOriginX,uRange,uTravel;
+    uniform vec4 uVort[8];
+    varying float vA;
+    ${GLSL_SURF}
+    ${GLSL_FLOW}
+    void main(){
+      vec2 p=vec2(uOriginX+aSeed.x*uRange, ${CZ.toFixed(1)}+aSeed.y*${(HALFW*0.92).toFixed(2)});
+      float ph=fract(uTime/uTravel+aMisc.x);
+      float age=ph*uTravel;
+      float dt=uTravel/24.0;
+      for(int i=0;i<24;i++){
+        if(float(i)*dt>=age) break;
+        p+=flowAt(p)*dt;
+      }
+      float d=depthAt(p);
+      float sp=length(flowAt(p));
+      /* fade in and out so recycling is invisible, and hide anything beached */
+      vA=smoothstep(0.0,0.10,ph)*(1.0-smoothstep(0.80,1.0,ph))
+         *smoothstep(0.06,0.16,d)*(0.55+0.45*step(0.02,sp));
+      vec3 wp=vec3(p.x, surfY(p.x)+0.014+aMisc.y, p.y);
+      vec4 mv=modelViewMatrix*vec4(wp,1.0);
+      gl_PointSize=clamp(260.0*uSize/max(-mv.z,0.4),1.0,26.0*uSize);
+      gl_Position=projectionMatrix*mv;
+    }`,
+  fragmentShader:`
+    varying float vA;
+    void main(){
+      vec2 d=gl_PointCoord-0.5; float r=dot(d,d);
+      if(r>0.25) discard;
+      gl_FragColor=vec4(0.96,0.99,0.97,(1.0-smoothstep(0.06,0.25,r))*vA);
+    }`});
+const gSpecks=new THREE.Points(gSpeckGeo,gSpeckMat);
+gSpecks.frustumCulled=false;gSpecks.renderOrder=2;gSpecks.visible=false;scene.add(gSpecks);
+
 /* ════════════════════════════════════════════════════════════
    5. TROUT
    ════════════════════════════════════════════════════════════ */
@@ -1452,6 +1561,7 @@ function drawHUD(){
   const slack=Math.max(0,offSpool-lineOut-rodArc);
   const rows=[
     ['FPS',M.fps.toFixed(0)+'   NODES '+nAct],
+    ['SPECKS',(P.speckGPU>0.5?'GPU ':'CPU ')+Math.floor((P.speckGPU>0.5?GSPECK:SPECK)*P.specks)],
     ['NODE LEN',(nodeLen*100).toFixed(0)+' cm'],
     ['LINE OUT',lineOut.toFixed(2)+' m'],
     ['SLACK',slack.toFixed(2)+' m'],
@@ -1775,7 +1885,7 @@ function onSettingChanged(key){
   if(key==='rodE'||key==='rodMass'||key==='tipSoft'||key==='rodTaper'){lastTipSoft=P.tipSoft;lastTaper=P.rodTaper;rebuildRod();}
   if(key==='current')waterMat.uniforms.uQ.value=P.current;
   if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
-  if(key==='speckSize')speckMat.uniforms.uSize.value=P.speckSize;
+  if(key==='speckSize'){speckMat.uniforms.uSize.value=P.speckSize;gSpeckMat.uniforms.uSize.value=P.speckSize;}
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
 }
 
@@ -2113,27 +2223,44 @@ renderer.setAnimationLoop(()=>{
     v.life-=dt*0.30;
   }
 
-  const visible=Math.floor(SPECK*Math.max(0,Math.min(1,P.specks)));
-  specks.visible=visible>2;
-  speckGeo.setDrawRange(0,visible);
-  speckPhase^=1;
-  for(let i=speckPhase;i<visible;i+=2){
-    const p=i*3;
-    computeFlow(spPos[p],spPos[p+2]);
-    const sp=Math.hypot(flowX,flowZ);
-    spPos[p]+=flowX*dt;spPos[p+2]+=flowZ*dt;
-    /* Slack water and the insides of rocks are sinks: anything that drifts in
-       never drifts out, so over a few minutes they hoard most of the field.
-       Drain the lifetime fast when a speck is barely moving — eddies still
-       show circulation, but nothing accumulates there. */
-    spLife[i]-=dt*(sp<0.055?9:1);
-    if(spPos[p]>_camW.x+P.speckRange*1.15||spPos[p]<_camW.x-P.speckRange*1.5||spLife[i]<0||
-       bedDepth(spPos[p],spPos[p+2])<0.10){
-      seedSpeck(i,_camW.x,Math.random()<P.speckSpread?1:0);continue;
+  const useGPU=P.speckGPU>0.5;
+  specks.visible=!useGPU&&P.specks>0.005;
+  gSpecks.visible=useGPU&&P.specks>0.005;
+  if(useGPU){
+    const u=gSpeckMat.uniforms;
+    u.uTime.value=simTime;
+    u.uSize.value=P.speckSize;
+    u.uQ.value=P.current;
+    u.uGrade.value=P.grade;
+    u.uRange.value=P.speckRange;
+    u.uTravel.value=Math.max(1,P.speckTravel);
+    /* the seed field only re-snaps when you have walked most of its width, so
+       the jump is rare and mostly hidden by the fade */
+    if(Math.abs(_camW.x-u.uOriginX.value)>P.speckRange*0.6) u.uOriginX.value=_camW.x;
+    for(let i=0;i<8;i++){
+      const v=vort[i], t=u.uVort.value[i];
+      if(v&&v.life>0){t.set(v.x,v.z,v.r,v.k*P.vortex*v.life);}
+      else t.set(0,0,1,0);
     }
-    spPos[p+1]=filmY(spPos[p],spPos[p+2],simTime)+0.014+spDep[i];
+    gSpeckGeo.setDrawRange(0,Math.floor(GSPECK*Math.max(0,Math.min(1,P.specks))));
+  } else {
+    const visible=Math.floor(SPECK*Math.max(0,Math.min(1,P.specks)));
+    speckGeo.setDrawRange(0,visible);
+    speckPhase^=1;
+    for(let i=speckPhase;i<visible;i+=2){
+      const p=i*3;
+      computeFlow(spPos[p],spPos[p+2]);
+      const sp=Math.hypot(flowX,flowZ);
+      spPos[p]+=flowX*dt;spPos[p+2]+=flowZ*dt;
+      spLife[i]-=dt*(sp<0.055?9:1);
+      if(spPos[p]>_camW.x+P.speckRange*1.15||spPos[p]<_camW.x-P.speckRange*1.5||spLife[i]<0||
+         bedDepth(spPos[p],spPos[p+2])<0.10){
+        seedSpeck(i,_camW.x,Math.random()<P.speckSpread?1:0);continue;
+      }
+      spPos[p+1]=filmY(spPos[p],spPos[p+2],simTime)+0.014+spDep[i];
+    }
+    speckGeo.attributes.position.needsUpdate=true;
   }
-  speckGeo.attributes.position.needsUpdate=true;
 
   zoneGrp.visible=P.showZones>0.5;
   if(zoneGrp.visible) for(let i=0;i<fishes.length;i++){

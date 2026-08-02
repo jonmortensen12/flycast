@@ -76,6 +76,12 @@ deadband meaningless. Don't reintroduce that.
 
 ### 2.4 Water
 
+- **Two speck renderers**, toggled by `speckGPU`. The CPU path advects real particles in JS
+  and is capped at 4000. The GPU path is stateless: each vertex knows a seed and a phase, and
+  the vertex shader re-integrates that seed through the same analytic flow field every frame,
+  20000 of them for no CPU cost. The GLSL flow function is generated from the same JS obstacle
+  list so the two cannot drift apart. If a grid solve ever replaces the analytic field, the
+  shader samples a texture instead — cheaper, not harder.
 - Depth-averaged **2D** flow. This is the shallow-water simplification and it is the correct
   one for dry-fly fishing; 3D would buy plunge-pool recirculation you would never see.
 - Speed follows continuity: `discharge / depth`, so thin water is fast water.
@@ -250,12 +256,18 @@ render loop, and that has broken a build.
 5. **No haul mechanic.** Single and double hauls are the obvious next casting feature.
 6. **One reach of river, four fish, one fly pattern.** No fly selection, no hatch, no
    fish memory of being pricked.
-7. **Performance.** ~116 active nodes at default spacing, ~265 at both minimums. Specks cost
-   a flow evaluation each and are the dominant cost at high density.
+7. **Performance.** ~116 active nodes at default spacing, ~265 at both minimums. On the CPU
+   speck path, specks cost a flow evaluation each and dominate at high density; the GPU path
+   removes that entirely. See `STRATEGY.md` for the full headroom analysis.
 
 ---
 
-## 7. If this moves off WebXR
+## 7. Strategy, roadmap and business
+
+See `STRATEGY.md` — platform choice, performance headroom, feature cost estimates, suggested
+build order, market and monetisation analysis, and the legal/employment considerations.
+
+## 8. If this moves off WebXR
 
 Meta's Horizon Store accepts immersive WebXR PWAs, packaged with Bubblewrap into an Android
 App Bundle, with in-app payments via the Digital Goods API. So the current file is already
