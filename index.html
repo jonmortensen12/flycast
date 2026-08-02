@@ -86,7 +86,9 @@ import * as THREE from 'three';
    ════════════════════════════════════════════════════════════ */
 const P = {
   nodeLen:0.20, leadNode:0.06, leaderLen:2.74, tippetLen:0.90,
-  stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1, dragMul:1.00, lineWt:5.0, statFric:0.05,
+  rodModel:1, rodE:200.0, rodMass:0.077,
+  stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
+  massMul:1.00, lineBend:1.00, lineSmooth:0.15, dragMul:1.00, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
@@ -99,11 +101,18 @@ const P = {
 const MENU=[
   ['— PRESETS —',null,0,0,0,''],
   ['Physical defaults','!physical',0,0,0,'Push right to load values derived from real tackle: AFFTA line weights, a measured 9 ft 5wt deflection curve, real leader taper, and physical air drag coefficients.'],
-  ['Classic rod feel','!classicrod',0,0,0,'Push right to restore the rod exactly as it was before damping existed: the earlier stiffness curve, stiffness 0.286, damping off. Touches nothing but the rod.'],
+  ['Classic tackle','!classicrod',0,0,0,'Restores the rod AND line as they were in the build you liked: legacy rod model, the earlier stiffness curve at 0.85, no damping, line mass 6.2x real, matching air drag, and uniform 20 cm node spacing.'],
   ['Load my default','!mydefault',0,0,0,'Push right to load whatever you last saved as your default.'],
   ['Save as my default','!save',0,0,0,'Push right to store every current value as your default.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
+  ['— ROD MODEL —',null,0,0,0,''],
+  ['Rod model','rodModel',0,1,1,'0 is the original position-based rod with an empirical stiffness curve. 1 is an XPBD beam whose compliance comes from the blank\u2019s real second moment of area and modulus, so stiffness and frequency both follow from physics instead of being tuned separately.'],
+  ['Rod modulus GPa','rodE',40.0,400.0,5.00,'Flexural modulus of the blank, XPBD model only. Carbon is roughly 70-230 GPa. Higher is stiffer and faster. At 200 the static bend matches a real rod but the first mode sits near 2.4 Hz, which is slower than the rod you liked.'],
+  ['Rod mass kg','rodMass',0.030,0.200,0.005,'Mass of the moving blank. A real 9 ft 5wt blank above the grip is about 45-60 g. Lighter raises the natural frequency without changing static stiffness.'],
   ['— LINE MODEL —',null,0,0,0,''],
+  ['Line mass mult','massMul',0.20,8.00,0.05,'Multiplier on top of the AFFTA line weight, applied to leader and line alike. 1.00 is physically real. The build you liked ran about 6.2, which is why loops carried further.'],
+  ['Line bend stiff','lineBend',0.00,200.0,1.00,'Bending stiffness of the line itself, as a multiple of its real value. Real fly line is almost limp at this node spacing, so values well above 1 are cosmetic.'],
+  ['Line smoothing','lineSmooth',0.00,0.50,0.01,'Numerical viscosity along the line. Not a physical force — it removes node-to-node jitter left by discretisation.'],
   ['Line node length','nodeLen',0.08,0.50,0.01,'Spacing of simulated points along the fly line, in metres. Smaller is smoother and slower — watch the FPS row.'],
   ['Leader node length','leadNode',0.03,0.25,0.01,'Spacing along the leader and tippet, which needs finer resolution than the fly line because it is far lighter and turns over more sharply.'],
   ['Leader length','leaderLen',1.50,5.00,0.10,'Total leader from fly to fly line. A 9 ft leader is 2.74 m.'],
@@ -158,6 +167,8 @@ const MENU=[
 
 /* values derived from real tackle — see the notes beside each menu row */
 const PHYSICAL={
+  rodModel:1, rodE:200.0, rodMass:0.077, massMul:1.00,
+  lineBend:1.00, lineSmooth:0.15, leadNode:0.06,
   stiffMul:1.434,   /* first bending mode at 4.0 Hz, which is what a real 5wt does */
   rodDamp:14.0, tipSoft:0.60, rodTaper:1,
   leaderLen:2.74, tippetLen:0.90, leadNode:0.06,
@@ -166,6 +177,14 @@ const PHYSICAL={
   guideMu:0.15, statFric:0.05, spoolDrag:1.00, spoolDead:0.05,
   tippet:21.0,      /* 5X = 4.75 lb */
   buoyancy:1.00, stick:1.00, nodeLen:0.20,
+};
+/* The tackle from the build he liked, measured back out of that version:
+   fly line 6.11 g/m against a real 5wt's 0.99, drag chosen to reproduce the
+   same drag-per-momentum, uniform 20 cm nodes, no rod damping. */
+const CLASSIC={
+  rodModel:0, rodTaper:0, stiffMul:0.85, rodDamp:0, tipSoft:0.60,
+  massMul:6.17, dragMul:3.50, lineWt:5.0,
+  nodeLen:0.20, leadNode:0.20, leaderLen:2.60, lineBend:0, lineSmooth:0.10,
 };
 let userDefault=null;
 
@@ -271,23 +290,30 @@ const rodI=new Float32Array(RN);
   }
   for(let i=0;i<RN;i++) rodI[i]/=rodI[0];
 }
-const rodOD=new Float32Array(RN);
+const rodOD=new Float32Array(RN), rodIabs=new Float64Array(RN), rodAlpha=new Float64Array(RN);
 { let sum=0;
   for(let i=0;i<RN;i++){const t=i/(RN-1);rodOD[i]=9.5+(1.6-9.5)*t;sum+=rodOD[i];}
-  for(let i=0;i<RN;i++) rodOD[i]/=sum;      /* mass share per node */
+  for(let i=0;i<RN;i++){
+    const D=rodOD[i]/1000, w=0.00055, d=Math.max(0,D-2*w);
+    rodIabs[i]=Math.PI/64*(Math.pow(D,4)-Math.pow(d,4));   /* m^4, real geometry */
+    rodOD[i]/=sum;                                          /* mass share per node */
+  }
 }
-const ROD_MASS=0.077;                       /* 77 g blank, a real 9 ft 5wt */
 function rebuildRod(){
   for(let i=0;i<RN;i++){
     /* thin-wall tube: mass per length goes as diameter, so a real rod is
        butt-heavy. An evenly weighted rod has too much tip mass and rings slow. */
-    const m=ROD_MASS*rodOD[i];
+    const m=Math.max(1e-4,P.rodMass*rodOD[i]);
     if(i<2) rinvM[i]=0;
     else{rinvM[i]=1/m;rdragK[i]=0.5*1.2*(0.006*ROD_SEG)/m;}
     const t=i/(RN-1);
     rbendK[i]=P.rodTaper<0.5
       ? 0.97+(0.14-0.97)*Math.pow(t,1.4)                  /* the earlier curve */
       : Math.max(Math.pow(rodI[i],P.tipSoft),0.03);       /* real tube physics */
+    /* XPBD compliance from real bending stiffness. Three points spaced L with
+       curvature k have sagitta C = k L^2/2, so U = 0.5 EI k^2 L = 2 EI C^2/L^3.
+       XPBD's U = 0.5 C^2/alpha, hence alpha = L^3/(4 EI). Nothing tuned. */
+    rodAlpha[i]=Math.pow(ROD_SEG,3)/(4*Math.max(1e6,P.rodE*1e9)*rodIabs[i]);
   }
 }
 rebuildRod();
@@ -295,6 +321,7 @@ rebuildRod();
 /* line — node i sits at a fixed arc length sArc(i) from the fly, forever */
 const pos=new Float32Array(MAXNODE*3),prd=new Float32Array(MAXNODE*3),vel=new Float32Array(MAXNODE*3);
 const invM=new Float32Array(MAXNODE),dragK=new Float32Array(MAXNODE);
+const lineEI=new Float64Array(MAXNODE), lineLam=new Float64Array(MAXNODE);
 let nodeLen=P.nodeLen, nAct=0;
 /* The line is discretised in two zones. Node i sits at a fixed arc length
    sArc(i) from the fly, finer through the leader than along the fly line. */
@@ -340,13 +367,14 @@ function rebuildMasses(){
   for(let i=0;i<MAXNODE;i++){
     const s=sArc(i), span=nodeSpan(i);
     const pr=lineProfile(s);
-    let m=Math.max(pr[0]*span,1.5e-6);
+    let m=Math.max(pr[0]*span*P.massMul,1.5e-6);
     if(i===0) m+=2.0e-5;                       /* a size 14 dry fly, 20 mg */
     invM[i]=1/m;
     /* drag/mass is independent of nodeLen, so changing resolution does not
        change how the line behaves — only how finely it is resolved.
        0.5*rho*Cd*A/m with air at 1.2 kg/m^3 and Cd 1.1 for a cylinder. */
     dragK[i]=0.5*1.2*1.1*pr[1]*span/m;
+    lineEI[i]=(s<P.leaderLen?3.0e9:2.0e7)*Math.PI*Math.pow(pr[1],4)/64;
   }
   if(hooked) invM[0]=1/(0.055+hooked.len*0.09);
 }
@@ -387,6 +415,24 @@ function rodDist(a,b,rest){
   rpos[A]+=dx*rinvM[a];rpos[A+1]+=dy*rinvM[a];rpos[A+2]+=dz*rinvM[a];
   rpos[B]-=dx*rinvM[b];rpos[B+1]-=dy*rinvM[b];rpos[B+2]-=dz*rinvM[b];
 }
+const rodLam=new Float64Array(RN);
+function rodBendXPBD(i,h2){
+  const a=i-1,b=i,c=i+1,A=a*3,B=b*3,C=c*3;
+  const dx=rpos[B]-(rpos[A]+rpos[C])*0.5;
+  const dy=rpos[B+1]-(rpos[A+1]+rpos[C+1])*0.5;
+  const dz=rpos[B+2]-(rpos[A+2]+rpos[C+2])*0.5;
+  const Cv=Math.sqrt(dx*dx+dy*dy+dz*dz);
+  if(Cv<1e-12) return;
+  const w=rinvM[a]*0.25+rinvM[b]+rinvM[c]*0.25;
+  if(w<=0) return;
+  const at=rodAlpha[i]/h2;
+  const dl=(-Cv-at*rodLam[i])/(w+at);
+  rodLam[i]+=dl;
+  const nx=dx/Cv*dl, ny=dy/Cv*dl, nz=dz/Cv*dl;
+  rpos[A]-=nx*0.5*rinvM[a];rpos[A+1]-=ny*0.5*rinvM[a];rpos[A+2]-=nz*0.5*rinvM[a];
+  rpos[C]-=nx*0.5*rinvM[c];rpos[C+1]-=ny*0.5*rinvM[c];rpos[C+2]-=nz*0.5*rinvM[c];
+  rpos[B]+=nx*rinvM[b];    rpos[B+1]+=ny*rinvM[b];    rpos[B+2]+=nz*rinvM[b];
+}
 function rodBend(a,b,c,k){
   const w=rinvM[a]*0.25+rinvM[b]+rinvM[c]*0.25;if(w<=0)return;
   const A=a*3,B=b*3,C=c*3;
@@ -415,6 +461,30 @@ function lineDist(a,b){
   dx*=s;dy*=s;dz*=s;
   pos[A]+=dx*invM[a];pos[A+1]+=dy*invM[a];pos[A+2]+=dz*invM[a];
   pos[B]-=dx*invM[b];pos[B+1]-=dy*invM[b];pos[B+2]-=dz*invM[b];
+}
+/* Real line bending stiffness: nylon leader at 3 GPa, PVC fly line at 20 MPa,
+   I = pi d^4/64, same alpha = L^3/(4 EI) as the rod. At these diameters the
+   physical value is almost nothing, so the multiplier exists to let you push
+   past reality if the jiggle needs it. */
+function lineBendXPBD(i,h2){
+  const a=i-1,b=i,c=i+1,A=a*3,B=b*3,C=c*3;
+  const dx=pos[B]-(pos[A]+pos[C])*0.5;
+  const dy=pos[B+1]-(pos[A+1]+pos[C+1])*0.5;
+  const dz=pos[B+2]-(pos[A+2]+pos[C+2])*0.5;
+  const Cv=Math.sqrt(dx*dx+dy*dy+dz*dz);
+  if(Cv<1e-12) return;
+  const w=invM[a]*0.25+invM[b]+invM[c]*0.25;
+  if(w<=0) return;
+  const L=restOf(a);
+  const EI=lineEI[i]*P.lineBend;
+  if(EI<=0) return;
+  const at=(L*L*L/(4*EI))/h2;
+  const dl=(-Cv-at*lineLam[i])/(w+at);
+  lineLam[i]+=dl;
+  const nx=dx/Cv*dl, ny=dy/Cv*dl, nz=dz/Cv*dl;
+  pos[A]-=nx*0.5*invM[a];pos[A+1]-=ny*0.5*invM[a];pos[A+2]-=nz*0.5*invM[a];
+  pos[C]-=nx*0.5*invM[c];pos[C+1]-=ny*0.5*invM[c];pos[C+2]-=nz*0.5*invM[c];
+  pos[B]+=nx*invM[b];    pos[B+1]+=ny*invM[b];    pos[B+2]+=nz*invM[b];
 }
 function lineBend(a,b,c,k){
   const w=invM[a]*0.25+invM[b]+invM[c]*0.25;if(w<=0)return;
@@ -598,12 +668,14 @@ function physics(dt){
     probeI[2]=Math.max(0,Math.floor(idxAt(offSpool))-1);
     probeLam[0]=probeLam[1]=probeLam[2]=0;
 
+    rodLam.fill(0);lineLam.fill(0);
     for(let it=0;it<ITER;it++){
       for(let i=0;i<RN-1;i++) rodDist(i,i+1,ROD_SEG);
-      for(let i=1;i<RN-1;i++) rodBend(i-1,i,i+1,Math.min(1,rbendK[i]*P.stiffMul));
+      if(P.rodModel>0.5){ for(let i=1;i<RN-1;i++) rodBendXPBD(i,h2); }
+      else { for(let i=1;i<RN-1;i++) rodBend(i-1,i,i+1,Math.min(1,rbendK[i]*P.stiffMul)); }
       for(let i=0;i<nAct-1;i++) lineDist(i,i+1);
       const bendTo=Math.min(nAct-2,Math.floor(idxAt(lineOut)));
-      for(let i=1;i<bendTo;i++) lineBend(i-1,i,i+1,0.04);
+      if(P.lineBend>0.001) for(let i=1;i<bendTo;i++) lineBendXPBD(i,h2);
       for(let g=0;g<NG;g++) solveGuide(g,0.85);
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
       if(handHeld&&handIdx>0) pinLine(sArc(handIdx),_handW.x,_handW.y,_handW.z,0.9);
@@ -685,6 +757,15 @@ function physics(dt){
     }
     for(let i=0;i<nAct;i++){const p=i*3;
       vel[p]=(pos[p]-prd[p])/h;vel[p+1]=(pos[p+1]-prd[p+1])/h;vel[p+2]=(pos[p+2]-prd[p+2])/h;}
+    /* numerical viscosity along the line. This is not a physical force — it is
+       there to kill the node-to-node jitter that discretisation creates. */
+    if(P.lineSmooth>0.001){
+      const k=Math.min(0.5,P.lineSmooth);
+      for(let i=1;i<nAct-1;i++){
+        const p=i*3,a=p-3,b=p+3;
+        for(let c=0;c<3;c++) vel[p+c]+=k*(0.5*(vel[a+c]+vel[b+c])-vel[p+c]);
+      }
+    }
     sanity();
     if(blewUp) return;
   }
@@ -1290,8 +1371,10 @@ function makePanel(w,h,cw,ch){
 }
 const hud=makePanel(0.44,0.38,512,440);
 hud.mesh.position.set(-0.56,1.16,-0.64);hud.mesh.rotation.y=0.58;player.add(hud.mesh);
-const menu=makePanel(0.64,0.68,620,660);
-menu.mesh.position.set(0,1.42,-0.85);menu.mesh.visible=false;player.add(menu.mesh);
+const MW=1400, MH=780, ROWH=24, COLW=450, COLX=[16,478,940];
+const TRACKX=168, TRACKW=118, VALX=336, RNGX=352, RNGW=52;
+const menu=makePanel(1.40,0.78,MW,MH);
+menu.mesh.position.set(0,1.45,-1.05);menu.mesh.visible=false;player.add(menu.mesh);
 
 let note='',noteT=0;
 function say(s){note=s;noteT=3.6;}
@@ -1372,7 +1455,7 @@ function copySettings(){
 }
 function runAction(key){
   if(key==='!physical'){applyPreset(PHYSICAL);say('physical defaults loaded');}
-  else if(key==='!classicrod'){applyPreset({rodTaper:0,stiffMul:0.286,rodDamp:0,tipSoft:0.60});say('classic rod feel loaded');}
+  else if(key==='!classicrod'){applyPreset(CLASSIC);say('classic tackle loaded');}
   else if(key==='!save'){userDefault=Object.assign({},P);say('saved as your default');}
   else if(key==='!mydefault'){
     if(userDefault){applyPreset(userDefault);say('your default loaded');}
@@ -1380,8 +1463,28 @@ function runAction(key){
   }
   else if(key==='!copy'){copySettings();say('settings copied');}
 }
-let menuOpen=false,menuSel=1,stickReady=true;
-const ROWS=13;
+let menuOpen=false, menuSel=1;
+/* per-row range expansion, so no setting can ever be out of reach */
+const RANGEX={};
+const rx=k=>RANGEX[k]||1;
+const rowMin=(k,mn)=>mn>0?mn/rx(k):mn*rx(k);
+const rowMax=(k,mx)=>mx*rx(k);
+/* layout: MENU split into two columns at a header boundary */
+/* split at the two header boundaries closest to the thirds, so sections
+   never straddle a column break */
+const SPLITS=(()=>{
+  const hdr=[];
+  for(let i=0;i<MENU.length;i++) if(MENU[i][1]===null) hdr.push(i);
+  const pick=f=>hdr.reduce((b,i)=>Math.abs(i-MENU.length*f)<Math.abs(b-MENU.length*f)?i:b,hdr[0]);
+  const a=pick(1/3); let bb=pick(2/3);
+  if(bb<=a) bb=Math.min(MENU.length,a+Math.ceil(MENU.length/3));
+  return [a,bb];
+})();
+function rowRect(i){
+  const col=i<SPLITS[0]?0:(i<SPLITS[1]?1:2);
+  const r=i-(col===0?0:SPLITS[col-1]);
+  return {x:COLX[col], y:60+r*ROWH, col, r};
+}
 function wrapText(c,text,maxW){
   const words=text.split(' '),lines=[];let cur='';
   for(const w of words){
@@ -1392,42 +1495,117 @@ function wrapText(c,text,maxW){
   return lines;
 }
 function drawMenu(){
-  const c=menu.cx;c.clearRect(0,0,620,660);
-  c.fillStyle='rgba(10,20,24,0.94)';c.fillRect(0,0,620,660);
-  c.fillStyle='#b5713f';c.fillRect(0,0,620,5);
-  c.font='700 16px "Space Mono",monospace';c.fillStyle='#b5713f';c.fillText('CONSTANTS',24,38);
-  c.fillStyle='#7d8b8c';c.font='700 11px "Space Mono",monospace';c.textAlign='right';
-  c.fillText('STICK \u2195 ROW   \u2194 VALUE   Y CLOSE',596,38);c.textAlign='left';
-  const top=Math.max(0,Math.min(MENU.length-ROWS,menuSel-Math.floor(ROWS/2)));
-  for(let r=0;r<ROWS&&top+r<MENU.length;r++){
-    const [label,key,mn,mx]=MENU[top+r],i=top+r,y=76+r*33,on=i===menuSel;
-    if(key===null){c.font='700 12px "Space Mono",monospace';c.fillStyle='#4d6166';
-      c.fillText(label,26,y);continue;}
-    if(on){c.fillStyle='rgba(181,113,63,0.20)';c.fillRect(14,y-18,592,27);}
-    c.font='700 15px "Space Mono",monospace';
-    c.fillStyle=on?'#e8e3d4':'#93a0a0';c.fillText(label,26,y);
-    if(key.charCodeAt(0)===33){                       /* action row */
-      c.fillStyle=on?'#b5713f':'#4d6166';
-      c.textAlign='right';c.fillText('PUSH \u25B6',594,y);c.textAlign='left';
+  const c=menu.cx;
+  c.clearRect(0,0,MW,MH);
+  c.fillStyle='rgba(10,20,24,0.95)';c.fillRect(0,0,MW,MH);
+  c.fillStyle='#b5713f';c.fillRect(0,0,MW,5);
+  c.font='700 16px "Space Mono",monospace';c.fillStyle='#b5713f';c.fillText('CONSTANTS',16,34);
+  c.fillStyle='#7d8b8c';c.font='700 11px "Space Mono",monospace';
+  c.fillText('POINT WITH THE ROD HAND, HOLD THE TRIGGER TO DRAG. LEFT HAND STILL FISHES. Y CLOSES.',170,34);
+  for(let i=0;i<MENU.length;i++){
+    const [label,key,mn,mx]=MENU[i];
+    const R=rowRect(i), X=R.x, y=R.y;
+    if(key===null){
+      c.font='700 11px "Space Mono",monospace';c.fillStyle='#4d6166';
+      c.fillText(label,X+4,y);continue;
+    }
+    const on=i===menuSel;
+    if(on){c.fillStyle='rgba(181,113,63,0.22)';c.fillRect(X-6,y-15,COLW,ROWH-1);}
+    c.font='700 12px "Space Mono",monospace';
+    c.fillStyle=on?'#e8e3d4':'#93a0a0';c.fillText(label,X+4,y);
+    if(key.charCodeAt(0)===33){
+      c.fillStyle=on?'#b5713f':'#4d6166';c.fillText('PUSH \u25B6',X+TRACKX,y);
       continue;
     }
-    const f=(P[key]-mn)/(mx-mn||1);
-    c.fillStyle='#243438';c.fillRect(340,y-11,140,7);
-    c.fillStyle=on?'#b5713f':'#4d6166';c.fillRect(340,y-11,140*Math.max(0,Math.min(1,f)),7);
+    const lo=rowMin(key,mn), hi=rowMax(key,mx);
+    const f=(P[key]-lo)/((hi-lo)||1);
+    c.fillStyle='#243438';c.fillRect(X+TRACKX,y-9,TRACKW,7);
+    c.fillStyle=on?'#b5713f':'#4d6166';c.fillRect(X+TRACKX,y-9,TRACKW*Math.max(0,Math.min(1,f)),7);
     c.fillStyle=on?'#e8e3d4':'#93a0a0';c.textAlign='right';
-    c.fillText(P[key].toFixed(2),594,y);c.textAlign='left';
+    c.fillText(P[key].toFixed(Math.abs(P[key])<10?2:1),X+VALX,y);c.textAlign='left';
+    const m=rx(key);
+    c.fillStyle=m>1?'#3a2a1c':'#1b262a';c.fillRect(X+RNGX,y-13,RNGW,16);
+    c.fillStyle=m>1?'#e0a45e':'#5d6f72';
+    c.font='700 10px "Space Mono",monospace';
+    c.fillText(m===1?'1x':(m===10?'10x':'100x'),X+RNGX+6,y-1);
   }
-  if(top>0){c.fillStyle='#4d6166';c.fillText('\u25B2',300,58);}
-  if(top+ROWS<MENU.length){c.fillStyle='#4d6166';c.fillText('\u25BC',300,520);}
-  c.fillStyle='#0b1519';c.fillRect(14,534,592,112);
-  c.fillStyle='#b5713f';c.fillRect(14,534,592,2);
+  /* description strip */
   const sel=MENU[menuSel];
-  c.font='700 13px "Space Mono",monospace';c.fillStyle='#b5713f';c.fillText(sel[0],26,558);
+  c.fillStyle='#0b1519';c.fillRect(14,MH-86,MW-28,76);
+  c.fillStyle='#b5713f';c.fillRect(14,MH-86,MW-28,2);
+  c.font='700 13px "Space Mono",monospace';c.fillStyle='#b5713f';
+  c.fillText(sel[0],26,MH-64);
   c.font='400 13px "Space Mono",monospace';c.fillStyle='#a9b5b3';
   const body=(sel[1]==='!copy'&&copyState)?('Settings '+copyState+'. '+sel[5]):(sel[5]||'');
-  const lines=wrapText(c,body,564);
-  for(let i=0;i<lines.length&&i<4;i++) c.fillText(lines[i],26,580+i*18);
+  const lines=wrapText(c,body,MW-80);
+  for(let i=0;i<lines.length&&i<3;i++) c.fillText(lines[i],26,MH-45+i*17);
   menu.tex.needsUpdate=true;
+}
+
+/* ---- pointer: ray from the rod hand onto the panel ---- */
+const _ray=new THREE.Raycaster();
+const _rayOrigin=new THREE.Vector3(), _rayDir=new THREE.Vector3();
+const pointerDot=new THREE.Mesh(new THREE.SphereGeometry(0.008,8,6),
+  new THREE.MeshBasicMaterial({color:0xffb320,depthTest:false}));
+pointerDot.renderOrder=30;pointerDot.visible=false;scene.add(pointerDot);
+const rayLine=(()=>{
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3));
+  const m=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xffb320,transparent:true,opacity:0.5}));
+  m.renderOrder=30;m.visible=false;scene.add(m);return m;
+})();
+let dragKey=null, dragRow=-1;
+function menuPointer(trigPressed, trigEdge){
+  if(!menuOpen||!rodGrip){pointerDot.visible=false;rayLine.visible=false;dragKey=null;return;}
+  rodGrip.getWorldPosition(_rayOrigin);
+  _rayDir.set(0,0,-1).applyQuaternion(_q).normalize();
+  _ray.set(_rayOrigin,_rayDir);
+  const hit=_ray.intersectObject(menu.mesh,false)[0];
+  rayLine.visible=true;
+  const rp=rayLine.geometry.attributes.position.array;
+  rp[0]=_rayOrigin.x;rp[1]=_rayOrigin.y;rp[2]=_rayOrigin.z;
+  const end=hit?hit.point:_rayOrigin.clone().addScaledVector(_rayDir,2.0);
+  rp[3]=end.x;rp[4]=end.y;rp[5]=end.z;
+  rayLine.geometry.attributes.position.needsUpdate=true;
+  if(!hit||!hit.uv){pointerDot.visible=false;if(!trigPressed)dragKey=null;return;}
+  pointerDot.visible=true;pointerDot.position.copy(hit.point);
+  const px=hit.uv.x*MW, py=(1-hit.uv.y)*MH;
+  /* which row */
+  let row=-1;
+  for(let i=0;i<MENU.length;i++){
+    if(MENU[i][1]===null) continue;
+    const R=rowRect(i);
+    if(px>=R.x-6&&px<=R.x-6+COLW&&py>=R.y-15&&py<=R.y+ROWH-16){row=i;break;}
+  }
+  if(row<0){if(!trigPressed)dragKey=null;return;}
+  menuSel=row;
+  const [,key,mn,mx,st]=MENU[row], R=rowRect(row);
+  if(trigEdge){
+    if(key.charCodeAt(0)===33){ runAction(key); return; }
+    if(px>=R.x+RNGX&&px<=R.x+RNGX+RNGW){
+      RANGEX[key]=rx(key)===1?10:(rx(key)===10?100:1);
+      say(MENU[row][0]+' range '+(RANGEX[key])+'x');
+      return;
+    }
+    dragKey=key;dragRow=row;
+  }
+  if(trigPressed&&dragKey===key){
+    const lo=rowMin(key,mn), hi=rowMax(key,mx);
+    let f=(px-(R.x+TRACKX))/TRACKW;
+    f=Math.max(0,Math.min(1,f));
+    let v=lo+(hi-lo)*f;
+    if(st>=1) v=Math.round(v/st)*st;
+    P[key]=v;
+    onSettingChanged(key);
+  }
+  if(!trigPressed) dragKey=null;
+}
+function onSettingChanged(key){
+  if(key==='lineWt'||key==='tippetLen'||key==='massMul')rebuildMasses();
+  if(key==='rodE'||key==='rodMass'||key==='tipSoft'||key==='rodTaper'){lastTipSoft=P.tipSoft;lastTaper=P.rodTaper;rebuildRod();}
+  if(key==='current')waterMat.uniforms.uQ.value=P.current;
+  if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
+  if(key==='speckSize')speckMat.uniforms.uSize.value=P.speckSize;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1538,7 +1716,7 @@ function resetCast(){
    ════════════════════════════════════════════════════════════ */
 const clock=new THREE.Clock();
 let started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
-let prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=false,prevRodPinch=false;
+let prevTrigR=false,prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=false,prevRodPinch=false;
 let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft, lastTaper=P.rodTaper;
 const _lh=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_netP=new THREE.Vector3();
 
@@ -1568,31 +1746,11 @@ renderer.setAnimationLoop(()=>{
   const ax=offPad&&offPad.axes.length>=4?offPad.axes[2]:0;
   const ay=offPad&&offPad.axes.length>=4?offPad.axes[3]:0;
 
-  if(menuOpen){
-    const mag=Math.hypot(ax,ay);
-    if(mag<0.30) stickReady=true;
-    if(stickReady&&mag>0.72&&Math.abs(ay)>Math.abs(ax)*1.6){
-      let s=menuSel;
-      do{s=(s+(ay>0?1:-1)+MENU.length)%MENU.length;}while(MENU[s][1]===null);
-      menuSel=s;stickReady=false;
-    }
-    if(Math.abs(ax)>0.3&&Math.abs(ax)>Math.abs(ay)*1.2&&MENU[menuSel][1]){
-      const key=MENU[menuSel][1];
-      if(key.charCodeAt(0)===33){
-        if(stickReady&&ax>0.5){runAction(key);stickReady=false;}
-      } else {
-        const[,,mn,mx,st]=MENU[menuSel];
-        P[key]=Math.min(mx,Math.max(mn,P[key]+Math.sign(ax)*st*dt*7));
-        if(key==='lineWt'||key==='tippetLen')rebuildMasses();
-        if(key==='current')waterMat.uniforms.uQ.value=P.current;
-        if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
-        if(key==='speckSize')speckMat.uniforms.uSize.value=P.speckSize;
-      }
-    }
-  } else if(Math.hypot(ax,ay)>0.15){
+  /* the menu is pointer-driven now, so the stick always walks and the left
+     hand keeps full line control while you tune */
+  if(Math.hypot(ax,ay)>0.15){
     camera.getWorldQuaternion(_camQ);
     const e=new THREE.Euler().setFromQuaternion(_camQ,'YXZ');
-    /* pushing the stick up walks forward */
     const yaw=e.y,fwd=(P.invertY>0.5?-ay:ay),str=ax;
     const vx=Math.sin(yaw)*fwd+Math.cos(yaw)*str;
     const vz=Math.cos(yaw)*fwd-Math.sin(yaw)*str;
@@ -1622,7 +1780,7 @@ renderer.setAnimationLoop(()=>{
   handTargets();
 
   /* ---- left hand ---- */
-  handMode=menuOpen?0:(trigL>0.85?2:(trigL>0.15?1:0));
+  handMode=(trigL>0.85?2:(trigL>0.15?1:0));
   const haveLeft=!!offGrip;
   if(haveLeft){
     offGrip.getWorldPosition(_lh);
@@ -1654,6 +1812,9 @@ renderer.setAnimationLoop(()=>{
   corkHeld=rodPinch&&corkIdx>0;
 
   /* reel in */
+  const trigRDown=trigR>0.6;
+  menuPointer(trigRDown, trigRDown&&!prevTrigR);
+  prevTrigR=trigRDown;
   if(trigR>0.05&&!menuOpen){
     let take=P.reelSpeed*trigR*dt;
     const slack=offSpool-lineOut-rodArc;
