@@ -86,7 +86,7 @@ import * as THREE from 'three';
    ════════════════════════════════════════════════════════════ */
 const P = {
   nodeLen:0.20, leadNode:0.06, leaderLen:2.74, tippetLen:0.90,
-  stiffMul:0.872, rodDamp:14.0, tipSoft:1.00, dragMul:1.00, lineWt:5.0, statFric:0.05,
+  stiffMul:0.474, rodDamp:14.0, tipSoft:0.60, dragMul:1.00, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
@@ -115,9 +115,9 @@ const MENU=[
   ['Spool drag','spoolDrag',0.05,3.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
   ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
   ['— ROD & TACKLE —',null,0,0,0,''],
-  ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 0.87 reproduces a real 9 ft 5wt: tip deflects a third of rod length under a 1.6 N load.'],
+  ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 0.47 at the default taper reproduces a real 9 ft 5wt: tip deflects a third of rod length under a 1.6 N load. Recalibrate this if you change Tip softness.'],
   ['Rod damping','rodDamp',0.00,60.0,1.00,'Internal damping of the blank, per second. Damps how fast the rod deforms, not how it swings. Around 14 kills tip ring in about half a second, which is what a good graphite rod does. Zero rings for three seconds.'],
-  ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip. 1.00 follows the real second moment of area of a tapered tube — the tip is roughly 500 times softer than the butt. Lower flattens it.'],
+  ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip, as an exponent on the blank\u2019s real second moment of area. 1.00 is the true tube, whose tip is 500x softer than the butt and goes noodly at this node count. 0.60 keeps the shape without the flop.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
   ['Tippet (N)','tippet',2.00,60.0,0.50,'Breaking strain. 5X is 4.75 lb, about 21 N. 6X is 15.6 N, 4X is 26.7 N.'],
   ['Line float','buoyancy',0.20,3.00,0.05,'How firmly the line is held on the surface film once it is riding on it.'],
@@ -156,8 +156,8 @@ const MENU=[
 
 /* values derived from real tackle — see the notes beside each menu row */
 const PHYSICAL={
-  stiffMul:0.872,   /* calibrated with the true tube taper: tip deflects L/3 under 1.6 N */
-  rodDamp:14.0, tipSoft:1.00,
+  stiffMul:0.474,   /* recalibrated at tipSoft 0.60: tip deflects L/3 under 1.6 N */
+  rodDamp:14.0, tipSoft:0.60,
   leaderLen:2.74, tippetLen:0.90, leadNode:0.06,
   dragMul:1.00,     /* dragK already carries 0.5*rho*Cd*A/m with Cd=1.1 */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
@@ -274,7 +274,7 @@ function rebuildRod(){
     const t=i/(RN-1);
     if(i<2) rinvM[i]=0;
     else{const m=0.014*(1-0.75*t);rinvM[i]=1/m;rdragK[i]=0.5*1.2*(0.006*ROD_SEG)/m;}
-    rbendK[i]=Math.pow(rodI[i],P.tipSoft);
+    rbendK[i]=Math.max(Math.pow(rodI[i],P.tipSoft),0.03);
   }
 }
 rebuildRod();
@@ -549,8 +549,12 @@ function physics(dt){
     simTime+=h;
     const a=s/SUB;
     /* rod butt is driven by the hand */
+    for(let c=0;c<6;c++) rprd[c]=rpos[c];
     rpos[0]=_p0.x+(_k0.x-_p0.x)*a;rpos[1]=_p0.y+(_k0.y-_p0.y)*a;rpos[2]=_p0.z+(_k0.z-_p0.z)*a;
     rpos[3]=_p1.x+(_k1.x-_p1.x)*a;rpos[4]=_p1.y+(_k1.y-_p1.y)*a;rpos[5]=_p1.z+(_k1.z-_p1.z)*a;
+    /* the two driven nodes carry the hand's motion — without their velocities
+       the damping reference below is garbage */
+    for(let c=0;c<6;c++) rvel[c]=(rpos[c]-rprd[c])/h;
     for(let i=2;i<RN;i++){
       const p=i*3;
       rvel[p+1]-=9.81*h;
@@ -642,16 +646,27 @@ function physics(dt){
 
     for(let i=2;i<RN;i++){const p=i*3;
       rvel[p]=(rpos[p]-rprd[p])/h;rvel[p+1]=(rpos[p+1]-rprd[p+1])/h;rvel[p+2]=(rpos[p+2]-rprd[p+2])/h;}
-    /* Internal blank damping. Damping toward zero would fight the hand; damping
-       toward the velocity the rod would have if it were rigid removes only the
-       deformation, which is what kills tip ring without deadening the stroke. */
+    /* Internal blank damping. The reference is the velocity field of a RIGID
+       rod moving with the hand: v0 plus omega cross r, with omega recovered
+       from the two driven nodes. Damping toward that removes only deformation.
+       Damping toward zero — which is what a bad reference amounts to — drags
+       the whole rod backwards and folds it at the first free node. */
     if(P.rodDamp>0.01){
-      const kd=Math.min(1,P.rodDamp*h);
-      for(let i=2;i<RN;i++){
-        const p=i*3;
-        for(let c=0;c<3;c++){
-          const vref=rvel[c]+(rvel[3+c]-rvel[c])*i;
-          rvel[p+c]+=kd*(vref-rvel[p+c]);
+      const kd=Math.min(0.5,P.rodDamp*h);
+      const rx=rpos[3]-rpos[0],ry=rpos[4]-rpos[1],rz=rpos[5]-rpos[2];
+      const r2=rx*rx+ry*ry+rz*rz;
+      if(r2>1e-9){
+        const dvx=rvel[3]-rvel[0],dvy=rvel[4]-rvel[1],dvz=rvel[5]-rvel[2];
+        const ox=(ry*dvz-rz*dvy)/r2, oy=(rz*dvx-rx*dvz)/r2, oz=(rx*dvy-ry*dvx)/r2;
+        for(let i=2;i<RN;i++){
+          const p=i*3;
+          const px=rpos[p]-rpos[0],py=rpos[p+1]-rpos[1],pz=rpos[p+2]-rpos[2];
+          const vx=rvel[0]+(oy*pz-oz*py);
+          const vy=rvel[1]+(oz*px-ox*pz);
+          const vz=rvel[2]+(ox*py-oy*px);
+          rvel[p]  +=kd*(vx-rvel[p]);
+          rvel[p+1]+=kd*(vy-rvel[p+1]);
+          rvel[p+2]+=kd*(vz-rvel[p+2]);
         }
       }
     }
