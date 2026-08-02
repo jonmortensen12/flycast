@@ -1539,7 +1539,7 @@ function resetCast(){
 const clock=new THREE.Clock();
 let started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
 let prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=false,prevRodPinch=false;
-let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft;
+let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft, lastTaper=P.rodTaper;
 const _lh=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_netP=new THREE.Vector3();
 
 function pulse(s){
