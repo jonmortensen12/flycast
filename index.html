@@ -88,8 +88,8 @@ const P = {
   nodeLen:0.20, leadNode:0.06, leaderLen:2.74, tippetLen:0.90,
   rodModel:1, rodE:200.0, rodMass:0.077,
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
-  massMul:1.00, lineBend:1.00, lineSmooth:0.15, dragMul:1.00, lineWt:5.0, statFric:0.05,
-  reelSpeed:2.60, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
+  massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, dragMul:1.00, lineWt:5.0, statFric:0.05,
+  reelSpeed:2.60, reelPower:60.0, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
   current:0.55, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:1.00,
@@ -104,6 +104,8 @@ const MENU=[
   ['Classic tackle','!classicrod',0,0,0,'Restores the rod AND line as they were in the build you liked: legacy rod model, the earlier stiffness curve at 0.85, no damping, line mass 6.2x real, matching air drag, and uniform 20 cm node spacing.'],
   ['Load my default','!mydefault',0,0,0,'Push right to load whatever you last saved as your default.'],
   ['Save as my default','!save',0,0,0,'Push right to store every current value as your default.'],
+  ['Hook a test fish','!hookfish',0,0,0,'Hooks the fish nearest your fly straight away, so you can work on the fight without having to earn it first.'],
+  ['Panel scale','menuScale',0.40,3.00,0.05,'Size of this panel. The plus and minus buttons in its top right do the same thing, and the handle at the top left drags it around.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
   ['— ROD MODEL —',null,0,0,0,''],
   ['Rod model','rodModel',0,1,1,'0 is the original position-based rod with an empirical stiffness curve. 1 is an XPBD beam whose compliance comes from the blank\u2019s real second moment of area and modulus, so stiffness and frequency both follow from physics instead of being tuned separately.'],
@@ -130,6 +132,7 @@ const MENU=[
   ['Taper model','rodTaper',0,1,1,'0 uses the earlier hand-drawn stiffness curve. 1 uses the real second moment of area of a tapered tube, shaped by Tip softness below.'],
   ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip, as an exponent on the blank\u2019s real second moment of area. 1.00 is the true tube, whose tip is 500x softer than the butt and goes noodly at this node count. 0.60 keeps the shape without the flop.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
+  ['Reel power N','reelPower',1.00,200.0,1.00,'Tension at which the reel finally stalls. Default 60 N is well above a 21 N tippet, so cranking always beats the fish and you can pull hard enough to break yourself off. Set it below tippet strength if you would rather the reel give out before the line does.'],
   ['Tippet (N)','tippet',2.00,60.0,0.50,'Breaking strain. 5X is 4.75 lb, about 21 N. 6X is 15.6 N, 4X is 26.7 N.'],
   ['Line float','buoyancy',0.20,3.00,0.05,'How firmly the line is held on the surface film once it is riding on it.'],
   ['Surface stick','stick',0.00,4.00,0.10,'Surface tension. Higher makes line cling and take a harder pull to lift off.'],
@@ -342,7 +345,7 @@ let lineOut=8.0;          /* arc from fly to tiptop */
 let offSpool=8.0+ROD_ARC+2.2;
 let rodArc=ROD_ARC;       /* live path length through the guides */
 let handMode=0,rodPinch=false,wrapTotal=0;
-let clickAcc=0,slipOut=0,spoolOut=0;
+let clickAcc=0,slipOut=0,spoolOut=0,reeling=false;
 let probeOut=0,probeIn=0,probeThr=0,probeSp=0;
 
 function lineProfile(s){
@@ -579,6 +582,21 @@ function airDrag(i,h){
 const RIDE=0.010, BREAK=2.6;
 function waterAndGround(i,h,t){
   const p=i*3,x=pos[p],z=pos[p+2];
+  /* a hooked fish lives below the film and must be free to sound, so the fly
+     node skips the surface clamp and just gets water drag plus a bed floor */
+  if(i===0&&hooked&&hooked.state==='hooked'){
+    const gyf=bedY(x,z);
+    if(bedDepth(x,z)>0.02){
+      computeFlow(x,z);
+      let rx2=vel[p]-flowX, ry2=vel[p+1], rz2=vel[p+2]-flowZ;
+      const rs=Math.sqrt(rx2*rx2+ry2*ry2+rz2*rz2);
+      const kk=1/(1+(3.5*rs+2.5)*h);
+      rx2*=kk;ry2*=kk;rz2*=kk;
+      vel[p]=flowX+rx2;vel[p+1]=ry2;vel[p+2]=flowZ+rz2;
+    }
+    if(pos[p+1]<gyf+0.06){pos[p+1]=gyf+0.06;if(vel[p+1]<0)vel[p+1]=0;}
+    return;
+  }
   /* cheap bail-out for line still high in the air — one surfY call instead of
      bedY + bedDepth + filmY + computeFlow. Far bank climbs, so allow for it. */
   const sy=surfY(x);
@@ -708,7 +726,9 @@ function physics(dt){
         slipOut+=dl;
       }
       const thr=P.spoolDrag*1.15+P.statFric;
-      if(Tsp>thr&&offSpool<TOTAL_LINE){
+      /* a hand on the crank holds the spool: a fish cannot take line while you
+         are actively reeling, which is what makes the reel able to win */
+      if(Tsp>thr&&offSpool<TOTAL_LINE&&!reeling){
         let give=0;
         if(handHeld&&handIdx>0){
           const Lr=offSpool-sArc(handIdx);
@@ -1077,6 +1097,7 @@ class Trout{
     this.feedT=4+Math.random()*8;
     this.riseT=1+Math.random()*5;this.riseAnim=0;this.evaluated=false;
     this.run=new THREE.Vector3(-1,0,0);this.runT=0;
+    this.beh='cruise';this.behT=0;this.effort=0.5;
     this.mesh=makeTrout(l.len);scene.add(this.mesh);
     this.marker=makeMarker();scene.add(this.marker);
   }
@@ -1084,20 +1105,49 @@ class Trout{
     const x=this.p?this.p.x:this.lie.x,z=this.p?this.p.z:this.lie.z;
     return surfY(x)-Math.min(0.42,bedDepth(x,z)*(this.feeding?0.36:0.62));
   }
+  newRunDir(){
+    let ax=pos[0]-rpos[0],az=pos[2]-rpos[2];
+    const dl=Math.hypot(ax,az)||1;ax/=dl;az/=dl;          /* away from the angler */
+    const an=Math.random()*Math.PI*2;
+    this.run.set(ax*0.75+Math.cos(an)*0.85,0,az*0.75+Math.sin(an)*0.85).normalize();
+  }
+  pickBehaviour(){
+    const s=this.stamina, r=Math.random();
+    if(s<0.22){ this.beh=r<0.75?'easy':'cruise'; this.behT=1.6+Math.random()*2.2; }
+    else if(r<0.28){ this.beh='run';    this.behT=1.0+Math.random()*1.8; this.newRunDir(); }
+    else if(r<0.48){ this.beh='sound';  this.behT=1.2+Math.random()*1.6; }
+    else if(r<0.58&&s>0.5){ this.beh='jump'; this.behT=0.60; this.newRunDir(); }
+    else if(r<0.80){ this.beh='cruise'; this.behT=1.0+Math.random()*1.6; this.newRunDir(); }
+    else { this.beh='easy'; this.behT=1.0+Math.random()*1.6; }
+    say('fish: '+this.beh);
+  }
+  /* Steady pull scales with length; a surge is about 2.6x that. A 40 cm rainbow
+     pulls roughly 5 N steady and 12 N in a first run, against a 21 N 5X tippet —
+     so a green fish can genuinely break you off, and can out-pull the reel. */
   drive(h){
-    let ax=rpos[0]-pos[0],az=rpos[2]-pos[2];
+    this.behT-=h;
+    if(this.behT<=0) this.pickBehaviour();
+    let ax=pos[0]-rpos[0],az=pos[2]-rpos[2];
     const dl=Math.hypot(ax,az)||1;ax/=dl;az/=dl;
-    this.runT-=h;
-    if(this.runT<=0){
-      this.runT=0.8+Math.random()*1.7;
-      const an=Math.random()*Math.PI*2;
-      this.run.set(Math.cos(an)*0.8-ax*0.9,0,Math.sin(an)*0.8-az*0.9).normalize();
+    const F=12*this.len*P.fishPower*(0.25+0.75*this.stamina);
+    let fx=0,fy=0,fz=0;
+    switch(this.beh){
+      case 'run':   fx=this.run.x*F*2.6; fz=this.run.z*F*2.6; this.effort=1.6; break;
+      case 'sound': fy=-F*1.5; fx=ax*F*0.5; fz=az*F*0.5;      this.effort=1.1; break;
+      case 'jump':  fy=F*3.2;  fx=this.run.x*F*0.9; fz=this.run.z*F*0.9; this.effort=1.4; break;
+      case 'easy':  fx=-ax*F*0.18; fz=-az*F*0.18;             this.effort=0.15; break;
+      default:      fx=this.run.x*F*0.7; fz=this.run.z*F*0.7; this.effort=0.5;
     }
-    const pw=9.5*P.fishPower*(0.25+0.75*this.stamina)*(0.7+this.len);
+    const im=invM[0];
+    vel[0]+=fx*im*h; vel[1]+=fy*im*h; vel[2]+=fz*im*h;
+    /* the current carries the fish too */
     computeFlow(pos[0],pos[2]);
-    vel[0]+=this.run.x*pw*h+flowX*0.5*h;
-    vel[2]+=this.run.z*pw*h+flowZ*0.5*h;
-    vel[1]+=(surfY(pos[0])-0.25-pos[1])*4*h;
+    vel[0]+=(flowX-vel[0])*Math.min(1,2.5*h);
+    vel[2]+=(flowZ-vel[2])*Math.min(1,2.5*h);
+    if(this.beh!=='jump'){
+      const want=surfY(pos[0])-Math.min(0.55,bedDepth(pos[0],pos[2])*0.6);
+      vel[1]+=(want-pos[1])*3.0*h;
+    }
   }
   update(dt,t){
     if(this.state==='hooked'){
@@ -1372,6 +1422,7 @@ function makePanel(w,h,cw,ch){
 const hud=makePanel(0.44,0.38,512,440);
 hud.mesh.position.set(-0.56,1.16,-0.64);hud.mesh.rotation.y=0.58;player.add(hud.mesh);
 const MW=1400, MH=780, ROWH=24, COLW=450, COLX=[16,478,940];
+const HANDLE={x:0,y:8,w:250,h:30}, SCALE_M={x:1240,y:8,w:34,h:30}, SCALE_P={x:1282,y:8,w:34,h:30};
 const TRACKX=168, TRACKW=118, VALX=336, RNGX=352, RNGW=52;
 const menu=makePanel(1.40,0.78,MW,MH);
 menu.mesh.position.set(0,1.45,-1.05);menu.mesh.visible=false;player.add(menu.mesh);
@@ -1399,9 +1450,10 @@ function drawHUD(){
     ['GUIDE WRAP',(wrapTotal*180/Math.PI).toFixed(0)+'\u00B0'],
     ['TIP vs HOLD',probeOut.toFixed(2)+' / '+probeThr.toFixed(2)+' N'],
     ['DRIFT',hooked?'\u2014':M.drift.toFixed(0)+' %'],
-    ['TENSION',M.tension.toFixed(1)+' N'],
+    ['TENSION',M.tension.toFixed(1)+' / '+P.tippet.toFixed(0)+' N'],
     ['FEEDING',feed+' of '+fishes.length],
     ['HOOKED',hooked?(hooked.stamina*100).toFixed(0)+' % left':'\u2014'],
+    ['FISH DOING',hooked?hooked.beh.toUpperCase():'\u2014'],
   ];
   rows.forEach(([k,v],i)=>{const y=34+i*30;
     c.fillStyle='#7d8b8c';c.fillText(k,24,y);
@@ -1461,14 +1513,50 @@ function runAction(key){
     if(userDefault){applyPreset(userDefault);say('your default loaded');}
     else say('nothing saved yet');
   }
+  else if(key==='!hookfish'){
+    let best=null,bd=1e9;
+    for(const f of fishes){
+      if(f.state!=='holding') continue;
+      const d=Math.hypot(f.p.x-pos[0],f.p.z-pos[2]);
+      if(d<bd){bd=d;best=f;}
+    }
+    if(best){
+      /* bring the fish to the fly rather than teleporting the fly, so the line
+         is not snapped taut out of nowhere */
+      best.p.set(pos[0],pos[1],pos[2]);
+      best.state='hooked';best.stamina=1;best.behT=0;best.effort=0.5;
+      hooked=best;invM[0]=1/(0.055+best.len*0.09);
+      say('test fish on \u2014 '+(best.len*100).toFixed(0)+' cm');
+    } else say('no fish available to hook');
+  }
   else if(key==='!copy'){copySettings();say('settings copied');}
 }
 let menuOpen=false, menuSel=1;
 /* per-row range expansion, so no setting can ever be out of reach */
-const RANGEX={};
+const RANGEX={}, RANGEWIN={};
+const RANGE_STEPS=[0.01,0.1,1,10,100];
 const rx=k=>RANGEX[k]||1;
-const rowMin=(k,mn)=>mn>0?mn/rx(k):mn*rx(k);
-const rowMax=(k,mx)=>mx*rx(k);
+/* Above 1x the range simply widens. Below 1x it zooms in around whatever the
+   value was when you pressed the button, and that window is frozen so the
+   slider does not slide out from under you while dragging. */
+function rowRange(key,mn,mx){
+  const m=rx(key);
+  if(m>=1) return [mn>0?mn/m:mn*m, mx*m];
+  const w=RANGEWIN[key];
+  return w?w:[mn,mx];
+}
+function cycleRange(key,mn,mx){
+  const i=RANGE_STEPS.indexOf(rx(key));
+  const m=RANGE_STEPS[(i+1)%RANGE_STEPS.length];
+  RANGEX[key]=m;
+  if(m<1){
+    const span=(mx-mn)*m, v=P[key];
+    let lo=v-span/2;
+    if(lo<mn-span) lo=mn;
+    RANGEWIN[key]=[lo,lo+span];
+  } else delete RANGEWIN[key];
+  return m;
+}
 /* layout: MENU split into two columns at a header boundary */
 /* split at the two header boundaries closest to the thirds, so sections
    never straddle a column break */
@@ -1500,8 +1588,20 @@ function drawMenu(){
   c.fillStyle='rgba(10,20,24,0.95)';c.fillRect(0,0,MW,MH);
   c.fillStyle='#b5713f';c.fillRect(0,0,MW,5);
   c.font='700 16px "Space Mono",monospace';c.fillStyle='#b5713f';c.fillText('CONSTANTS',16,34);
+  /* grab handle */
+  c.fillStyle=panelDrag?'#3a2a1c':'#1b262a';c.fillRect(HANDLE.x+8,HANDLE.y,HANDLE.w,HANDLE.h);
+  c.fillStyle=panelDrag?'#e0a45e':'#6d7f82';c.font='700 12px "Space Mono",monospace';
+  c.fillText('\u2725  DRAG TO MOVE',HANDLE.x+20,HANDLE.y+20);
   c.fillStyle='#7d8b8c';c.font='700 11px "Space Mono",monospace';
-  c.fillText('POINT WITH THE ROD HAND, HOLD THE TRIGGER TO DRAG. LEFT HAND STILL FISHES. Y CLOSES.',170,34);
+  c.fillText('POINT WITH THE ROD HAND, TRIGGER TO DRAG. LEFT HAND STILL FISHES. Y CLOSES.',HANDLE.w+30,34);
+  /* scale buttons */
+  for(const [b,lab] of [[SCALE_M,'\u2212'],[SCALE_P,'+']]){
+    c.fillStyle='#1b262a';c.fillRect(b.x,b.y,b.w,b.h);
+    c.fillStyle='#a9b5b3';c.font='700 18px "Space Mono",monospace';
+    c.fillText(lab,b.x+11,b.y+22);
+  }
+  c.fillStyle='#5d6f72';c.font='700 11px "Space Mono",monospace';
+  c.fillText(P.menuScale.toFixed(2)+'x',SCALE_P.x+42,SCALE_P.y+20);
   for(let i=0;i<MENU.length;i++){
     const [label,key,mn,mx]=MENU[i];
     const R=rowRect(i), X=R.x, y=R.y;
@@ -1517,7 +1617,7 @@ function drawMenu(){
       c.fillStyle=on?'#b5713f':'#4d6166';c.fillText('PUSH \u25B6',X+TRACKX,y);
       continue;
     }
-    const lo=rowMin(key,mn), hi=rowMax(key,mx);
+    const [lo,hi]=rowRange(key,mn,mx);
     const f=(P[key]-lo)/((hi-lo)||1);
     c.fillStyle='#243438';c.fillRect(X+TRACKX,y-9,TRACKW,7);
     c.fillStyle=on?'#b5713f':'#4d6166';c.fillRect(X+TRACKX,y-9,TRACKW*Math.max(0,Math.min(1,f)),7);
@@ -1527,7 +1627,7 @@ function drawMenu(){
     c.fillStyle=m>1?'#3a2a1c':'#1b262a';c.fillRect(X+RNGX,y-13,RNGW,16);
     c.fillStyle=m>1?'#e0a45e':'#5d6f72';
     c.font='700 10px "Space Mono",monospace';
-    c.fillText(m===1?'1x':(m===10?'10x':'100x'),X+RNGX+6,y-1);
+    c.fillText(m>=1?(m+'x'):(m===0.1?'.1x':'.01x'),X+RNGX+4,y-1);
   }
   /* description strip */
   const sel=MENU[menuSel];
@@ -1554,9 +1654,13 @@ const rayLine=(()=>{
   const m=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xffb320,transparent:true,opacity:0.5}));
   m.renderOrder=30;m.visible=false;scene.add(m);return m;
 })();
-let dragKey=null, dragRow=-1;
+let dragKey=null, dragRow=-1, panelDrag=false, panelDist=1.05;
+const _pw=new THREE.Vector3(), _camWorld=new THREE.Vector3();
 function menuPointer(trigPressed, trigEdge){
-  if(!menuOpen||!rodGrip){pointerDot.visible=false;rayLine.visible=false;dragKey=null;return;}
+  if(!menuOpen||!rodGrip){
+    pointerDot.visible=false;rayLine.visible=false;dragKey=null;panelDrag=false;
+    return false;
+  }
   rodGrip.getWorldPosition(_rayOrigin);
   _rayDir.set(0,0,-1).applyQuaternion(_q).normalize();
   _ray.set(_rayOrigin,_rayDir);
@@ -1567,9 +1671,30 @@ function menuPointer(trigPressed, trigEdge){
   const end=hit?hit.point:_rayOrigin.clone().addScaledVector(_rayDir,2.0);
   rp[3]=end.x;rp[4]=end.y;rp[5]=end.z;
   rayLine.geometry.attributes.position.needsUpdate=true;
-  if(!hit||!hit.uv){pointerDot.visible=false;if(!trigPressed)dragKey=null;return;}
+  /* keep dragging the panel even once the ray leaves it */
+  if(panelDrag){
+    if(!trigPressed){panelDrag=false;}
+    else{
+      _pw.copy(_rayOrigin).addScaledVector(_rayDir,panelDist);
+      player.updateMatrixWorld(true);
+      menu.mesh.position.copy(player.worldToLocal(_pw.clone()));
+      camera.getWorldPosition(_camWorld);
+      menu.mesh.lookAt(_camWorld);
+      menu.mesh.rotateY(Math.PI);
+      return true;
+    }
+  }
+  if(!hit||!hit.uv){pointerDot.visible=false;if(!trigPressed)dragKey=null;return false;}
   pointerDot.visible=true;pointerDot.position.copy(hit.point);
   const px=hit.uv.x*MW, py=(1-hit.uv.y)*MH;
+  const inBox=(b)=>px>=b.x&&px<=b.x+b.w&&py>=b.y&&py<=b.y+b.h;
+  if(trigEdge){
+    if(px>=HANDLE.x+8&&px<=HANDLE.x+8+HANDLE.w&&py>=HANDLE.y&&py<=HANDLE.y+HANDLE.h){
+      panelDrag=true;panelDist=hit.distance;return true;
+    }
+    if(inBox(SCALE_M)){P.menuScale=Math.max(0.40,P.menuScale-0.10);menu.mesh.scale.setScalar(P.menuScale);return true;}
+    if(inBox(SCALE_P)){P.menuScale=Math.min(3.00,P.menuScale+0.10);menu.mesh.scale.setScalar(P.menuScale);return true;}
+  }
   /* which row */
   let row=-1;
   for(let i=0;i<MENU.length;i++){
@@ -1577,20 +1702,20 @@ function menuPointer(trigPressed, trigEdge){
     const R=rowRect(i);
     if(px>=R.x-6&&px<=R.x-6+COLW&&py>=R.y-15&&py<=R.y+ROWH-16){row=i;break;}
   }
-  if(row<0){if(!trigPressed)dragKey=null;return;}
+  if(row<0){if(!trigPressed)dragKey=null;return true;}
   menuSel=row;
   const [,key,mn,mx,st]=MENU[row], R=rowRect(row);
   if(trigEdge){
-    if(key.charCodeAt(0)===33){ runAction(key); return; }
+    if(key.charCodeAt(0)===33){ runAction(key); return true; }
     if(px>=R.x+RNGX&&px<=R.x+RNGX+RNGW){
-      RANGEX[key]=rx(key)===1?10:(rx(key)===10?100:1);
-      say(MENU[row][0]+' range '+(RANGEX[key])+'x');
-      return;
+      const m=cycleRange(key,mn,mx);
+      say(MENU[row][0]+' range '+m+'x');
+      return true;
     }
     dragKey=key;dragRow=row;
   }
   if(trigPressed&&dragKey===key){
-    const lo=rowMin(key,mn), hi=rowMax(key,mx);
+    const [lo,hi]=rowRange(key,mn,mx);
     let f=(px-(R.x+TRACKX))/TRACKW;
     f=Math.max(0,Math.min(1,f));
     let v=lo+(hi-lo)*f;
@@ -1599,6 +1724,7 @@ function menuPointer(trigPressed, trigEdge){
     onSettingChanged(key);
   }
   if(!trigPressed) dragKey=null;
+  return true;
 }
 function onSettingChanged(key){
   if(key==='lineWt'||key==='tippetLen'||key==='massMul')rebuildMasses();
@@ -1606,6 +1732,7 @@ function onSettingChanged(key){
   if(key==='current')waterMat.uniforms.uQ.value=P.current;
   if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
   if(key==='speckSize')speckMat.uniforms.uSize.value=P.speckSize;
+  if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1813,10 +1940,15 @@ renderer.setAnimationLoop(()=>{
 
   /* reel in */
   const trigRDown=trigR>0.6;
-  menuPointer(trigRDown, trigRDown&&!prevTrigR);
+  const onPanel=menuPointer(trigRDown, trigRDown&&!prevTrigR);
+  reeling=trigR>0.05&&!onPanel;
   prevTrigR=trigRDown;
-  if(trigR>0.05&&!menuOpen){
-    let take=P.reelSpeed*trigR*dt;
+  if(trigR>0.05&&!onPanel){
+    /* The reel wins. It gathers line at full rate until tension reaches Reel
+       power, so holding the trigger down against a running fish will shorten
+       the line until something gives — normally the tippet. */
+    const eff=Math.max(0,Math.min(1,1-(M.tension-P.reelPower)/Math.max(P.reelPower,0.05)));
+    let take=P.reelSpeed*trigR*dt*eff;
     const slack=offSpool-lineOut-rodArc;
     const fromSlack=Math.min(Math.max(0,slack-MIN_SLACK),take);
     offSpool-=fromSlack;take-=fromSlack;
@@ -1894,8 +2026,12 @@ renderer.setAnimationLoop(()=>{
     }
   }
 
+  if(hooked&&hooked.beh==='jump'&&pos[1]>filmY(pos[0],pos[2],simTime)-0.02&&Math.random()<dt*14){
+    spawnRing(pos[0],pos[2],1.5);
+  }
   if(hooked){
-    hooked.stamina=Math.max(0,hooked.stamina-M.tension*0.0075*P.fatigue*dt-dt*0.012);
+    hooked.stamina=Math.max(0,hooked.stamina
+      -(M.tension*0.0060+hooked.effort*0.055)*P.fatigue*dt-dt*0.008);
     if(M.tension>P.tippet){
       hooked.spook('tippet popped',1);hooked=null;rebuildMasses();pulse(1.0);
     } else if(netOn&&haveLeft){

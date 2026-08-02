@@ -144,7 +144,20 @@ texture with olive back, silver flanks, the pink lateral stripe and depth-graded
 forked caudal, dorsal, adipose, anal and pectoral fins. A travelling sine wave runs down each
 body via a per-fish vertex shader, with the tail riding the same wave.
 
-Behaviour: fish hold facing **upstream** (nose is local −X, flow runs toward +X, so heading
+**Fighting a hooked fish.** Pull scales with length: roughly `12·len·power` newtons steady,
+with a run multiplying that by 2.6 and a jump by 3.2. A 40 cm rainbow therefore pulls ~5 N
+steady and ~12 N in a first run, against a 21 N 5X tippet — so a green fish can break you off
+and can out-pull the reel. **The reel is stronger than the fish.** It gathers line at full rate until tension reaches
+`reelPower` (default 60 N, well above a 21 N tippet), and while you are cranking the spool
+cannot pay line back out. So holding the trigger against a running fish shortens the line
+until something gives — normally the tippet. Setting `reelPower` below tippet strength makes
+the reel stall first and saves the line instead. Five behaviours cycle on a timer weighted
+by stamina: **run, sound, jump, cruise, easy**. Stamina drains from both tension and the fish's
+own effort, so a fish that fights hard tires fast. The fly node skips the surface film clamp
+while hooked, so it can genuinely sound and genuinely jump. A **Hook a test fish** action in
+the menu puts one on immediately for testing.
+
+Behaviour when not hooked: fish hold facing **upstream** (nose is local −X, flow runs toward +X, so heading
 zero). They cycle in and out of feeding; feeding fish sit higher and nose the film with real
 rise rings. The take is evaluated **continuously as the fly drifts through** the take radius,
 once per pass — not by where the fly lands. Landing only decides whether you spook them
@@ -186,9 +199,13 @@ timestep-dependent, so **any calibration must be redone if those change.** XPBD 
 | Right grip | clamp line at the cork |
 | A | reset cast · B | reseat fish · Y | toggle menu |
 
-Menu: point with the rod hand, hold the trigger to drag a slider. The left hand keeps full
+Menu: point with the rod hand, hold the trigger to drag a slider. The panel is movable —
+grab the handle at its top left and it follows the ray; the +/- buttons at top right resize it.
+If the ray is not on the panel the right trigger still reels, so you can fish with the menu open. The left hand keeps full
 line control while the menu is open, deliberately, so changes can be felt live. Each row has
-a **1x / 10x / 100x** range button so no setting can ever be out of reach.
+a range button cycling **0.01x / 0.1x / 1x / 10x / 100x**, so no setting is ever out of reach in
+either direction. Below 1x the range zooms in around the value at the moment you pressed it,
+and that window is frozen so the slider does not slide out from under you mid-drag.
 
 ---
 
