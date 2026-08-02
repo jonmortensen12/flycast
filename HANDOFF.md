@@ -61,7 +61,7 @@ No force is ever injected to make line move. Each substep:
    running backwards — one rule, both directions.
 4. θ is the total wrap angle across the guide stack, so a deeply loaded rod grips harder.
    This is the capstan equation and it is why shooting is harder when the rod is bent.
-5. You can only shoot the belly you have. Once slack hits `MIN_SLACK`, further line must
+6. You can only shoot the belly you have. Once slack hits `MIN_SLACK`, further line must
    come off the spool on the spool's own terms.
 
 ### 2.3 Line off the reel
@@ -203,7 +203,7 @@ timestep-dependent, so **any calibration must be redone if those change.** XPBD 
 | Input | Action |
 |---|---|
 | Left stick | walk, including wading; deep water slows you |
-| Left trigger | under 15% free · 15–85% routes line through the hand · over 85% pinches |
+| Left trigger | under 15% free · 15–85% **routes** (line slides through the hand, held point re-chosen every frame) · over 85% **pinches** (one material point held fast) |
 | Left grip | net |
 | Right trigger | reel in, analog · **drives the menu pointer while the menu is open** |
 | Right grip | clamp line at the cork |

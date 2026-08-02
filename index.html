@@ -88,11 +88,11 @@ const P = {
   nodeLen:0.20, leadNode:0.06, leaderLen:2.74, tippetLen:0.90,
   rodModel:1, rodE:200.0, rodMass:0.077,
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
-  massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, dragMul:1.00, lineWt:5.0, statFric:0.05,
+  massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:1.00, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, reelPower:60.0, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
-  current:0.55, speckGPU:1, speckTravel:7.0, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:1.00,
+  current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
   splashV:4.50, lineRad:0.50, spookT:5.00, fatigue:1.00,
@@ -106,6 +106,7 @@ const MENU=[
   ['Save as my default','!save',0,0,0,'Push right to store every current value as your default.'],
   ['Hook a test fish','!hookfish',0,0,0,'Hooks the fish nearest your fly straight away, so you can work on the fight without having to earn it first.'],
   ['Recenter panel','!recenter',0,0,0,'Puts the panel back in front of you at a comfortable distance. Use this if you ever lose track of it.'],
+  ['Stats scale','hudScale',0.40,3.00,0.05,'Size of the statistics window. It has its own drag handle and plus/minus buttons in its top corners, usable any time the menu is open.'],
   ['Panel scale','menuScale',0.40,3.00,0.05,'Size of this panel. The plus and minus buttons in its top right do the same thing, and the handle at the top left drags it around.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
   ['— ROD MODEL —',null,0,0,0,''],
@@ -149,6 +150,7 @@ const MENU=[
   ['River grade','grade',0.00,2.50,0.10,'Steepness of the reach and the size of the drops between pools. Rebuilds the bed live.'],
   ['GPU specks','speckGPU',0,1,1,'0 runs the original CPU specks — real particles carried by the flow, capped at 4000 because each one costs a flow evaluation in JavaScript. 1 moves the whole thing into a shader: each speck re-integrates its own short streamline every frame, up to 20000 of them, for no CPU cost at all. Toggle freely; nothing else changes.'],
   ['Speck travel s','speckTravel',2.00,20.0,0.50,'GPU specks only. How many seconds of drift each speck traces before fading out and starting again. Longer reads as transport down the river; shorter reads as local flow direction.'],
+  ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter dots showing where it was a moment ago, which makes direction and speed readable at a glance. This is the gap between them in seconds. Zero collapses them onto the head.'],
   ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 20000 on the GPU path.'],
   ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck.'],
   ['Speck range','speckRange',6.00,45.0,1.00,'How far upstream and downstream specks are kept, in metres. A shorter range packs the same count into less river, so you can read the flow with far fewer of them.'],
@@ -621,7 +623,7 @@ const _k0=new THREE.Vector3(),_k1=new THREE.Vector3(),_p0=new THREE.Vector3(),_p
 const SUB=6,ITER=6;
 let simTime=0, handIdx=-1, corkIdx=-1, blewUp=false;
 const _reelW=new THREE.Vector3(),_corkW=new THREE.Vector3(),_handW=new THREE.Vector3();
-let handHeld=false, corkHeld=false;
+let handHeld=false, corkHeld=false, handPinched=false;
 
 function sanity(){
   for(let i=0;i<nAct;i++){
@@ -687,7 +689,7 @@ function physics(dt){
       if(P.lineBend>0.001) for(let i=1;i<bendTo;i++) lineBendXPBD(i,h2);
       for(let g=0;g<NG;g++) solveGuide(g,0.85);
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
-      if(handHeld&&handIdx>0) pinLine(sArc(handIdx),_handW.x,_handW.y,_handW.z,0.9);
+      if(handHeld&&handIdx>0) pinLine(sArc(handIdx),_handW.x,_handW.y,_handW.z,handMode===2?0.9:0.45);
       if(corkHeld&&corkIdx>0) pinLine(sArc(corkIdx),_corkW.x,_corkW.y,_corkW.z,0.9);
     }
 
@@ -700,7 +702,7 @@ function physics(dt){
       const cap=Math.exp(P.guideMu*wrapTotal);
       probeThr=Tin*cap+P.statFric;probeSp=Tsp;
       let dl=0;
-      if(!rodPinch){
+      if(!rodPinch&&!reeling&&!handPinched){
         if(Tout>probeThr){
           const wOut=invM[Math.max(0,probeI[0])]+invM[Math.max(0,probeI[0])+1];
           dl=(Tout-probeThr)*h2*wOut;
@@ -715,6 +717,21 @@ function physics(dt){
         }
         lineOut=Math.max(MIN_OUT,lineOut+dl);
         slipOut+=dl;
+      }
+      /* Stripping. Material length from stripping guide to your pinched hand
+         cannot be shorter than the straight distance between them, so any
+         surplus has to come in through the guides. This is the same statement
+         that governs the spool, and like the spool it beats a fish because it
+         is geometry rather than a friction contest. */
+      if(handPinched&&!rodPinch){
+        const Lt=sArc(handIdx)-(lineOut+rodArc);
+        const Dt=Math.hypot(_handW.x-_strip.x,_handW.y-_strip.y,_handW.z-_strip.z);
+        const over=Dt-Lt-P.spoolDead;
+        if(over>0){
+          const pull=Math.min(over,0.06);
+          lineOut=Math.max(MIN_OUT,lineOut-pull);
+          slipOut-=pull;
+        }
       }
       const thr=P.spoolDrag*1.15+P.statFric;
       /* a hand on the crank holds the spool: a fish cannot take line while you
@@ -1003,16 +1020,19 @@ vec2 flowAt(vec2 p){
 }`;
 const gSpeckGeo=new THREE.BufferGeometry();
 {
-  const seed=new Float32Array(GSPECK*2), misc=new Float32Array(GSPECK*2);
-  for(let i=0;i<GSPECK;i++){
-    seed[i*2]=Math.random()*2-1;
-    seed[i*2+1]=Math.random()*2-1;
-    misc[i*2]=Math.random();                       /* phase offset */
-    misc[i*2+1]=Math.random()<0.55?0:-Math.random()*0.35;   /* depth below film */
+  const seed=new Float32Array(GSPECK*2), misc=new Float32Array(GSPECK*3);
+  for(let i=0;i<GSPECK;i+=3){
+    const sx=Math.random()*2-1, sz=Math.random()*2-1;
+    const ph=Math.random(), dep=Math.random()<0.55?0:-Math.random()*0.35;
+    for(let k=0;k<3&&i+k<GSPECK;k++){
+      const j=i+k;
+      seed[j*2]=sx; seed[j*2+1]=sz;
+      misc[j*3]=ph; misc[j*3+1]=dep; misc[j*3+2]=k;   /* 0 = head, 1-2 = trail */
+    }
   }
   gSpeckGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(GSPECK*3),3));
   gSpeckGeo.setAttribute('aSeed',new THREE.BufferAttribute(seed,2));
-  gSpeckGeo.setAttribute('aMisc',new THREE.BufferAttribute(misc,2));
+  gSpeckGeo.setAttribute('aMisc',new THREE.BufferAttribute(misc,3));
   gSpeckGeo.boundingSphere=new THREE.Sphere(new THREE.Vector3(),500);
 }
 const gSpeckMat=new THREE.ShaderMaterial({
@@ -1020,11 +1040,12 @@ const gSpeckMat=new THREE.ShaderMaterial({
   uniforms:{
     uTime:{value:0}, uSize:{value:P.speckSize}, uQ:{value:P.current}, uGrade:{value:P.grade},
     uOriginX:{value:0}, uRange:{value:P.speckRange}, uTravel:{value:P.speckTravel},
+    uTrail:{value:P.speckTrail},
     uVort:{value:Array.from({length:8},()=>new THREE.Vector4(0,0,1,0))},
   },
   vertexShader:`
-    attribute vec2 aSeed; attribute vec2 aMisc;
-    uniform float uTime,uSize,uQ,uGrade,uOriginX,uRange,uTravel;
+    attribute vec2 aSeed; attribute vec3 aMisc;
+    uniform float uTime,uSize,uQ,uGrade,uOriginX,uRange,uTravel,uTrail;
     uniform vec4 uVort[8];
     varying float vA;
     ${GLSL_SURF}
@@ -1032,20 +1053,29 @@ const gSpeckMat=new THREE.ShaderMaterial({
     void main(){
       vec2 p=vec2(uOriginX+aSeed.x*uRange, ${CZ.toFixed(1)}+aSeed.y*${(HALFW*0.92).toFixed(2)});
       float ph=fract(uTime/uTravel+aMisc.x);
-      float age=ph*uTravel;
+      /* trail points are the same speck a moment earlier */
+      float tIdx=aMisc.z;
+      float age=ph*uTravel-tIdx*uTrail;
+      if(age<0.0) age+=uTravel;
+      /* Take whole steps then a PARTIAL final step. Stepping only in whole dt
+         made the speck teleport dt-worth of travel at a time, which read as a
+         static dotted field rather than moving water. */
       float dt=uTravel/24.0;
+      float rem=age;
       for(int i=0;i<24;i++){
-        if(float(i)*dt>=age) break;
-        p+=flowAt(p)*dt;
+        float st=min(dt,rem);
+        if(st<=0.0) break;
+        p+=flowAt(p)*st;
+        rem-=st;
       }
       float d=depthAt(p);
       float sp=length(flowAt(p));
       /* fade in and out so recycling is invisible, and hide anything beached */
-      vA=smoothstep(0.0,0.10,ph)*(1.0-smoothstep(0.80,1.0,ph))
-         *smoothstep(0.06,0.16,d)*(0.55+0.45*step(0.02,sp));
+      float fade=smoothstep(0.0,0.10,ph)*(1.0-smoothstep(0.80,1.0,ph));
+      vA=fade*smoothstep(0.06,0.16,d)*(0.55+0.45*step(0.02,sp))*(1.0-0.30*tIdx);
       vec3 wp=vec3(p.x, surfY(p.x)+0.014+aMisc.y, p.y);
       vec4 mv=modelViewMatrix*vec4(wp,1.0);
-      gl_PointSize=clamp(260.0*uSize/max(-mv.z,0.4),1.0,26.0*uSize);
+      gl_PointSize=clamp(260.0*uSize*(1.0-0.20*tIdx)/max(-mv.z,0.4),1.0,26.0*uSize);
       gl_Position=projectionMatrix*mv;
     }`,
   fragmentShader:`
@@ -1540,9 +1570,11 @@ function makePanel(w,h,cw,ch){
     new THREE.MeshBasicMaterial({map:tex,transparent:true,depthTest:false}));
   m.renderOrder=20;return{cv,cx:cv.getContext('2d'),tex,mesh:m};
 }
-const hud=makePanel(0.44,0.38,512,440);
+const HW=512, HH=600;
+const HHANDLE={x:8,y:6,w:200,h:26}, HSC_M={x:404,y:6,w:24,h:26}, HSC_P={x:434,y:6,w:24,h:26};
+const hud=makePanel(0.44,0.515,HW,HH);
 hud.mesh.position.set(-0.56,1.16,-0.64);hud.mesh.rotation.y=0.58;player.add(hud.mesh);
-const MW=1400, MH=780, ROWH=24, COLW=450, COLX=[16,478,940];
+const MW=1400, MH=780, ROWH=23, COLW=450, COLX=[16,478,940];
 const HANDLE={x:0,y:8,w:250,h:30}, SCALE_M={x:1240,y:8,w:34,h:30}, SCALE_P={x:1282,y:8,w:34,h:30};
 const TRACKX=168, TRACKW=118, VALX=336, RNGX=352, RNGW=52;
 const menu=makePanel(1.40,0.78,MW,MH);
@@ -1553,9 +1585,20 @@ function say(s){note=s;noteT=3.6;}
 const M={bend:0,drift:0,tension:0,depth:0,fps:60};
 const HANDTXT=['free','routing','pinched'];
 function drawHUD(){
-  const c=hud.cx;c.clearRect(0,0,512,440);
-  c.fillStyle='rgba(12,22,26,0.86)';c.fillRect(0,0,512,440);
-  c.fillStyle='#b5713f';c.fillRect(0,0,512,4);
+  const c=hud.cx;c.clearRect(0,0,HW,HH);
+  c.fillStyle='rgba(12,22,26,0.86)';c.fillRect(0,0,HW,HH);
+  c.fillStyle='#b5713f';c.fillRect(0,0,HW,4);
+  /* handle and scale buttons, usable whenever the menu pointer is live */
+  c.fillStyle=panelDrag&&dragTarget===hud.mesh?'#3a2a1c':'#162226';
+  c.fillRect(HHANDLE.x,HHANDLE.y,HHANDLE.w,HHANDLE.h);
+  c.fillStyle=panelDrag&&dragTarget===hud.mesh?'#e0a45e':'#6d7f82';
+  c.font='700 11px "Space Mono",monospace';
+  c.fillText('\u2725  DRAG',HHANDLE.x+10,HHANDLE.y+18);
+  for(const [b,lab] of [[HSC_M,'\u2212'],[HSC_P,'+']]){
+    c.fillStyle='#162226';c.fillRect(b.x,b.y,b.w,b.h);
+    c.fillStyle='#a9b5b3';c.font='700 15px "Space Mono",monospace';
+    c.fillText(lab,b.x+7,b.y+19);
+  }
   c.font='700 16px "Space Mono",monospace';
   const feed=fishes.filter(f=>f.feeding&&f.state==='holding').length;
   const slack=Math.max(0,offSpool-lineOut-rodArc);
@@ -1651,7 +1694,7 @@ function runAction(key){
       say('test fish on \u2014 '+(best.len*100).toFixed(0)+' cm');
     } else say('no fish available to hook');
   }
-  else if(key==='!recenter'){recenterPanel();say('panel recentred');}
+  else if(key==='!recenter'){recenterPanel(menu.mesh);recenterPanel(hud.mesh);say('panels recentred');}
   else if(key==='!copy'){copySettings();say('settings copied');}
 }
 let menuOpen=false, menuSel=1;
@@ -1779,6 +1822,8 @@ const rayLine=(()=>{
 })();
 let dragKey=null, dragRow=-1, panelDrag=false, panelDist=1.05;
 const _pw=new THREE.Vector3(), _camWorld=new THREE.Vector3(), panelOff=new THREE.Vector3();
+const panelQOff=new THREE.Quaternion();
+let dragTarget=null;
 const PANEL_HOME=new THREE.Vector3(0,1.45,-1.05);
 /* yaw-only facing: pitching the panel makes it unreadable and easy to lose */
 function facePanelAt(target){
@@ -1787,22 +1832,27 @@ function facePanelAt(target){
   const dx=t.x-menu.mesh.position.x, dz=t.z-menu.mesh.position.z;
   menu.mesh.rotation.set(0,Math.atan2(dx,dz),0);
 }
-function clampPanel(){
-  const p=menu.mesh.position;
-  if(!Number.isFinite(p.x)||!Number.isFinite(p.y)||!Number.isFinite(p.z)){recenterPanel();return;}
+function clampPanel(m){
+  m=m||menu.mesh;
+  const p=m.position;
+  if(!Number.isFinite(p.x)||!Number.isFinite(p.y)||!Number.isFinite(p.z)){recenterPanel(m);return;}
   camera.getWorldPosition(_camWorld);
   player.updateMatrixWorld(true);
   const c=player.worldToLocal(_camWorld.clone());
-  if(p.distanceTo(c)>4.0||p.distanceTo(c)<0.25) recenterPanel();
+  const d=p.distanceTo(c);
+  if(d>5.0||d<0.20) recenterPanel(m);
 }
-function recenterPanel(){
+function recenterPanel(m){
+  m=m||menu.mesh;
   camera.getWorldQuaternion(_camQ);
   const e=new THREE.Euler().setFromQuaternion(_camQ,'YXZ');
   camera.getWorldPosition(_camWorld);
   player.updateMatrixWorld(true);
   const c=player.worldToLocal(_camWorld.clone());
-  menu.mesh.position.set(c.x-Math.sin(e.y)*1.05, c.y-0.10, c.z-Math.cos(e.y)*1.05);
-  menu.mesh.rotation.set(0,e.y,0);
+  const off=(m===hud.mesh)?0.62:1.05;
+  const side=(m===hud.mesh)?-0.55:0;
+  m.position.set(c.x-Math.sin(e.y)*off+Math.cos(e.y)*side, c.y-0.10, c.z-Math.cos(e.y)*off-Math.sin(e.y)*side);
+  m.rotation.set(0,e.y,0);
 }
 function menuPointer(trigPressed, trigEdge){
   if(!menuOpen||!rodGrip){
@@ -1812,7 +1862,8 @@ function menuPointer(trigPressed, trigEdge){
   rodGrip.getWorldPosition(_rayOrigin);
   _rayDir.set(0,0,-1).applyQuaternion(_q).normalize();
   _ray.set(_rayOrigin,_rayDir);
-  const hit=_ray.intersectObject(menu.mesh,false)[0];
+  const hits=_ray.intersectObjects([menu.mesh,hud.mesh],false);
+  const hit=hits[0];
   rayLine.visible=true;
   const rp=rayLine.geometry.attributes.position.array;
   rp[0]=_rayOrigin.x;rp[1]=_rayOrigin.y;rp[2]=_rayOrigin.z;
@@ -1825,25 +1876,44 @@ function menuPointer(trigPressed, trigEdge){
   if(panelDrag){
     if(!trigPressed){
       panelDrag=false;
-      camera.getWorldPosition(_camWorld);
-      facePanelAt(_camWorld);
     } else {
+      const tgt=dragTarget;
       _pw.copy(_rayOrigin).addScaledVector(_rayDir,panelDist).add(panelOff);
       player.updateMatrixWorld(true);
-      menu.mesh.position.copy(player.worldToLocal(_pw));
-      clampPanel();
+      tgt.position.copy(player.worldToLocal(_pw));
+      /* orientation rides the hand, so you can swing a panel out to the side or
+         put it behind you and leave it there */
+      tgt.quaternion.copy(rodGrip.quaternion).multiply(panelQOff);
+      clampPanel(tgt);
       return true;
     }
   }
   if(!hit||!hit.uv){pointerDot.visible=false;if(!trigPressed)dragKey=null;return false;}
   pointerDot.visible=true;pointerDot.position.copy(hit.point);
+  if(hit.object===hud.mesh){
+    const hx=hit.uv.x*HW, hy=(1-hit.uv.y)*HH;
+    const inH=(b)=>hx>=b.x&&hx<=b.x+b.w&&hy>=b.y&&hy<=b.y+b.h;
+    if(trigEdge){
+      if(inH(HHANDLE)){
+        panelDrag=true;panelDist=hit.distance;dragTarget=hud.mesh;
+        player.updateMatrixWorld(true);
+        panelOff.copy(hud.mesh.getWorldPosition(new THREE.Vector3())).sub(hit.point);
+        panelQOff.copy(rodGrip.quaternion).invert().multiply(hud.mesh.quaternion);
+        return true;
+      }
+      if(inH(HSC_M)){P.hudScale=Math.max(0.40,P.hudScale-0.10);hud.mesh.scale.setScalar(P.hudScale);return true;}
+      if(inH(HSC_P)){P.hudScale=Math.min(3.00,P.hudScale+0.10);hud.mesh.scale.setScalar(P.hudScale);return true;}
+    }
+    return true;
+  }
   const px=hit.uv.x*MW, py=(1-hit.uv.y)*MH;
   const inBox=(b)=>px>=b.x&&px<=b.x+b.w&&py>=b.y&&py<=b.y+b.h;
   if(trigEdge){
     if(px>=HANDLE.x+8&&px<=HANDLE.x+8+HANDLE.w&&py>=HANDLE.y&&py<=HANDLE.y+HANDLE.h){
-      panelDrag=true;panelDist=hit.distance;
+      panelDrag=true;panelDist=hit.distance;dragTarget=menu.mesh;
       player.updateMatrixWorld(true);
       panelOff.copy(menu.mesh.getWorldPosition(new THREE.Vector3())).sub(hit.point);
+      panelQOff.copy(rodGrip.quaternion).invert().multiply(menu.mesh.quaternion);
       return true;
     }
     if(inBox(SCALE_M)){P.menuScale=Math.max(0.40,P.menuScale-0.10);menu.mesh.scale.setScalar(P.menuScale);return true;}
@@ -1887,6 +1957,7 @@ function onSettingChanged(key){
   if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
   if(key==='speckSize'){speckMat.uniforms.uSize.value=P.speckSize;gSpeckMat.uniforms.uSize.value=P.speckSize;}
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
+  if(key==='hudScale')hud.mesh.scale.setScalar(P.hudScale);
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1997,7 +2068,7 @@ function resetCast(){
    ════════════════════════════════════════════════════════════ */
 const clock=new THREE.Clock();
 let started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
-let prevTrigR=false,prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=false,prevRodPinch=false;
+let prevTrigR=false,prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=0,prevRodPinch=false;
 let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft, lastTaper=P.rodTaper;
 const _lh=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_netP=new THREE.Vector3();
 
@@ -2072,15 +2143,23 @@ renderer.setAnimationLoop(()=>{
   } else {leftHand.visible=false;netGrp.visible=false;}
 
   const handActive=handMode>0&&haveLeft&&!netOn;
-  if(handActive&&!prevHandActive){
+  if(handActive&&handMode===1){
+    /* routing: the line runs through your fingers but is free to slide, so the
+       held material point is re-chosen every frame. Pinning one node here was
+       what stopped line feeding out past the hand while casting. */
+    const n=nearestLineNode(_lh.x,_lh.y,_lh.z);
+    handIdx=(n.i>0&&n.d<0.75)?n.i:-1;
+    if(handIdx>0) handArc=sArc(handIdx);
+  } else if(handActive&&prevHandActive!==2&&handMode===2){
     const n=nearestLineNode(_lh.x,_lh.y,_lh.z);
     handIdx=(n.i>0&&n.d<0.55)?n.i:-1;
     if(handIdx>0) handArc=sArc(handIdx);
     if(handIdx<0) say('no line there to grab');
   }
   if(!handActive) handIdx=-1;
-  prevHandActive=handActive;
+  prevHandActive=handActive?handMode:0;
   handHeld=handActive&&handIdx>0;
+  handPinched=handMode===2&&handIdx>0;
   _handW.copy(_lh);
 
   if(rodPinch&&!prevRodPinch){
@@ -2234,6 +2313,7 @@ renderer.setAnimationLoop(()=>{
     u.uGrade.value=P.grade;
     u.uRange.value=P.speckRange;
     u.uTravel.value=Math.max(1,P.speckTravel);
+    u.uTrail.value=P.speckTrail;
     /* the seed field only re-snaps when you have walked most of its width, so
        the jump is rare and mostly hidden by the fade */
     if(Math.abs(_camW.x-u.uOriginX.value)>P.speckRange*0.6) u.uOriginX.value=_camW.x;
