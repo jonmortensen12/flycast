@@ -85,8 +85,8 @@ import * as THREE from 'three';
    1. SETTINGS
    ════════════════════════════════════════════════════════════ */
 const P = {
-  nodeLen:0.20,
-  stiffMul:0.286, dragMul:1.00, lineWt:5.0, statFric:0.05,
+  nodeLen:0.20, leadNode:0.06, leaderLen:2.74, tippetLen:0.90,
+  stiffMul:0.872, rodDamp:14.0, tipSoft:1.00, dragMul:1.00, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
@@ -103,7 +103,10 @@ const MENU=[
   ['Save as my default','!save',0,0,0,'Push right to store every current value as your default.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
   ['— LINE MODEL —',null,0,0,0,''],
-  ['Node length','nodeLen',0.08,0.50,0.01,'Spacing between simulated points on the line, in metres. One spacing for the whole line, so more line means more nodes. Smaller is smoother and slower — watch the FPS row.'],
+  ['Line node length','nodeLen',0.08,0.50,0.01,'Spacing of simulated points along the fly line, in metres. Smaller is smoother and slower — watch the FPS row.'],
+  ['Leader node length','leadNode',0.03,0.25,0.01,'Spacing along the leader and tippet, which needs finer resolution than the fly line because it is far lighter and turns over more sharply.'],
+  ['Leader length','leaderLen',1.50,5.00,0.10,'Total leader from fly to fly line. A 9 ft leader is 2.74 m.'],
+  ['Tippet length','tippetLen',0.20,2.50,0.05,'Level tippet at the fly end, cut from the leader total. Longer tippet drifts more freely but turns over less crisply.'],
   ['Line weight','lineWt',3.00,8.00,0.50,'AFFTA line rating. Sets real mass per metre: a 5wt head is 140 grains over 30 ft, which is 0.99 g/m. Heavier line loads the rod harder and carries further.'],
   ['Line air drag','dragMul',0.10,4.00,0.05,'Multiplier on the physical drag coefficient. 1.00 is a real cylinder in crossflow — raise it only if loops refuse to turn over.'],
   ['— FRICTION —',null,0,0,0,''],
@@ -112,7 +115,9 @@ const MENU=[
   ['Spool drag','spoolDrag',0.05,3.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
   ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
   ['— ROD & TACKLE —',null,0,0,0,''],
-  ['Rod stiffness','stiffMul',0.05,2.00,0.02,'Bending stiffness of the blank. 0.29 reproduces a real 9 ft 5wt: tip deflects a third of rod length under a 1.6 N load. Higher is a faster action.'],
+  ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 0.87 reproduces a real 9 ft 5wt: tip deflects a third of rod length under a 1.6 N load.'],
+  ['Rod damping','rodDamp',0.00,60.0,1.00,'Internal damping of the blank, per second. Damps how fast the rod deforms, not how it swings. Around 14 kills tip ring in about half a second, which is what a good graphite rod does. Zero rings for three seconds.'],
+  ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip. 1.00 follows the real second moment of area of a tapered tube — the tip is roughly 500 times softer than the butt. Lower flattens it.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
   ['Tippet (N)','tippet',2.00,60.0,0.50,'Breaking strain. 5X is 4.75 lb, about 21 N. 6X is 15.6 N, 4X is 26.7 N.'],
   ['Line float','buoyancy',0.20,3.00,0.05,'How firmly the line is held on the surface film once it is riding on it.'],
@@ -151,7 +156,9 @@ const MENU=[
 
 /* values derived from real tackle — see the notes beside each menu row */
 const PHYSICAL={
-  stiffMul:0.286,   /* calibrated: 9ft 5wt tip deflects L/3 under 1.6 N */
+  stiffMul:0.872,   /* calibrated with the true tube taper: tip deflects L/3 under 1.6 N */
+  rodDamp:14.0, tipSoft:1.00,
+  leaderLen:2.74, tippetLen:0.90, leadNode:0.06,
   dragMul:1.00,     /* dragK already carries 0.5*rho*Cd*A/m with Cd=1.1 */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
   guideMu:0.15, statFric:0.05, spoolDrag:1.00, spoolDead:0.05,
@@ -178,7 +185,7 @@ const GUIDE_ARC=GUIDE_S.map(s=>ROD_LEN*(1-s));
 const ROD_ARC=GUIDE_ARC[0];
 
 /* ---- line: one continuous chain, material coordinate = arc length from the fly ---- */
-const MAXNODE=430, TOTAL_LINE=34.0, LEADER_LEN=2.6, FLYLINE_LEN=27.0;
+const MAXNODE=620, TOTAL_LINE=34.0, FLYLINE_LEN=27.0;
 const MIN_SLACK=0.25, MIN_OUT=4.0;
 let hooked=null;
 
@@ -251,17 +258,44 @@ function computeFlow(x,z){
 /* rod */
 const rpos=new Float32Array(RN*3),rprd=new Float32Array(RN*3),rvel=new Float32Array(RN*3);
 const rinvM=new Float32Array(RN),rdragK=new Float32Array(RN),rbendK=new Float32Array(RN);
-for(let i=0;i<RN;i++){
-  const t=i/(RN-1);
-  if(i<2) rinvM[i]=0;
-  else{const m=0.014*(1-0.75*t);rinvM[i]=1/m;rdragK[i]=0.5*1.2*(0.006*ROD_SEG)/m;}
-  rbendK[i]=0.97+(0.14-0.97)*Math.pow(t,1.4);
+const rodI=new Float32Array(RN);
+{
+  /* second moment of area of the real blank: OD tapers 9.5 mm to 1.6 mm over
+     the 9 ft, tubular with a roughly constant 0.55 mm wall. Bending stiffness
+     follows I, which means the tip is ~500x softer than the butt. */
+  for(let i=0;i<RN;i++){
+    const t=i/(RN-1), D=(9.5+(1.6-9.5)*t)/1000, w=0.00055, d=Math.max(0,D-2*w);
+    rodI[i]=Math.PI/64*(Math.pow(D,4)-Math.pow(d,4));
+  }
+  for(let i=0;i<RN;i++) rodI[i]/=rodI[0];
 }
+function rebuildRod(){
+  for(let i=0;i<RN;i++){
+    const t=i/(RN-1);
+    if(i<2) rinvM[i]=0;
+    else{const m=0.014*(1-0.75*t);rinvM[i]=1/m;rdragK[i]=0.5*1.2*(0.006*ROD_SEG)/m;}
+    rbendK[i]=Math.pow(rodI[i],P.tipSoft);
+  }
+}
+rebuildRod();
 
-/* line — node i sits at arc length i*nodeLen from the fly, forever */
+/* line — node i sits at a fixed arc length sArc(i) from the fly, forever */
 const pos=new Float32Array(MAXNODE*3),prd=new Float32Array(MAXNODE*3),vel=new Float32Array(MAXNODE*3);
 const invM=new Float32Array(MAXNODE),dragK=new Float32Array(MAXNODE);
 let nodeLen=P.nodeLen, nAct=0;
+/* The line is discretised in two zones. Node i sits at a fixed arc length
+   sArc(i) from the fly, finer through the leader than along the fly line. */
+let leadLen=P.leadNode, leadN=1, leaderTot=P.leaderLen;
+function rebuildSpacing(){
+  nodeLen=P.nodeLen; leaderTot=P.leaderLen;
+  leadN=Math.max(1,Math.min(MAXNODE-8,Math.ceil(leaderTot/P.leadNode)));
+  leadLen=leaderTot/leadN;
+}
+rebuildSpacing();
+const sArc=i=> i<=leadN ? i*leadLen : leaderTot+(i-leadN)*nodeLen;
+const idxAt=s=> s<=leaderTot ? s/leadLen : leadN+(s-leaderTot)/nodeLen;
+const restOf=i=> i<leadN ? leadLen : nodeLen;
+const nodeSpan=i=> i===0 ? leadLen : 0.5*(restOf(i-1)+restOf(i));
 
 /* the two material boundaries: where the tiptop and the spool sit along the line */
 let lineOut=8.0;          /* arc from fly to tiptop */
@@ -273,15 +307,17 @@ let probeOut=0,probeIn=0,probeThr=0,probeSp=0;
 
 function lineProfile(s){
   /* [density kg/m, diameter m] at arc length s from the fly.
-     Leader: real 9 ft tapered nylon, 5X tippet (0.152 mm, 0.021 g/m) at the fly
-     out to a 0.021 in butt (0.53 mm, 0.255 g/m). Nylon at 1140 kg/m^3.
-     Fly line: AFFTA rating. Beyond that, 20 lb dacron backing. */
-  if(s<LEADER_LEN){
-    const u=s/LEADER_LEN;
-    const d=0.000152+(0.000533-0.000152)*Math.pow(u,1.3);
+     Level 5X tippet (0.152 mm, 0.021 g/m) out to the tippet length, then a
+     taper to a 0.021 in butt (0.53 mm, 0.255 g/m). Nylon at 1140 kg/m^3.
+     Then AFFTA fly line, then 20 lb dacron backing. */
+  const LT=P.leaderLen, TT=Math.min(P.tippetLen,LT*0.85);
+  if(s<LT){
+    let d;
+    if(s<TT) d=0.000152;
+    else{const u=(s-TT)/Math.max(0.05,LT-TT); d=0.000152+(0.000533-0.000152)*Math.pow(u,1.2);}
     return [Math.PI*(d*0.5)*(d*0.5)*1140, d];
   }
-  if(s<FLYLINE_LEN){
+  if(s<LT+FLYLINE_LEN){
     const d=0.00090+(P.lineWt-3)*0.00006;
     return [lineWeightDensity(P.lineWt), d];
   }
@@ -289,15 +325,15 @@ function lineProfile(s){
 }
 function rebuildMasses(){
   for(let i=0;i<MAXNODE;i++){
-    const s=i*nodeLen;
+    const s=sArc(i), span=nodeSpan(i);
     const pr=lineProfile(s);
-    let m=Math.max(pr[0]*nodeLen,2e-6);
+    let m=Math.max(pr[0]*span,1.5e-6);
     if(i===0) m+=2.0e-5;                       /* a size 14 dry fly, 20 mg */
     invM[i]=1/m;
     /* drag/mass is independent of nodeLen, so changing resolution does not
        change how the line behaves — only how finely it is resolved.
        0.5*rho*Cd*A/m with air at 1.2 kg/m^3 and Cd 1.1 for a cylinder. */
-    dragK[i]=0.5*1.2*1.1*pr[1]*nodeLen/m;
+    dragK[i]=0.5*1.2*1.1*pr[1]*span/m;
   }
   if(hooked) invM[0]=1/(0.055+hooked.len*0.09);
 }
@@ -305,12 +341,12 @@ rebuildMasses();
 
 /* re-discretise when node length changes: sample the old shape by arc length */
 const tmpP=new Float32Array(MAXNODE*3),tmpV=new Float32Array(MAXNODE*3);
-function redistribute(oldLen){
+function redistribute(oldIdxAt){
   const oldN=nAct;
   tmpP.set(pos.subarray(0,oldN*3));tmpV.set(vel.subarray(0,oldN*3));
-  const newN=Math.min(MAXNODE,Math.floor(offSpool/nodeLen)+2);
+  const newN=Math.min(MAXNODE,Math.floor(idxAt(offSpool))+2);
   for(let i=0;i<newN;i++){
-    const s=i*nodeLen, f=Math.min(oldN-1.001,s/oldLen);
+    const s=sArc(i), f=Math.min(oldN-1.001,Math.max(0,oldIdxAt(s)));
     const a=Math.floor(f),b=Math.min(oldN-1,a+1),t=f-a;
     const A=a*3,B=b*3,k=i*3;
     for(let c=0;c<3;c++){
@@ -320,9 +356,10 @@ function redistribute(oldLen){
   }
   nAct=newN;
   rebuildMasses();
-  if(handIdx>0) handIdx=Math.min(nAct-2,Math.max(1,Math.round(handIdx*oldLen/nodeLen)));
-  if(corkIdx>0) corkIdx=Math.min(nAct-2,Math.max(1,Math.round(corkIdx*oldLen/nodeLen)));
+  if(handIdx>0) handIdx=Math.min(nAct-2,Math.max(1,Math.round(idxAt(handArc))));
+  if(corkIdx>0) corkIdx=Math.min(nAct-2,Math.max(1,Math.round(idxAt(corkArc))));
 }
+let handArc=0, corkArc=0;
 
 /* ════════════════════════════════════════════════════════════
    3. SOLVER
@@ -355,7 +392,7 @@ function lineDist(a,b){
   const A=a*3,B=b*3;
   let dx=pos[B]-pos[A],dy=pos[B+1]-pos[A+1],dz=pos[B+2]-pos[A+2];
   const d=Math.sqrt(dx*dx+dy*dy+dz*dz);if(d<1e-9)return;
-  const err=d-nodeLen;
+  const err=d-restOf(a);
   if(err>0){
     if(a===probeI[0]) probeLam[0]+=err/w;
     else if(a===probeI[1]) probeLam[1]+=err/w;
@@ -377,8 +414,8 @@ function lineBend(a,b,c,k){
 }
 
 /* pin an interpolated point on the line to a fixed world point */
-function pinLine(sArc,x,y,z,k){
-  const f=sArc/nodeLen;
+function pinLine(sVal,x,y,z,k){
+  const f=idxAt(sVal);
   const a=Math.floor(f);
   if(a<0||a+1>=nAct) return;
   const t=f-a,b=a+1,A=a*3,B=b*3;
@@ -394,8 +431,8 @@ function pinLine(sArc,x,y,z,k){
    interpolated point on the ROD, both ways, so the line loads the blank */
 const _gd=new THREE.Vector3();
 function solveGuide(g,k){
-  const sArc=lineOut+GUIDE_ARC[g];
-  const f=sArc/nodeLen, a=Math.floor(f);
+  const sVal=lineOut+GUIDE_ARC[g];
+  const f=idxAt(sVal), a=Math.floor(f);
   if(a<0||a+1>=nAct) return;
   const t=f-a,b=a+1,A=a*3,B=b*3;
   const rf=GUIDE_S[g]*(RN-1), ra=Math.min(RN-2,Math.floor(rf)), rt=rf-ra, rb=ra+1;
@@ -489,18 +526,6 @@ function waterAndGround(i,h,t){
   vel[p]=flowX+rx;vel[p+1]=ry;vel[p+2]=flowZ+rz;
 }
 
-/* segment tension probe, pre-solve. This is the only thing that decides flow. */
-function segTension(i,h2){
-  if(i<0||i+1>=nAct) return 0;
-  const A=i*3,B=A+3;
-  const d=Math.hypot(pos[B]-pos[A],pos[B+1]-pos[A+1],pos[B+2]-pos[A+2]);
-  const stretch=d-nodeLen;
-  if(stretch<=0) return 0;
-  const w=invM[i]+invM[i+1];
-  if(w<=0) return 0;
-  return (stretch/w)/h2;
-}
-
 const _k0=new THREE.Vector3(),_k1=new THREE.Vector3(),_p0=new THREE.Vector3(),_p1=new THREE.Vector3();
 const SUB=6,ITER=6;
 let simTime=0, handIdx=-1, corkIdx=-1, blewUp=false;
@@ -538,7 +563,7 @@ function physics(dt){
     updateGuidePositions();
 
     /* line integration */
-    nAct=Math.min(MAXNODE,Math.floor(offSpool/nodeLen)+2);
+    nAct=Math.min(MAXNODE,Math.floor(idxAt(offSpool))+2);
     for(let i=0;i<nAct;i++){
       const p=i*3;
       vel[p+1]-=9.81*h;
@@ -551,21 +576,21 @@ function physics(dt){
 
     /* probe segments: just outside the tiptop, just below the stripping
        guide, and just inside the spool. Impulses accumulate during the solve. */
-    probeI[0]=Math.floor(lineOut/nodeLen)-1;
-    probeI[1]=Math.floor((lineOut+rodArc)/nodeLen)+1;
-    probeI[2]=Math.floor(offSpool/nodeLen)-1;
+    probeI[0]=Math.max(0,Math.floor(idxAt(lineOut))-1);
+    probeI[1]=Math.floor(idxAt(lineOut+rodArc))+1;
+    probeI[2]=Math.max(0,Math.floor(idxAt(offSpool))-1);
     probeLam[0]=probeLam[1]=probeLam[2]=0;
 
     for(let it=0;it<ITER;it++){
       for(let i=0;i<RN-1;i++) rodDist(i,i+1,ROD_SEG);
       for(let i=1;i<RN-1;i++) rodBend(i-1,i,i+1,Math.min(1,rbendK[i]*P.stiffMul));
       for(let i=0;i<nAct-1;i++) lineDist(i,i+1);
-      const bendTo=Math.min(nAct-2,Math.floor(lineOut/nodeLen));
+      const bendTo=Math.min(nAct-2,Math.floor(idxAt(lineOut)));
       for(let i=1;i<bendTo;i++) lineBend(i-1,i,i+1,0.04);
       for(let g=0;g<NG;g++) solveGuide(g,0.85);
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
-      if(handHeld&&handIdx>0) pinLine(handIdx*nodeLen,_handW.x,_handW.y,_handW.z,0.9);
-      if(corkHeld&&corkIdx>0) pinLine(corkIdx*nodeLen,_corkW.x,_corkW.y,_corkW.z,0.9);
+      if(handHeld&&handIdx>0) pinLine(sArc(handIdx),_handW.x,_handW.y,_handW.z,0.9);
+      if(corkHeld&&corkIdx>0) pinLine(sArc(corkIdx),_corkW.x,_corkW.y,_corkW.z,0.9);
     }
 
     /* ---- material flow, decided purely by tension vs friction ----
@@ -597,7 +622,7 @@ function physics(dt){
       if(Tsp>thr&&offSpool<TOTAL_LINE){
         let give=0;
         if(handHeld&&handIdx>0){
-          const Lr=offSpool-handIdx*nodeLen;
+          const Lr=offSpool-sArc(handIdx);
           const Dr=Math.hypot(_handW.x-_reelW.x,_handW.y-_reelW.y,_handW.z-_reelW.z);
           give=Dr-Lr-P.spoolDead;
         } else {
@@ -612,11 +637,24 @@ function physics(dt){
       }
       if(offSpool-lineOut-rodArc<MIN_SLACK)
         lineOut=Math.max(MIN_OUT,offSpool-rodArc-MIN_SLACK);
-      nAct=Math.min(MAXNODE,Math.floor(offSpool/nodeLen)+2);
+      nAct=Math.min(MAXNODE,Math.floor(idxAt(offSpool))+2);
     }
 
     for(let i=2;i<RN;i++){const p=i*3;
       rvel[p]=(rpos[p]-rprd[p])/h;rvel[p+1]=(rpos[p+1]-rprd[p+1])/h;rvel[p+2]=(rpos[p+2]-rprd[p+2])/h;}
+    /* Internal blank damping. Damping toward zero would fight the hand; damping
+       toward the velocity the rod would have if it were rigid removes only the
+       deformation, which is what kills tip ring without deadening the stroke. */
+    if(P.rodDamp>0.01){
+      const kd=Math.min(1,P.rodDamp*h);
+      for(let i=2;i<RN;i++){
+        const p=i*3;
+        for(let c=0;c<3;c++){
+          const vref=rvel[c]+(rvel[3+c]-rvel[c])*i;
+          rvel[p+c]+=kd*(vref-rvel[p+c]);
+        }
+      }
+    }
     for(let i=0;i<nAct;i++){const p=i*3;
       vel[p]=(pos[p]-prd[p])/h;vel[p+1]=(pos[p+1]-prd[p+1])/h;vel[p+2]=(pos[p+2]-prd[p+2])/h;}
     sanity();
@@ -757,11 +795,11 @@ function seedSpeck(i,cx,mode){
     const c=cellCursor++;
     const gx=c%GX,gz=Math.floor(c/GX)%GZ;
     spPos[p]  =cx-P.speckRange+((gx+Math.random())/GX)*P.speckRange*2;
-    spPos[p+2]=CZ+(((gz+Math.random())/GZ)*2-1)*HALFW*0.98;
+    spPos[p+2]=CZ+(((gz+Math.random())/GZ)*2-1)*HALFW*0.92;
     spLife[i] =5+Math.random()*10;
   } else {
     spPos[p]  =cx-P.speckRange*0.45-Math.random()*P.speckRange*0.85;
-    spPos[p+2]=CZ+(Math.random()*2-1)*HALFW*0.98;
+    spPos[p+2]=CZ+(Math.random()*2-1)*HALFW*0.92;
     spLife[i] =14+Math.random()*22;
   }
   spDep[i]=Math.random()<0.55?0:-Math.random()*0.35;
@@ -983,7 +1021,9 @@ class Trout{
     const m=this.mesh;
     m.visible=this.state!=='spooked';
     m.position.copy(this.p);
-    const hd=this.state==='hooked'?Math.atan2(-vel[2],-vel[0]):Math.PI;
+    /* nose is local -X. Holding, a trout points into the current, which runs
+       toward +X, so upstream is a heading of zero. */
+    const hd=this.state==='hooked'?Math.atan2(vel[2],-vel[0]):0;
     m.rotation.y+=((hd-m.rotation.y+Math.PI*3)%(Math.PI*2)-Math.PI)*Math.min(1,dt*3);
     m.rotation.z=this.state==='hooked'?Math.sin(t*9)*0.22:Math.sin(t*1.6+this.lie.x)*0.04;
     m.rotation.x=this.riseAnim>0?-0.35*Math.sin(Math.max(0,this.riseAnim)*Math.PI):0;
@@ -1281,13 +1321,17 @@ function applyPreset(obj){
   afterSettingsChange();
 }
 function afterSettingsChange(){
-  if(Math.abs(P.nodeLen-nodeLen)>1e-4){const old=nodeLen;nodeLen=P.nodeLen;redistribute(old);}
+  const oL=leadLen,oN=leadN,oT=leaderTot,oM=nodeLen;
+  rebuildSpacing();
+  if(nAct>2) redistribute(v=> v<=oT ? v/oL : oN+(v-oT)/oM);
+  rebuildRod();
   rebuildMasses();
   waterMat.uniforms.uQ.value=P.current;
   waterMat.uniforms.uGrade.value=P.grade;
   speckMat.uniforms.uSize.value=P.speckSize;
   rebuildBed();placeObstacles();
-  lastGrade=P.grade;lastNodeLen=P.nodeLen;
+  lastGrade=P.grade;
+  lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft;
 }
 function copySettings(){
   settingsStr=encodeSettings();
@@ -1398,8 +1442,8 @@ function handTargets(){
 
 function nearestLineNode(x,y,z){
   let best=-1,bd=1e9;
-  const from=Math.floor((lineOut+rodArc)/nodeLen)+1;   /* only the loose belly */
-  const to=Math.min(nAct-2,Math.floor(offSpool/nodeLen)-1);
+  const from=Math.floor(idxAt(lineOut+rodArc))+1;   /* only the loose belly */
+  const to=Math.min(nAct-2,Math.floor(idxAt(offSpool))-1);
   for(let i=from;i<=to;i++){
     const p=i*3;
     const d=(pos[p]-x)**2+(pos[p+1]-y)**2+(pos[p+2]-z)**2;
@@ -1418,15 +1462,15 @@ function resetCast(){
     rpos[p]=_k0.x+dx*ROD_SEG*i;rpos[p+1]=_k0.y+dy*ROD_SEG*i;rpos[p+2]=_k0.z+dz*ROD_SEG*i;
     rvel[p]=rvel[p+1]=rvel[p+2]=0;}
   updateGuidePositions();
-  nodeLen=P.nodeLen;
+  rebuildSpacing();
   lineOut=8.0;
   offSpool=lineOut+rodArc+2.2;
   rebuildMasses();
-  nAct=Math.min(MAXNODE,Math.floor(offSpool/nodeLen)+2);
+  nAct=Math.min(MAXNODE,Math.floor(idxAt(offSpool))+2);
   const T=(NG-1)*3;                                   /* tiptop */
   const tipx=guidePos[T],tipy=guidePos[T+1],tipz=guidePos[T+2];
   for(let i=0;i<nAct;i++){
-    const s=i*nodeLen,p=i*3;
+    const s=sArc(i),p=i*3;
     if(s<lineOut){
       const u=1-s/lineOut;                            /* fly is at s=0 */
       pos[p]=tipx+ (lineOut-s)*0.10;
@@ -1449,7 +1493,7 @@ function resetCast(){
   }
   /* straighten the flying section out over the water */
   for(let i=0;i<nAct;i++){
-    const s=i*nodeLen,p=i*3;
+    const s=sArc(i),p=i*3;
     if(s>=lineOut) break;
     pos[p]=tipx;
     pos[p+1]=surfY(tipx)+0.03;
@@ -1466,7 +1510,7 @@ function resetCast(){
 const clock=new THREE.Clock();
 let started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
 let prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=false,prevRodPinch=false;
-let lastNodeLen=P.nodeLen;
+let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft;
 const _lh=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_netP=new THREE.Vector3();
 
 function pulse(s){
@@ -1510,7 +1554,7 @@ renderer.setAnimationLoop(()=>{
       } else {
         const[,,mn,mx,st]=MENU[menuSel];
         P[key]=Math.min(mx,Math.max(mn,P[key]+Math.sign(ax)*st*dt*7));
-        if(key==='lineWt')rebuildMasses();
+        if(key==='lineWt'||key==='tippetLen')rebuildMasses();
         if(key==='current')waterMat.uniforms.uQ.value=P.current;
         if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
         if(key==='speckSize')speckMat.uniforms.uSize.value=P.speckSize;
@@ -1535,9 +1579,14 @@ renderer.setAnimationLoop(()=>{
     M.depth=Math.max(0,surfY(_camW.x)-gy);
   }
   if(Math.abs(P.grade-lastGrade)>0.005){lastGrade=P.grade;rebuildBed();placeObstacles();}
-  if(Math.abs(P.nodeLen-lastNodeLen)>0.004){
-    const old=nodeLen;nodeLen=P.nodeLen;lastNodeLen=P.nodeLen;
-    redistribute(old);
+  {
+    const sig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;
+    if(Math.abs(sig-lastSig)>0.004){
+      const oL=leadLen,oN=leadN,oT=leaderTot,oM=nodeLen;
+      const oldIdx=v=> v<=oT ? v/oL : oN+(v-oT)/oM;
+      rebuildSpacing();redistribute(oldIdx);lastSig=sig;
+    }
+    if(Math.abs(P.tipSoft-lastTipSoft)>0.005){lastTipSoft=P.tipSoft;rebuildRod();}
   }
 
   handTargets();
@@ -1557,6 +1606,7 @@ renderer.setAnimationLoop(()=>{
   if(handActive&&!prevHandActive){
     const n=nearestLineNode(_lh.x,_lh.y,_lh.z);
     handIdx=(n.i>0&&n.d<0.55)?n.i:-1;
+    if(handIdx>0) handArc=sArc(handIdx);
     if(handIdx<0) say('no line there to grab');
   }
   if(!handActive) handIdx=-1;
@@ -1567,6 +1617,7 @@ renderer.setAnimationLoop(()=>{
   if(rodPinch&&!prevRodPinch){
     const n=nearestLineNode(_corkW.x,_corkW.y,_corkW.z);
     corkIdx=n.i>0?n.i:-1;
+    if(corkIdx>0) corkArc=sArc(corkIdx);
   }
   if(!rodPinch) corkIdx=-1;
   prevRodPinch=rodPinch;
@@ -1615,7 +1666,7 @@ renderer.setAnimationLoop(()=>{
         flyAir=false;driftAcc=0;driftT=0;
         const speed=Math.hypot(vel[0],vel[1],vel[2]);
         spawnRing(fx,fz,0.6);
-        const lastFree=Math.floor(lineOut/nodeLen);
+        const lastFree=Math.floor(idxAt(lineOut));
         for(const f of fishes){
           if(f.state!=='holding')continue;
           f.evaluated=false;
@@ -1698,10 +1749,15 @@ renderer.setAnimationLoop(()=>{
   for(let i=speckPhase;i<visible;i+=2){
     const p=i*3;
     computeFlow(spPos[p],spPos[p+2]);
+    const sp=Math.hypot(flowX,flowZ);
     spPos[p]+=flowX*dt;spPos[p+2]+=flowZ*dt;
-    spLife[i]-=dt;
+    /* Slack water and the insides of rocks are sinks: anything that drifts in
+       never drifts out, so over a few minutes they hoard most of the field.
+       Drain the lifetime fast when a speck is barely moving — eddies still
+       show circulation, but nothing accumulates there. */
+    spLife[i]-=dt*(sp<0.055?9:1);
     if(spPos[p]>_camW.x+P.speckRange*1.15||spPos[p]<_camW.x-P.speckRange*1.5||spLife[i]<0||
-       bedDepth(spPos[p],spPos[p+2])<0.04){
+       bedDepth(spPos[p],spPos[p+2])<0.10){
       seedSpeck(i,_camW.x,Math.random()<P.speckSpread?1:0);continue;
     }
     spPos[p+1]=filmY(spPos[p],spPos[p+2],simTime)+0.014+spDep[i];
@@ -1732,22 +1788,22 @@ renderer.setAnimationLoop(()=>{
 
   /* ---- render the line: resample the whole chain by arc length ---- */
   {
-    const lastIdx=Math.min(nAct-1,Math.floor(offSpool/nodeLen));
+    const lastIdx=Math.min(nAct-1,Math.floor(idxAt(offSpool)));
     const total=offSpool;
     for(let j=0;j<DYN_N;j++){
       const s=total*j/(DYN_N-1);
-      const f=Math.min(lastIdx-0.001,s/nodeLen);
+      const f=Math.min(lastIdx-0.001,Math.max(0,idxAt(s)));
       const a=Math.max(0,Math.floor(f)),b=Math.min(lastIdx,a+1),tt=f-a;
       const A=a*3,B=b*3,k=j*3;
       dynPath[k]  =pos[A]  +(pos[B]  -pos[A]  )*tt;
       dynPath[k+1]=pos[A+1]+(pos[B+1]-pos[A+1])*tt;
       dynPath[k+2]=pos[A+2]+(pos[B+2]-pos[A+2])*tt;
       let rad,c;
-      if(s<LEADER_LEN){
-        const u=s/LEADER_LEN;
+      if(s<P.leaderLen){
+        const u=s/P.leaderLen;
         rad=(0.0013+(0.0040-0.0013)*u)*P.lineVis;
         c=cLdr.clone().lerp(cFly,u);
-      } else if(s<FLYLINE_LEN){ rad=0.0040*P.lineVis; c=cFly; }
+      } else if(s<P.leaderLen+FLYLINE_LEN){ rad=0.0040*P.lineVis; c=cFly; }
       else { rad=0.0022*P.lineVis; c=cBack; }
       lineTube.rad[j]=rad;
       for(let q=0;q<lineTube.R;q++){
