@@ -105,6 +105,7 @@ const MENU=[
   ['Load my default','!mydefault',0,0,0,'Push right to load whatever you last saved as your default.'],
   ['Save as my default','!save',0,0,0,'Push right to store every current value as your default.'],
   ['Hook a test fish','!hookfish',0,0,0,'Hooks the fish nearest your fly straight away, so you can work on the fight without having to earn it first.'],
+  ['Recenter panel','!recenter',0,0,0,'Puts the panel back in front of you at a comfortable distance. Use this if you ever lose track of it.'],
   ['Panel scale','menuScale',0.40,3.00,0.05,'Size of this panel. The plus and minus buttons in its top right do the same thing, and the handle at the top left drags it around.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
   ['— ROD MODEL —',null,0,0,0,''],
@@ -379,7 +380,7 @@ function rebuildMasses(){
     dragK[i]=0.5*1.2*1.1*pr[1]*span/m;
     lineEI[i]=(s<P.leaderLen?3.0e9:2.0e7)*Math.PI*Math.pow(pr[1],4)/64;
   }
-  if(hooked) invM[0]=1/(0.055+hooked.len*0.09);
+  if(hooked&&hooked.state==='hooked') invM[0]=0;   /* fish drives the fly node */
 }
 rebuildMasses();
 
@@ -584,25 +585,12 @@ function waterAndGround(i,h,t){
   const p=i*3,x=pos[p],z=pos[p+2];
   /* a hooked fish lives below the film and must be free to sound, so the fly
      node skips the surface clamp and just gets water drag plus a bed floor */
-  if(i===0&&hooked&&hooked.state==='hooked'){
-    const gyf=bedY(x,z);
-    if(bedDepth(x,z)>0.02){
-      computeFlow(x,z);
-      let rx2=vel[p]-flowX, ry2=vel[p+1], rz2=vel[p+2]-flowZ;
-      const rs=Math.sqrt(rx2*rx2+ry2*ry2+rz2*rz2);
-      const kk=1/(1+(3.5*rs+2.5)*h);
-      rx2*=kk;ry2*=kk;rz2*=kk;
-      vel[p]=flowX+rx2;vel[p+1]=ry2;vel[p+2]=flowZ+rz2;
-    }
-    if(pos[p+1]<gyf+0.06){pos[p+1]=gyf+0.06;if(vel[p+1]<0)vel[p+1]=0;}
-    return;
-  }
+  if(i===0&&hooked&&hooked.state==='hooked') return;   /* driven by the fish body */
   /* cheap bail-out for line still high in the air — one surfY call instead of
-     bedY + bedDepth + filmY + computeFlow. Far bank climbs, so allow for it. */
+     bedY + bedDepth + filmY + computeFlow. The far bank climbs, so allow for it. */
   const sy=surfY(x);
   if(pos[p+1]>sy+(z<CZ-HALFW?3.0:0.8)) return;
-  const gy=bedY(x,z);
-  const depth=bedDepth(x,z);
+  const gy=bedY(x,z), depth=bedDepth(x,z);
   if(depth<=0.02){                                   /* dry bank */
     if(pos[p+1]<gy+0.008){pos[p+1]=gy+0.008;if(vel[p+1]<0)vel[p+1]=0;
       vel[p]*=0.82;vel[p+2]*=0.82;}
@@ -667,6 +655,7 @@ function physics(dt){
     }
     updateGuidePositions();
 
+    if(hooked&&hooked.state==='hooked') hooked.step(h);
     /* line integration */
     nAct=Math.min(MAXNODE,Math.floor(idxAt(offSpool))+2);
     for(let i=0;i<nAct;i++){
@@ -674,7 +663,7 @@ function physics(dt){
       vel[p+1]-=9.81*h;
       airDrag(i,h);
       waterAndGround(i,h,simTime);
-      if(i===0&&hooked) hooked.drive(h);
+
       prd[p]=pos[p];prd[p+1]=pos[p+1];prd[p+2]=pos[p+2];
       pos[p]+=vel[p]*h;pos[p+1]+=vel[p+1]*h;pos[p+2]+=vel[p+2]*h;
     }
@@ -1097,7 +1086,7 @@ class Trout{
     this.feedT=4+Math.random()*8;
     this.riseT=1+Math.random()*5;this.riseAnim=0;this.evaluated=false;
     this.run=new THREE.Vector3(-1,0,0);this.runT=0;
-    this.beh='cruise';this.behT=0;this.effort=0.5;
+    this.beh='cruise';this.behT=0;this.effort=0.5;this.v=new THREE.Vector3();
     this.mesh=makeTrout(l.len);scene.add(this.mesh);
     this.marker=makeMarker();scene.add(this.marker);
   }
@@ -1121,14 +1110,19 @@ class Trout{
     else { this.beh='easy'; this.behT=1.0+Math.random()*1.6; }
     say('fish: '+this.beh);
   }
-  /* Steady pull scales with length; a surge is about 2.6x that. A 40 cm rainbow
-     pulls roughly 5 N steady and 12 N in a first run, against a 21 N 5X tippet —
-     so a green fish can genuinely break you off, and can out-pull the reel. */
-  drive(h){
+  bodyMass(){ return 0.30*Math.pow(this.len/0.30,3); }
+  /* A hooked fish is its own rigid body, NOT a heavy node on the line.
+     Hanging 0.7 kg off a 1.5 microgram tippet node is a 60,000:1 mass ratio and
+     Gauss-Seidel simply cannot transmit force across it — the line could neither
+     drag the fish in nor build tension to break. Instead the fly node is made
+     kinematic and pinned to the fish, and the line tension measured at the rod
+     tip is fed back to the fish as a real force. */
+  step(h){
     this.behT-=h;
     if(this.behT<=0) this.pickBehaviour();
-    let ax=pos[0]-rpos[0],az=pos[2]-rpos[2];
+    let ax=this.p.x-rpos[0],az=this.p.z-rpos[2];
     const dl=Math.hypot(ax,az)||1;ax/=dl;az/=dl;
+    const m=this.bodyMass();
     const F=12*this.len*P.fishPower*(0.25+0.75*this.stamina);
     let fx=0,fy=0,fz=0;
     switch(this.beh){
@@ -1138,20 +1132,38 @@ class Trout{
       case 'easy':  fx=-ax*F*0.18; fz=-az*F*0.18;             this.effort=0.15; break;
       default:      fx=this.run.x*F*0.7; fz=this.run.z*F*0.7; this.effort=0.5;
     }
-    const im=invM[0];
-    vel[0]+=fx*im*h; vel[1]+=fy*im*h; vel[2]+=fz*im*h;
-    /* the current carries the fish too */
-    computeFlow(pos[0],pos[2]);
-    vel[0]+=(flowX-vel[0])*Math.min(1,2.5*h);
-    vel[2]+=(flowZ-vel[2])*Math.min(1,2.5*h);
-    if(this.beh!=='jump'){
-      const want=surfY(pos[0])-Math.min(0.55,bedDepth(pos[0],pos[2])*0.6);
-      vel[1]+=(want-pos[1])*3.0*h;
+    /* the line pulls the fish toward the rod tip with the tension we measured */
+    const T=(RN-1)*3;
+    let lx=rpos[T]-this.p.x, ly=rpos[T+1]-this.p.y, lz=rpos[T+2]-this.p.z;
+    const ll=Math.hypot(lx,ly,lz)||1; lx/=ll;ly/=ll;lz/=ll;
+    const Tn=Math.min(probeOut,400);
+    fx+=lx*Tn; fy+=ly*Tn; fz+=lz*Tn;
+    this.v.x+=fx/m*h; this.v.y+=fy/m*h; this.v.z+=fz/m*h;
+    /* water: drag relative to the current, and gravity when airborne */
+    const film=filmY(this.p.x,this.p.z,simTime);
+    if(this.p.y<film){
+      computeFlow(this.p.x,this.p.z);
+      const k=1/(1+(2.2*Math.hypot(this.v.x-flowX,this.v.y,this.v.z-flowZ)+1.8)*h);
+      this.v.x=flowX+(this.v.x-flowX)*k;
+      this.v.y*=k;
+      this.v.z=flowZ+(this.v.z-flowZ)*k;
+      if(this.beh!=='jump'){
+        const want=film-Math.min(0.55,bedDepth(this.p.x,this.p.z)*0.6);
+        this.v.y+=(want-this.p.y)*3.0*h;
+      }
+    } else {
+      this.v.y-=9.81*h;
     }
+    this.p.x+=this.v.x*h; this.p.y+=this.v.y*h; this.p.z+=this.v.z*h;
+    const gy=bedY(this.p.x,this.p.z)+0.06;
+    if(this.p.y<gy){this.p.y=gy;if(this.v.y<0)this.v.y=0;}
+    /* the fly goes wherever the fish goes */
+    pos[0]=this.p.x;pos[1]=this.p.y;pos[2]=this.p.z;
+    vel[0]=this.v.x;vel[1]=this.v.y;vel[2]=this.v.z;
   }
   update(dt,t){
     if(this.state==='hooked'){
-      this.p.set(pos[0],pos[1],pos[2]);
+      /* p is integrated in step(); nothing to do here */
     } else if(this.state==='spooked'){
       this.timer-=dt;
       const deep=surfY(this.p.x)-0.95;
@@ -1182,7 +1194,7 @@ class Trout{
     m.position.copy(this.p);
     /* nose is local -X. Holding, a trout points into the current, which runs
        toward +X, so upstream is a heading of zero. */
-    const hd=this.state==='hooked'?Math.atan2(vel[2],-vel[0]):0;
+    const hd=this.state==='hooked'?Math.atan2(this.v.z,-this.v.x):0;
     m.rotation.y+=((hd-m.rotation.y+Math.PI*3)%(Math.PI*2)-Math.PI)*Math.min(1,dt*3);
     m.rotation.z=this.state==='hooked'?Math.sin(t*9)*0.22:Math.sin(t*1.6+this.lie.x)*0.04;
     m.rotation.x=this.riseAnim>0?-0.35*Math.sin(Math.max(0,this.riseAnim)*Math.PI):0;
@@ -1525,10 +1537,11 @@ function runAction(key){
          is not snapped taut out of nowhere */
       best.p.set(pos[0],pos[1],pos[2]);
       best.state='hooked';best.stamina=1;best.behT=0;best.effort=0.5;
-      hooked=best;invM[0]=1/(0.055+best.len*0.09);
+      best.v.set(0,0,0);hooked=best;invM[0]=0;
       say('test fish on \u2014 '+(best.len*100).toFixed(0)+' cm');
     } else say('no fish available to hook');
   }
+  else if(key==='!recenter'){recenterPanel();say('panel recentred');}
   else if(key==='!copy'){copySettings();say('settings copied');}
 }
 let menuOpen=false, menuSel=1;
@@ -1655,7 +1668,32 @@ const rayLine=(()=>{
   m.renderOrder=30;m.visible=false;scene.add(m);return m;
 })();
 let dragKey=null, dragRow=-1, panelDrag=false, panelDist=1.05;
-const _pw=new THREE.Vector3(), _camWorld=new THREE.Vector3();
+const _pw=new THREE.Vector3(), _camWorld=new THREE.Vector3(), panelOff=new THREE.Vector3();
+const PANEL_HOME=new THREE.Vector3(0,1.45,-1.05);
+/* yaw-only facing: pitching the panel makes it unreadable and easy to lose */
+function facePanelAt(target){
+  player.updateMatrixWorld(true);
+  const t=player.worldToLocal(target.clone());
+  const dx=t.x-menu.mesh.position.x, dz=t.z-menu.mesh.position.z;
+  menu.mesh.rotation.set(0,Math.atan2(dx,dz),0);
+}
+function clampPanel(){
+  const p=menu.mesh.position;
+  if(!Number.isFinite(p.x)||!Number.isFinite(p.y)||!Number.isFinite(p.z)){recenterPanel();return;}
+  camera.getWorldPosition(_camWorld);
+  player.updateMatrixWorld(true);
+  const c=player.worldToLocal(_camWorld.clone());
+  if(p.distanceTo(c)>4.0||p.distanceTo(c)<0.25) recenterPanel();
+}
+function recenterPanel(){
+  camera.getWorldQuaternion(_camQ);
+  const e=new THREE.Euler().setFromQuaternion(_camQ,'YXZ');
+  camera.getWorldPosition(_camWorld);
+  player.updateMatrixWorld(true);
+  const c=player.worldToLocal(_camWorld.clone());
+  menu.mesh.position.set(c.x-Math.sin(e.y)*1.05, c.y-0.10, c.z-Math.cos(e.y)*1.05);
+  menu.mesh.rotation.set(0,e.y,0);
+}
 function menuPointer(trigPressed, trigEdge){
   if(!menuOpen||!rodGrip){
     pointerDot.visible=false;rayLine.visible=false;dragKey=null;panelDrag=false;
@@ -1671,16 +1709,19 @@ function menuPointer(trigPressed, trigEdge){
   const end=hit?hit.point:_rayOrigin.clone().addScaledVector(_rayDir,2.0);
   rp[3]=end.x;rp[4]=end.y;rp[5]=end.z;
   rayLine.geometry.attributes.position.needsUpdate=true;
-  /* keep dragging the panel even once the ray leaves it */
+  /* Drag by OFFSET, not by snapping the panel onto the ray. Snapping meant a
+     one-degree twitch of the rod hand threw the panel metres sideways, and it
+     could end up behind you with no way back. */
   if(panelDrag){
-    if(!trigPressed){panelDrag=false;}
-    else{
-      _pw.copy(_rayOrigin).addScaledVector(_rayDir,panelDist);
-      player.updateMatrixWorld(true);
-      menu.mesh.position.copy(player.worldToLocal(_pw.clone()));
+    if(!trigPressed){
+      panelDrag=false;
       camera.getWorldPosition(_camWorld);
-      menu.mesh.lookAt(_camWorld);
-      menu.mesh.rotateY(Math.PI);
+      facePanelAt(_camWorld);
+    } else {
+      _pw.copy(_rayOrigin).addScaledVector(_rayDir,panelDist).add(panelOff);
+      player.updateMatrixWorld(true);
+      menu.mesh.position.copy(player.worldToLocal(_pw));
+      clampPanel();
       return true;
     }
   }
@@ -1690,7 +1731,10 @@ function menuPointer(trigPressed, trigEdge){
   const inBox=(b)=>px>=b.x&&px<=b.x+b.w&&py>=b.y&&py<=b.y+b.h;
   if(trigEdge){
     if(px>=HANDLE.x+8&&px<=HANDLE.x+8+HANDLE.w&&py>=HANDLE.y&&py<=HANDLE.y+HANDLE.h){
-      panelDrag=true;panelDist=hit.distance;return true;
+      panelDrag=true;panelDist=hit.distance;
+      player.updateMatrixWorld(true);
+      panelOff.copy(menu.mesh.getWorldPosition(new THREE.Vector3())).sub(hit.point);
+      return true;
     }
     if(inBox(SCALE_M)){P.menuScale=Math.max(0.40,P.menuScale-0.10);menu.mesh.scale.setScalar(P.menuScale);return true;}
     if(inBox(SCALE_P)){P.menuScale=Math.min(3.00,P.menuScale+0.10);menu.mesh.scale.setScalar(P.menuScale);return true;}
@@ -2020,7 +2064,7 @@ renderer.setAnimationLoop(()=>{
       const chance=(f.feeding?1:P.nonFeedMult)*(clean?1:0.06);
       if(Math.random()<chance){
         f.state='hooked';f.stamina=1;f.runT=0;hooked=f;
-        invM[0]=1/(0.055+f.len*0.09);
+        f.v.set(0,0,0);f.p.set(pos[0],pos[1],pos[2]);invM[0]=0;
         say('EAT \u2014 he\u2019s on');pulse(1.0);spawnRing(fx,fz,1.2);
       } else say(!clean?'drag \u2014 refused':(f.feeding?'he looked and passed':'that one isn\u2019t feeding'));
     }

@@ -153,8 +153,12 @@ cannot pay line back out. So holding the trigger against a running fish shortens
 until something gives — normally the tippet. Setting `reelPower` below tippet strength makes
 the reel stall first and saves the line instead. Five behaviours cycle on a timer weighted
 by stamina: **run, sound, jump, cruise, easy**. Stamina drains from both tension and the fish's
-own effort, so a fish that fights hard tires fast. The fly node skips the surface film clamp
-while hooked, so it can genuinely sound and genuinely jump. A **Hook a test fish** action in
+own effort, so a fish that fights hard tires fast. **A hooked fish is its own rigid body, not a heavy node on the line.** Hanging 0.7 kg off a
+1.5 microgram tippet node is a 60,000:1 mass ratio, and Gauss-Seidel cannot transmit force
+across that — the line could neither drag the fish in nor build tension to break. So while
+hooked, `invM[0] = 0` and the fly node is pinned to the fish each substep; the line tension
+measured at the rod tip is fed back to the fish as a real force along the line. The fish
+integrates its own swim force, water drag and gravity, and is free to leave the water. A **Hook a test fish** action in
 the menu puts one on immediately for testing.
 
 Behaviour when not hooked: fish hold facing **upstream** (nose is local −X, flow runs toward +X, so heading
