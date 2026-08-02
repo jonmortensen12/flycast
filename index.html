@@ -86,43 +86,50 @@ import * as THREE from 'three';
    ════════════════════════════════════════════════════════════ */
 const P = {
   nodeLen:0.20,
-  stiffMul:0.85, dragMul:2.75, lineDens:1.85, statFric:0.05,
-  reelSpeed:2.60, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:12.0,
-  guideMu:0.16, lineVis:1.60, flySize:1.80, haptics:1.00,
-  moveSpeed:1.60, netRadius:0.30,
-  current:0.55, specks:1.00, speckSize:0.05, speckSpread:0.45, grade:1.00, vortex:1.00,
+  stiffMul:0.286, dragMul:1.00, lineWt:5.0, statFric:0.05,
+  reelSpeed:2.60, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
+  guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
+  moveSpeed:1.60, netRadius:0.30, invertY:0,
+  current:0.55, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
   splashV:4.50, lineRad:0.50, spookT:5.00, fatigue:1.00,
   riseRate:0.55, feedChance:0.60, nonFeedMult:0.15, fishPower:1.00,
 };
 const MENU=[
+  ['— PRESETS —',null,0,0,0,''],
+  ['Physical defaults','!physical',0,0,0,'Push right to load values derived from real tackle: AFFTA line weights, a measured 9 ft 5wt deflection curve, real leader taper, and physical air drag coefficients.'],
+  ['Load my default','!mydefault',0,0,0,'Push right to load whatever you last saved as your default.'],
+  ['Save as my default','!save',0,0,0,'Push right to store every current value as your default.'],
+  ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
   ['— LINE MODEL —',null,0,0,0,''],
-  ['Node length','nodeLen',0.08,0.50,0.01,'Spacing between simulated points on the line, in metres. The whole line uses one spacing, so longer line means more nodes. Smaller is smoother and slower — watch the FPS row.'],
-  ['Line mass','lineDens',0.40,3.00,0.05,'Weight per metre of fly line. Heavier loads the rod more but is harder to hold in the air.'],
-  ['Line air drag','dragMul',0.10,4.00,0.05,'Air resistance on the line. This is what turns a loop over and eventually kills it.'],
+  ['Node length','nodeLen',0.08,0.50,0.01,'Spacing between simulated points on the line, in metres. One spacing for the whole line, so more line means more nodes. Smaller is smoother and slower — watch the FPS row.'],
+  ['Line weight','lineWt',3.00,8.00,0.50,'AFFTA line rating. Sets real mass per metre: a 5wt head is 140 grains over 30 ft, which is 0.99 g/m. Heavier line loads the rod harder and carries further.'],
+  ['Line air drag','dragMul',0.10,4.00,0.05,'Multiplier on the physical drag coefficient. 1.00 is a real cylinder in crossflow — raise it only if loops refuse to turn over.'],
   ['— FRICTION —',null,0,0,0,''],
-  ['Guide friction','guideMu',0.00,0.60,0.01,'Capstan friction through the eyelets. Every radian of bend multiplies the tension needed to make line slide, so a deeply loaded rod grips harder.'],
-  ['Static friction','statFric',0.00,0.60,0.01,'Force that must be beaten before line slides at all, at the guides or the spool. Raise it if line creeps out on false casts.'],
+  ['Guide friction','guideMu',0.00,0.60,0.01,'Capstan friction through the eyelets. Around 0.15 for fly line on chrome snakes. Every radian of rod bend multiplies the tension needed to make line slide.'],
+  ['Static friction','statFric',0.00,0.60,0.01,'Force that must be beaten before line slides at all. Raise it if line creeps out on false casts.'],
   ['Spool drag','spoolDrag',0.05,3.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
-  ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far you must pull past taut before any line leaves the reel. Stops small hand movements from bleeding line.'],
+  ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
   ['— ROD & TACKLE —',null,0,0,0,''],
-  ['Rod stiffness','stiffMul',0.20,2.00,0.05,'How much the blank resists bending. Low is a soft noodle; high is fast action needing a crisp stop.'],
+  ['Rod stiffness','stiffMul',0.05,2.00,0.02,'Bending stiffness of the blank. 0.29 reproduces a real 9 ft 5wt: tip deflects a third of rod length under a 1.6 N load. Higher is a faster action.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
-  ['Tippet (N)','tippet',2.00,60.0,0.50,'Breaking strain in newtons. Exceed it playing a fish and you pop him off.'],
+  ['Tippet (N)','tippet',2.00,60.0,0.50,'Breaking strain. 5X is 4.75 lb, about 21 N. 6X is 15.6 N, 4X is 26.7 N.'],
   ['Line float','buoyancy',0.20,3.00,0.05,'How firmly the line is held on the surface film once it is riding on it.'],
   ['Surface stick','stick',0.00,4.00,0.10,'Surface tension. Higher makes line cling and take a harder pull to lift off.'],
-  ['Line thickness','lineVis',0.50,4.00,0.10,'Visual only. Fattens the rendered line so you can see it at distance.'],
+  ['Line thickness','lineVis',0.10,4.00,0.05,'Visual only. How fat the line is drawn. Real fly line is far thinner than is comfortable to see at distance.'],
   ['Fly size','flySize',0.50,4.00,0.10,'Visual only. Scales the fly and its hi-vis post.'],
   ['Haptics','haptics',0.00,2.00,0.10,'Vibration strength for rod load, fish tension, and spool clicks.'],
   ['— PLAYER —',null,0,0,0,''],
   ['Move speed','moveSpeed',0.40,4.00,0.10,'Walking speed on the left stick. Deep water slows you regardless.'],
-  ['Net radius','netRadius',0.15,0.80,0.05,'How close a tired fish must be to the net hoop to be landed.'],
+  ['Invert walk Y','invertY',0,1,1,'Flip the forward and backward walking direction.'],
+  ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
   ['— RIVER —',null,0,0,0,''],
   ['Current','current',0.10,1.40,0.05,'Discharge per unit width. Speed is this divided by depth, so raising it speeds the whole river.'],
   ['River grade','grade',0.00,2.50,0.10,'Steepness of the reach and the size of the drops between pools. Rebuilds the bed live.'],
   ['Speck density','specks',0.00,1.00,0.02,'How many drifting specks are shown, out of 4000.'],
-  ['Speck size','speckSize',0.05,4.00,0.05,'On-screen size of each speck.'],
+  ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck.'],
+  ['Speck range','speckRange',6.00,45.0,1.00,'How far upstream and downstream specks are kept, in metres. A shorter range packs the same count into less river, so you can read the flow with far fewer of them.'],
   ['Speck spread','speckSpread',0.00,1.00,0.05,'Share of specks respawning on a grid around you rather than drifting from upstream. Raise it to see flow in dead water.'],
   ['Eddy strength','vortex',0.00,2.50,0.10,'Strength of vortices shed off the rocks and log. Zero gives smooth steady flow.'],
   ['— FISH —',null,0,0,0,''],
@@ -135,12 +142,31 @@ const MENU=[
   ['Splash limit','splashV',1.00,9.00,0.20,'Landing speed above which the fly slaps down and spooks nearby fish.'],
   ['Lining radius','lineRad',0.10,2.00,0.05,'How close fly line may land to a fish before he is lined and put down.'],
   ['Spook seconds','spookT',1.00,20.0,0.50,'How long a spooked fish sulks before returning to his lie.'],
-  ['Stamina drain','fatigue',0.20,3.00,0.05,'How fast a hooked fish tires under tension. Higher means shorter fights.'],
+  ['Stamina drain','fatigue',0.20,3.00,0.05,'How fast a hooked fish tires under tension. Affects how hard he is to steer, not whether he can be netted.'],
   ['Rise interest','riseRate',0.05,2.00,0.05,'How often a feeding fish noses the surface for naturals.'],
   ['Feeding chance','feedChance',0.00,1.00,0.05,'Odds a fish is actively feeding when he re-evaluates. Feeding fish are the catchable ones.'],
   ['Non-feeder mult','nonFeedMult',0.00,1.00,0.05,'Take chance multiplier for a fish that is not feeding.'],
   ['Fish power','fishPower',0.30,2.50,0.05,'How hard a hooked fish pulls and runs.'],
 ];
+
+/* values derived from real tackle — see the notes beside each menu row */
+const PHYSICAL={
+  stiffMul:0.286,   /* calibrated: 9ft 5wt tip deflects L/3 under 1.6 N */
+  dragMul:1.00,     /* dragK already carries 0.5*rho*Cd*A/m with Cd=1.1 */
+  lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
+  guideMu:0.15, statFric:0.05, spoolDrag:1.00, spoolDead:0.05,
+  tippet:21.0,      /* 5X = 4.75 lb */
+  buoyancy:1.00, stick:1.00, nodeLen:0.20,
+};
+let userDefault=null;
+
+/* AFFTA head weights in grains over the first 30 ft */
+const AFFTA={1:60,2:80,3:100,4:120,5:140,6:160,7:185,8:210,9:240,10:280};
+function lineWeightDensity(wt){
+  const a=Math.max(1,Math.min(9,Math.floor(wt))),b=Math.min(10,a+1),t=Math.max(0,Math.min(1,wt-a));
+  const gr=AFFTA[a]*(1-t)+AFFTA[b]*t;
+  return gr*6.47989e-5/9.144;                 /* grains -> kg, over 30 ft */
+}
 
 /* ---- rod ---- */
 const RN=12, ROD_LEN=2.743, ROD_SEG=ROD_LEN/(RN-1);
@@ -153,7 +179,8 @@ const ROD_ARC=GUIDE_ARC[0];
 
 /* ---- line: one continuous chain, material coordinate = arc length from the fly ---- */
 const MAXNODE=430, TOTAL_LINE=34.0, LEADER_LEN=2.6, FLYLINE_LEN=27.0;
-const MIN_SLACK=0.25, MIN_OUT=1.6;
+const MIN_SLACK=0.25, MIN_OUT=4.0;
+let hooked=null;
 
 /* ---- river ---- */
 const CZ=-9.0, HALFW=7.0, MAXDEPTH=1.5, VMAX=2.2;
@@ -242,27 +269,37 @@ let offSpool=8.0+ROD_ARC+2.2;
 let rodArc=ROD_ARC;       /* live path length through the guides */
 let handMode=0,rodPinch=false,wrapTotal=0;
 let clickAcc=0,slipOut=0,spoolOut=0;
+let probeOut=0,probeIn=0,probeThr=0,probeSp=0;
 
 function lineProfile(s){
-  /* returns [density kg/m, diameter m] at arc length s from the fly */
+  /* [density kg/m, diameter m] at arc length s from the fly.
+     Leader: real 9 ft tapered nylon, 5X tippet (0.152 mm, 0.021 g/m) at the fly
+     out to a 0.021 in butt (0.53 mm, 0.255 g/m). Nylon at 1140 kg/m^3.
+     Fly line: AFFTA rating. Beyond that, 20 lb dacron backing. */
   if(s<LEADER_LEN){
     const u=s/LEADER_LEN;
-    return [0.00030+(0.00095-0.00030)*Math.pow(u,1.6), 0.00040+(0.00105-0.00040)*Math.pow(u,1.6)];
+    const d=0.000152+(0.000533-0.000152)*Math.pow(u,1.3);
+    return [Math.PI*(d*0.5)*(d*0.5)*1140, d];
   }
-  if(s<FLYLINE_LEN) return [0.0033*P.lineDens, 0.0013];
-  return [0.00075, 0.00060];
+  if(s<FLYLINE_LEN){
+    const d=0.00090+(P.lineWt-3)*0.00006;
+    return [lineWeightDensity(P.lineWt), d];
+  }
+  return [0.00040,0.00050];
 }
 function rebuildMasses(){
   for(let i=0;i<MAXNODE;i++){
     const s=i*nodeLen;
     const pr=lineProfile(s);
-    let m=Math.max(pr[0]*nodeLen,7e-5);
-    if(i===0) m+=2.5e-5;                       /* the fly itself */
+    let m=Math.max(pr[0]*nodeLen,2e-6);
+    if(i===0) m+=2.0e-5;                       /* a size 14 dry fly, 20 mg */
     invM[i]=1/m;
     /* drag/mass is independent of nodeLen, so changing resolution does not
-       change how the line behaves — only how finely it is resolved */
+       change how the line behaves — only how finely it is resolved.
+       0.5*rho*Cd*A/m with air at 1.2 kg/m^3 and Cd 1.1 for a cylinder. */
     dragK[i]=0.5*1.2*1.1*pr[1]*nodeLen/m;
   }
+  if(hooked) invM[0]=1/(0.055+hooked.len*0.09);
 }
 rebuildMasses();
 
@@ -309,12 +346,22 @@ function rodBend(a,b,c,k){
   rpos[C]+=dx*s*rinvM[c]*0.5;rpos[C+1]+=dy*s*rinvM[c]*0.5;rpos[C+2]+=dz*s*rinvM[c]*0.5;
   rpos[B]-=dx*s*rinvM[b];    rpos[B+1]-=dy*s*rinvM[b];    rpos[B+2]-=dz*s*rinvM[b];
 }
+/* Tension in PBD is the accumulated constraint impulse over the iterations,
+   NOT the pre-solve gap. The gap is what is left before the solver acts and
+   under-reads real tension by more than an order of magnitude. */
+const probeI=new Int32Array(3), probeLam=new Float64Array(3);
 function lineDist(a,b){
   const w=invM[a]+invM[b];if(w<=0)return;
   const A=a*3,B=b*3;
   let dx=pos[B]-pos[A],dy=pos[B+1]-pos[A+1],dz=pos[B+2]-pos[A+2];
   const d=Math.sqrt(dx*dx+dy*dy+dz*dz);if(d<1e-9)return;
-  const s=((d-nodeLen)/d)/w;
+  const err=d-nodeLen;
+  if(err>0){
+    if(a===probeI[0]) probeLam[0]+=err/w;
+    else if(a===probeI[1]) probeLam[1]+=err/w;
+    else if(a===probeI[2]) probeLam[2]+=err/w;
+  }
+  const s=(err/d)/w;
   dx*=s;dy*=s;dz*=s;
   pos[A]+=dx*invM[a];pos[A+1]+=dy*invM[a];pos[A+2]+=dz*invM[a];
   pos[B]-=dx*invM[b];pos[B+1]-=dy*invM[b];pos[B+2]-=dz*invM[b];
@@ -412,6 +459,10 @@ function airDrag(i,h){
 const RIDE=0.010, BREAK=2.6;
 function waterAndGround(i,h,t){
   const p=i*3,x=pos[p],z=pos[p+2];
+  /* cheap bail-out for line still high in the air — one surfY call instead of
+     bedY + bedDepth + filmY + computeFlow. Far bank climbs, so allow for it. */
+  const sy=surfY(x);
+  if(pos[p+1]>sy+(z<CZ-HALFW?3.0:0.8)) return;
   const gy=bedY(x,z);
   const depth=bedDepth(x,z);
   if(depth<=0.02){                                   /* dry bank */
@@ -498,60 +549,12 @@ function physics(dt){
       pos[p]+=vel[p]*h;pos[p+1]+=vel[p+1]*h;pos[p+2]+=vel[p+2]*h;
     }
 
-    /* ---- material flow, decided purely by tension vs friction ---- */
-    {
-      const outI=Math.floor(lineOut/nodeLen)-1;
-      const inI =Math.floor((lineOut+rodArc)/nodeLen)+1;
-      const spI =Math.floor(offSpool/nodeLen)-1;
-      const Tout=segTension(outI,h2), Tin=segTension(inI,h2), Tsp=segTension(spI,h2);
-      const cap=Math.exp(P.guideMu*wrapTotal);
-      let dl=0;
-      if(!rodPinch){
-        if(Tout>Tin*cap+P.statFric){
-          const wOut=invM[Math.max(0,outI)]+invM[Math.max(0,outI)+1];
-          dl=(Tout-(Tin*cap+P.statFric))*h2*wOut;
-        } else if(Tin>Tout*cap+P.statFric){
-          const wIn=invM[Math.min(nAct-2,inI)]+invM[Math.min(nAct-2,inI)+1];
-          dl=-(Tin-(Tout*cap+P.statFric))*h2*wIn;
-        }
-        dl=Math.max(-0.05,Math.min(0.05,dl));
-        /* You can only shoot the belly you have. Once it is gone, more line
-           must come off the spool, which is the spool's decision below. */
-        if(dl>0){
-          const avail=Math.max(0,(offSpool-lineOut-rodArc)-MIN_SLACK);
-          dl=Math.min(dl,avail);
-        }
-        lineOut=Math.max(MIN_OUT,lineOut+dl);
-        slipOut+=dl;
-      }
-      /* ---- the spool ----
-         The line cannot be shorter than the straight distance it has to span.
-         If the reel-to-hand span is over-stretched and the tension beats the
-         drag, exactly that surplus leaves the spool: 1:1 with your hand.
-         No accumulation, so the deadband means what it says. */
-      const thr=P.spoolDrag*1.15+P.statFric;
-      if(Tsp>thr&&offSpool<TOTAL_LINE){
-        let give=0;
-        if(handHeld&&handIdx>0){
-          const Lr=offSpool-handIdx*nodeLen;
-          const Dr=Math.hypot(_handW.x-_reelW.x,_handW.y-_reelW.y,_handW.z-_reelW.z);
-          give=Dr-Lr-P.spoolDead;
-        } else {
-          /* no hand on the line — a running fish or a hard shoot pulls direct */
-          const wS=invM[Math.max(0,spI)]+invM[Math.max(0,spI)+1];
-          give=(Tsp-thr)*h2*wS;
-        }
-        if(give>0){
-          give=Math.min(give,0.06);
-          offSpool=Math.min(TOTAL_LINE,offSpool+give);
-          spoolOut+=give;clickAcc+=give;
-        }
-      }
-      /* only ever tighten the belly by reeling; never invent line here */
-      if(offSpool-lineOut-rodArc<MIN_SLACK)
-        lineOut=Math.max(MIN_OUT,offSpool-rodArc-MIN_SLACK);
-      nAct=Math.min(MAXNODE,Math.floor(offSpool/nodeLen)+2);
-    }
+    /* probe segments: just outside the tiptop, just below the stripping
+       guide, and just inside the spool. Impulses accumulate during the solve. */
+    probeI[0]=Math.floor(lineOut/nodeLen)-1;
+    probeI[1]=Math.floor((lineOut+rodArc)/nodeLen)+1;
+    probeI[2]=Math.floor(offSpool/nodeLen)-1;
+    probeLam[0]=probeLam[1]=probeLam[2]=0;
 
     for(let it=0;it<ITER;it++){
       for(let i=0;i<RN-1;i++) rodDist(i,i+1,ROD_SEG);
@@ -563,6 +566,53 @@ function physics(dt){
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
       if(handHeld&&handIdx>0) pinLine(handIdx*nodeLen,_handW.x,_handW.y,_handW.z,0.9);
       if(corkHeld&&corkIdx>0) pinLine(corkIdx*nodeLen,_corkW.x,_corkW.y,_corkW.z,0.9);
+    }
+
+    /* ---- material flow, decided purely by tension vs friction ----
+       Tension now comes from the solved constraint impulses, so these are
+       real newtons and can actually beat the friction thresholds. */
+    {
+      const Tout=probeLam[0]/h2, Tin=probeLam[1]/h2, Tsp=probeLam[2]/h2;
+      probeOut=Tout;probeIn=Tin;
+      const cap=Math.exp(P.guideMu*wrapTotal);
+      probeThr=Tin*cap+P.statFric;probeSp=Tsp;
+      let dl=0;
+      if(!rodPinch){
+        if(Tout>probeThr){
+          const wOut=invM[Math.max(0,probeI[0])]+invM[Math.max(0,probeI[0])+1];
+          dl=(Tout-probeThr)*h2*wOut;
+        } else if(Tin>Tout*cap+P.statFric){
+          const wIn=invM[Math.max(0,probeI[1])]+invM[Math.max(0,probeI[1])+1];
+          dl=-(Tin-(Tout*cap+P.statFric))*h2*wIn;
+        }
+        dl=Math.max(-0.05,Math.min(0.05,dl));
+        if(dl>0){
+          const avail=Math.max(0,(offSpool-lineOut-rodArc)-MIN_SLACK);
+          dl=Math.min(dl,avail);
+        }
+        lineOut=Math.max(MIN_OUT,lineOut+dl);
+        slipOut+=dl;
+      }
+      const thr=P.spoolDrag*1.15+P.statFric;
+      if(Tsp>thr&&offSpool<TOTAL_LINE){
+        let give=0;
+        if(handHeld&&handIdx>0){
+          const Lr=offSpool-handIdx*nodeLen;
+          const Dr=Math.hypot(_handW.x-_reelW.x,_handW.y-_reelW.y,_handW.z-_reelW.z);
+          give=Dr-Lr-P.spoolDead;
+        } else {
+          const wS=invM[Math.max(0,probeI[2])]+invM[Math.max(0,probeI[2])+1];
+          give=(Tsp-thr)*h2*wS;
+        }
+        if(give>0){
+          give=Math.min(give,0.06);
+          offSpool=Math.min(TOTAL_LINE,offSpool+give);
+          spoolOut+=give;clickAcc+=give;
+        }
+      }
+      if(offSpool-lineOut-rodArc<MIN_SLACK)
+        lineOut=Math.max(MIN_OUT,offSpool-rodArc-MIN_SLACK);
+      nAct=Math.min(MAXNODE,Math.floor(offSpool/nodeLen)+2);
     }
 
     for(let i=2;i<RN;i++){const p=i*3;
@@ -706,11 +756,11 @@ function seedSpeck(i,cx,mode){
   if(mode===1){
     const c=cellCursor++;
     const gx=c%GX,gz=Math.floor(c/GX)%GZ;
-    spPos[p]  =cx-30+((gx+Math.random())/GX)*60;
+    spPos[p]  =cx-P.speckRange+((gx+Math.random())/GX)*P.speckRange*2;
     spPos[p+2]=CZ+(((gz+Math.random())/GZ)*2-1)*HALFW*0.98;
     spLife[i] =5+Math.random()*10;
   } else {
-    spPos[p]  =cx-14-Math.random()*26;
+    spPos[p]  =cx-P.speckRange*0.45-Math.random()*P.speckRange*0.85;
     spPos[p+2]=CZ+(Math.random()*2-1)*HALFW*0.98;
     spLife[i] =14+Math.random()*22;
   }
@@ -781,6 +831,30 @@ const troutTex=(()=>{
   const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;
 })();
 const troutBodyMat=new THREE.MeshStandardMaterial({map:troutTex,roughness:0.34,metalness:0.18});
+/* a real trout holds by undulating, not by sitting rigid. Each fish gets its
+   own material so it can carry its own phase, amplitude and beat rate. */
+function makeSwimMaterial(){
+  const m=troutBodyMat.clone();
+  m.userData.u={uT:{value:Math.random()*10},uAmp:{value:1},uSpd:{value:3},uPh:{value:Math.random()*6.28}};
+  m.onBeforeCompile=sh=>{
+    sh.uniforms.uT=m.userData.u.uT;
+    sh.uniforms.uAmp=m.userData.u.uAmp;
+    sh.uniforms.uSpd=m.userData.u.uSpd;
+    sh.uniforms.uPh=m.userData.u.uPh;
+    sh.vertexShader='uniform float uT,uAmp,uSpd,uPh;\n'+sh.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+       float bx=transformed.x+0.5;
+       float env=smoothstep(0.12,1.0,bx);
+       env*=env;
+       transformed.z+=sin(bx*7.0-uT*uSpd+uPh)*0.075*env*uAmp;`
+    );
+  };
+  m.needsUpdate=true;
+  return m;
+}
+const SWIM={amp:0,spd:0};
+function swimPhase(mat,t){ return Math.sin(1.0*7.0-t*mat.userData.u.uSpd.value+mat.userData.u.uPh.value); }
 const finMat=new THREE.MeshStandardMaterial({color:0x74805f,roughness:0.7,
   transparent:true,opacity:0.9,side:THREE.DoubleSide});
 function troutGeometry(){
@@ -812,7 +886,9 @@ function finShape(pts){
 }
 function makeTrout(len){
   const g=new THREE.Group();
-  g.add(new THREE.Mesh(TROUT_GEO,troutBodyMat));
+  const mat=makeSwimMaterial();
+  g.userData.swim=mat;
+  g.add(new THREE.Mesh(TROUT_GEO,mat));
   const tailPivot=new THREE.Group();tailPivot.position.x=0.485;
   tailPivot.add(new THREE.Mesh(finShape([[0,0],[0.13,0.115],[0.085,0],[0.13,-0.115],[0,0]]),finMat));
   g.add(tailPivot);g.userData.tail=tailPivot;
@@ -834,7 +910,6 @@ function makeTrout(len){
 }
 const LIES=[{x:-2.0,z:-7.2,len:0.40},{x:-6.2,z:-6.6,len:0.32},
             {x:2.6,z:-11.0,len:0.46},{x:7.4,z:-8.0,len:0.35}];
-let hooked=null;
 const fishes=[];
 function makeMarker(){
   const g=new THREE.Group();
@@ -912,8 +987,16 @@ class Trout{
     m.rotation.y+=((hd-m.rotation.y+Math.PI*3)%(Math.PI*2)-Math.PI)*Math.min(1,dt*3);
     m.rotation.z=this.state==='hooked'?Math.sin(t*9)*0.22:Math.sin(t*1.6+this.lie.x)*0.04;
     m.rotation.x=this.riseAnim>0?-0.35*Math.sin(Math.max(0,this.riseAnim)*Math.PI):0;
-    const beat=this.state==='hooked'?11:(this.feeding?3.4:1.9);
-    m.userData.tail.rotation.y=Math.sin(t*beat+this.lie.z)*(this.state==='hooked'?0.55:0.28);
+    /* body wave: faster and wider when hooked, lazy while holding */
+    const u=m.userData.swim.userData.u;
+    u.uT.value=t;
+    u.uSpd.value=this.state==='hooked'?9.0:(this.feeding?3.6:2.2);
+    const amp=this.state==='hooked'?1.7:(this.feeding?0.85:0.55);
+    u.uAmp.value+=(amp-u.uAmp.value)*Math.min(1,dt*3);
+    const w=Math.sin(7.0-t*u.uSpd.value+u.uPh.value);
+    const wPrev=Math.sin(7.0-(t-0.02)*u.uSpd.value+u.uPh.value);
+    m.userData.tail.position.z=w*0.075*u.uAmp.value;
+    m.userData.tail.rotation.y=-(w-wPrev)*7.0*u.uAmp.value;
     this.marker.visible=P.showMarkers>0.5&&this.state!=='spooked';
     this.marker.position.set(this.p.x,Math.max(this.p.y,surfY(this.p.x)+0.02),this.p.z);
     this.marker.children[1].position.y=0.92+Math.sin(t*2.2+this.lie.x)*0.05;
@@ -1163,6 +1246,7 @@ function drawHUD(){
     ['SPOOL SLIP',(spoolOut*100).toFixed(1)+' cm/f'],
     ['LEFT HAND',HANDTXT[handMode]+(rodPinch?' / CORK':'')],
     ['GUIDE WRAP',(wrapTotal*180/Math.PI).toFixed(0)+'\u00B0'],
+    ['TIP vs HOLD',probeOut.toFixed(2)+' / '+probeThr.toFixed(2)+' N'],
     ['DRIFT',hooked?'\u2014':M.drift.toFixed(0)+' %'],
     ['TENSION',M.tension.toFixed(1)+' N'],
     ['FEEDING',feed+' of '+fishes.length],
@@ -1173,6 +1257,55 @@ function drawHUD(){
     c.fillStyle='#e8e3d4';c.textAlign='right';c.fillText(v,488,y);c.textAlign='left';});
   if(noteT>0){c.fillStyle='#b5713f';c.font='700 15px "Space Mono",monospace';c.fillText(note,24,428);}
   hud.tex.needsUpdate=true;
+}
+/* ---- settings export / presets ---- */
+let settingsStr='', copyState='';
+function encodeSettings(){
+  const parts=[];
+  for(const k of Object.keys(P)) parts.push(k+'='+(+P[k]).toFixed(3));
+  return parts.join('&');
+}
+function applySettings(str){
+  let n=0;
+  for(const kv of str.split('&')){
+    const i=kv.indexOf('=');
+    if(i<1) continue;
+    const k=kv.slice(0,i),v=parseFloat(kv.slice(i+1));
+    if(k in P && Number.isFinite(v)){P[k]=v;n++;}
+  }
+  if(n) afterSettingsChange();
+  return n;
+}
+function applyPreset(obj){
+  for(const k in obj) if(k in P) P[k]=obj[k];
+  afterSettingsChange();
+}
+function afterSettingsChange(){
+  if(Math.abs(P.nodeLen-nodeLen)>1e-4){const old=nodeLen;nodeLen=P.nodeLen;redistribute(old);}
+  rebuildMasses();
+  waterMat.uniforms.uQ.value=P.current;
+  waterMat.uniforms.uGrade.value=P.grade;
+  speckMat.uniforms.uSize.value=P.speckSize;
+  rebuildBed();placeObstacles();
+  lastGrade=P.grade;lastNodeLen=P.nodeLen;
+}
+function copySettings(){
+  settingsStr=encodeSettings();
+  try{ location.hash='s='+encodeURIComponent(settingsStr); }catch(e){}
+  const url=location.href;
+  copyState='copied to clipboard';
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).catch(()=>{copyState='in the URL bar — copy from there';});
+  } else copyState='in the URL bar — copy from there';
+}
+function runAction(key){
+  if(key==='!physical'){applyPreset(PHYSICAL);say('physical defaults loaded');}
+  else if(key==='!save'){userDefault=Object.assign({},P);say('saved as your default');}
+  else if(key==='!mydefault'){
+    if(userDefault){applyPreset(userDefault);say('your default loaded');}
+    else say('nothing saved yet');
+  }
+  else if(key==='!copy'){copySettings();say('settings copied');}
 }
 let menuOpen=false,menuSel=1,stickReady=true;
 const ROWS=13;
@@ -1200,6 +1333,11 @@ function drawMenu(){
     if(on){c.fillStyle='rgba(181,113,63,0.20)';c.fillRect(14,y-18,592,27);}
     c.font='700 15px "Space Mono",monospace';
     c.fillStyle=on?'#e8e3d4':'#93a0a0';c.fillText(label,26,y);
+    if(key.charCodeAt(0)===33){                       /* action row */
+      c.fillStyle=on?'#b5713f':'#4d6166';
+      c.textAlign='right';c.fillText('PUSH \u25B6',594,y);c.textAlign='left';
+      continue;
+    }
     const f=(P[key]-mn)/(mx-mn||1);
     c.fillStyle='#243438';c.fillRect(340,y-11,140,7);
     c.fillStyle=on?'#b5713f':'#4d6166';c.fillRect(340,y-11,140*Math.max(0,Math.min(1,f)),7);
@@ -1213,7 +1351,8 @@ function drawMenu(){
   const sel=MENU[menuSel];
   c.font='700 13px "Space Mono",monospace';c.fillStyle='#b5713f';c.fillText(sel[0],26,558);
   c.font='400 13px "Space Mono",monospace';c.fillStyle='#a9b5b3';
-  const lines=wrapText(c,sel[5]||'',564);
+  const body=(sel[1]==='!copy'&&copyState)?('Settings '+copyState+'. '+sel[5]):(sel[5]||'');
+  const lines=wrapText(c,body,564);
   for(let i=0;i<lines.length&&i<4;i++) c.fillText(lines[i],26,580+i*18);
   menu.tex.needsUpdate=true;
 }
@@ -1365,17 +1504,23 @@ renderer.setAnimationLoop(()=>{
       menuSel=s;stickReady=false;
     }
     if(Math.abs(ax)>0.3&&Math.abs(ax)>Math.abs(ay)*1.2&&MENU[menuSel][1]){
-      const[,key,mn,mx,st]=MENU[menuSel];
-      P[key]=Math.min(mx,Math.max(mn,P[key]+Math.sign(ax)*st*dt*7));
-      if(key==='lineDens')rebuildMasses();
-      if(key==='current')waterMat.uniforms.uQ.value=P.current;
-      if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
-      if(key==='speckSize')speckMat.uniforms.uSize.value=P.speckSize;
+      const key=MENU[menuSel][1];
+      if(key.charCodeAt(0)===33){
+        if(stickReady&&ax>0.5){runAction(key);stickReady=false;}
+      } else {
+        const[,,mn,mx,st]=MENU[menuSel];
+        P[key]=Math.min(mx,Math.max(mn,P[key]+Math.sign(ax)*st*dt*7));
+        if(key==='lineWt')rebuildMasses();
+        if(key==='current')waterMat.uniforms.uQ.value=P.current;
+        if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
+        if(key==='speckSize')speckMat.uniforms.uSize.value=P.speckSize;
+      }
     }
   } else if(Math.hypot(ax,ay)>0.15){
     camera.getWorldQuaternion(_camQ);
     const e=new THREE.Euler().setFromQuaternion(_camQ,'YXZ');
-    const yaw=e.y,fwd=-ay,str=ax;
+    /* pushing the stick up walks forward */
+    const yaw=e.y,fwd=(P.invertY>0.5?-ay:ay),str=ax;
     const vx=Math.sin(yaw)*fwd+Math.cos(yaw)*str;
     const vz=Math.cos(yaw)*fwd-Math.sin(yaw)*str;
     camera.getWorldPosition(_camW);
@@ -1454,11 +1599,7 @@ renderer.setAnimationLoop(()=>{
     bend+=Math.acos(Math.max(-1,Math.min(1,(ux*vx+uy*vy+uz*vz)/(ul*vl))));
   }
   M.bend=bend*180/Math.PI;
-  {
-    const h2=(dt/SUB)*(dt/SUB);
-    const inst=segTension(Math.max(0,Math.floor(lineOut/nodeLen)-1),h2);
-    M.tension+=(Math.min(200,inst)-M.tension)*Math.min(1,dt*12);
-  }
+  M.tension+=(Math.min(200,probeOut)-M.tension)*Math.min(1,dt*12);
 
   /* ---- fly ---- */
   const fx=pos[0],fy=pos[1],fz=pos[2];
@@ -1518,11 +1659,11 @@ renderer.setAnimationLoop(()=>{
     } else if(netOn&&haveLeft){
       netMouth.getWorldPosition(_netP);
       const d=Math.hypot(fx-_netP.x,fy-_netP.y,fz-_netP.z);
-      if(d<P.netRadius&&hooked.stamina<0.45){
+      if(d<P.netRadius){
         hooked.state='landed';hooked.timer=4;
         say('netted him \u2014 '+(hooked.len*100).toFixed(0)+' cm');
         hooked=null;rebuildMasses();pulse(0.6);
-      } else if(d<P.netRadius) say('too green for the net');
+      }
     }
     M.drift=0;
   }
@@ -1559,7 +1700,7 @@ renderer.setAnimationLoop(()=>{
     computeFlow(spPos[p],spPos[p+2]);
     spPos[p]+=flowX*dt;spPos[p+2]+=flowZ*dt;
     spLife[i]-=dt;
-    if(spPos[p]>_camW.x+34||spPos[p]<_camW.x-46||spLife[i]<0||
+    if(spPos[p]>_camW.x+P.speckRange*1.15||spPos[p]<_camW.x-P.speckRange*1.5||spLife[i]<0||
        bedDepth(spPos[p],spPos[p+2])<0.04){
       seedSpeck(i,_camW.x,Math.random()<P.speckSpread?1:0);continue;
     }
@@ -1656,6 +1797,15 @@ if(!navigator.xr){
   navigator.xr.isSessionSupported('immersive-vr').then(ok=>{
     if(!ok){enterBtn.disabled=true;enterBtn.textContent='Headset not detected';}});
 }
+/* restore a shared settings string, e.g. #s=nodeLen=0.200&... */
+if(location.hash&&location.hash.indexOf('s=')>=0){
+  try{
+    const raw=decodeURIComponent(location.hash.slice(location.hash.indexOf('s=')+2));
+    const n=applySettings(raw);
+    if(n) hint.innerHTML='<b>Loaded '+n+' settings from the URL.</b> '+hint.innerHTML;
+  }catch(e){}
+}
+
 enterBtn.addEventListener('click',async()=>{
   try{
     const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
