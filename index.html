@@ -86,7 +86,7 @@ import * as THREE from 'three';
    ════════════════════════════════════════════════════════════ */
 const P = {
   nodeLen:0.20, leadNode:0.06, leaderLen:2.74, tippetLen:0.90,
-  stiffMul:0.474, rodDamp:14.0, tipSoft:0.60, dragMul:1.00, lineWt:5.0, statFric:0.05,
+  stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1, dragMul:1.00, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
@@ -99,6 +99,7 @@ const P = {
 const MENU=[
   ['— PRESETS —',null,0,0,0,''],
   ['Physical defaults','!physical',0,0,0,'Push right to load values derived from real tackle: AFFTA line weights, a measured 9 ft 5wt deflection curve, real leader taper, and physical air drag coefficients.'],
+  ['Classic rod feel','!classicrod',0,0,0,'Push right to restore the rod exactly as it was before damping existed: the earlier stiffness curve, stiffness 0.286, damping off. Touches nothing but the rod.'],
   ['Load my default','!mydefault',0,0,0,'Push right to load whatever you last saved as your default.'],
   ['Save as my default','!save',0,0,0,'Push right to store every current value as your default.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
@@ -115,8 +116,9 @@ const MENU=[
   ['Spool drag','spoolDrag',0.05,3.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
   ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
   ['— ROD & TACKLE —',null,0,0,0,''],
-  ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 0.47 at the default taper reproduces a real 9 ft 5wt: tip deflects a third of rod length under a 1.6 N load. Recalibrate this if you change Tip softness.'],
+  ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 1.43 puts the first bending mode at 4.0 Hz, which is what a real 9 ft 5wt measures. Calibrating on frequency rather than static sag is what stopped it feeling like a noodle.'],
   ['Rod damping','rodDamp',0.00,60.0,1.00,'Internal damping of the blank, per second. Damps how fast the rod deforms, not how it swings. Around 14 kills tip ring in about half a second, which is what a good graphite rod does. Zero rings for three seconds.'],
+  ['Taper model','rodTaper',0,1,1,'0 uses the earlier hand-drawn stiffness curve. 1 uses the real second moment of area of a tapered tube, shaped by Tip softness below.'],
   ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip, as an exponent on the blank\u2019s real second moment of area. 1.00 is the true tube, whose tip is 500x softer than the butt and goes noodly at this node count. 0.60 keeps the shape without the flop.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
   ['Tippet (N)','tippet',2.00,60.0,0.50,'Breaking strain. 5X is 4.75 lb, about 21 N. 6X is 15.6 N, 4X is 26.7 N.'],
@@ -156,8 +158,8 @@ const MENU=[
 
 /* values derived from real tackle — see the notes beside each menu row */
 const PHYSICAL={
-  stiffMul:0.474,   /* recalibrated at tipSoft 0.60: tip deflects L/3 under 1.6 N */
-  rodDamp:14.0, tipSoft:0.60,
+  stiffMul:1.434,   /* first bending mode at 4.0 Hz, which is what a real 5wt does */
+  rodDamp:14.0, tipSoft:0.60, rodTaper:1,
   leaderLen:2.74, tippetLen:0.90, leadNode:0.06,
   dragMul:1.00,     /* dragK already carries 0.5*rho*Cd*A/m with Cd=1.1 */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
@@ -269,12 +271,23 @@ const rodI=new Float32Array(RN);
   }
   for(let i=0;i<RN;i++) rodI[i]/=rodI[0];
 }
+const rodOD=new Float32Array(RN);
+{ let sum=0;
+  for(let i=0;i<RN;i++){const t=i/(RN-1);rodOD[i]=9.5+(1.6-9.5)*t;sum+=rodOD[i];}
+  for(let i=0;i<RN;i++) rodOD[i]/=sum;      /* mass share per node */
+}
+const ROD_MASS=0.077;                       /* 77 g blank, a real 9 ft 5wt */
 function rebuildRod(){
   for(let i=0;i<RN;i++){
-    const t=i/(RN-1);
+    /* thin-wall tube: mass per length goes as diameter, so a real rod is
+       butt-heavy. An evenly weighted rod has too much tip mass and rings slow. */
+    const m=ROD_MASS*rodOD[i];
     if(i<2) rinvM[i]=0;
-    else{const m=0.014*(1-0.75*t);rinvM[i]=1/m;rdragK[i]=0.5*1.2*(0.006*ROD_SEG)/m;}
-    rbendK[i]=Math.max(Math.pow(rodI[i],P.tipSoft),0.03);
+    else{rinvM[i]=1/m;rdragK[i]=0.5*1.2*(0.006*ROD_SEG)/m;}
+    const t=i/(RN-1);
+    rbendK[i]=P.rodTaper<0.5
+      ? 0.97+(0.14-0.97)*Math.pow(t,1.4)                  /* the earlier curve */
+      : Math.max(Math.pow(rodI[i],P.tipSoft),0.03);       /* real tube physics */
   }
 }
 rebuildRod();
@@ -1346,7 +1359,7 @@ function afterSettingsChange(){
   speckMat.uniforms.uSize.value=P.speckSize;
   rebuildBed();placeObstacles();
   lastGrade=P.grade;
-  lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft;
+  lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft, lastTaper=P.rodTaper;
 }
 function copySettings(){
   settingsStr=encodeSettings();
@@ -1359,6 +1372,7 @@ function copySettings(){
 }
 function runAction(key){
   if(key==='!physical'){applyPreset(PHYSICAL);say('physical defaults loaded');}
+  else if(key==='!classicrod'){applyPreset({rodTaper:0,stiffMul:0.286,rodDamp:0,tipSoft:0.60});say('classic rod feel loaded');}
   else if(key==='!save'){userDefault=Object.assign({},P);say('saved as your default');}
   else if(key==='!mydefault'){
     if(userDefault){applyPreset(userDefault);say('your default loaded');}
@@ -1601,7 +1615,8 @@ renderer.setAnimationLoop(()=>{
       const oldIdx=v=> v<=oT ? v/oL : oN+(v-oT)/oM;
       rebuildSpacing();redistribute(oldIdx);lastSig=sig;
     }
-    if(Math.abs(P.tipSoft-lastTipSoft)>0.005){lastTipSoft=P.tipSoft;rebuildRod();}
+    if(Math.abs(P.tipSoft-lastTipSoft)>0.005||Math.abs(P.rodTaper-lastTaper)>0.1){
+      lastTipSoft=P.tipSoft;lastTaper=P.rodTaper;rebuildRod();}
   }
 
   handTargets();
