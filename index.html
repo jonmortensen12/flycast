@@ -725,7 +725,7 @@ function physics(dt){
          is geometry rather than a friction contest. */
       if(handPinched&&!rodPinch){
         const Lt=sArc(handIdx)-(lineOut+rodArc);
-        const Dt=Math.hypot(_handW.x-_strip.x,_handW.y-_strip.y,_handW.z-_strip.z);
+        const Dt=Math.hypot(_handW.x-guidePos[0],_handW.y-guidePos[1],_handW.z-guidePos[2]);
         const over=Dt-Lt-P.spoolDead;
         if(over>0){
           const pull=Math.min(over,0.06);

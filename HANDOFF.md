@@ -239,9 +239,16 @@ Recorded because each one was mis-diagnosed at least once.
 8. **Nothing loaded at all** — a variable read every frame but never declared. `node --check`
    passes such files happily.
 
-**Therefore: run `smoke.mjs` before shipping.** It stubs Three.js and the DOM, executes the
-module, and ticks the animation loop. Syntax checking does not catch a ReferenceError in the
-render loop, and that has broken a build.
+9. **Frozen the moment the left hand grabbed line** — a variable referenced in the stripping
+   code that was never declared. Same class as (8): fine until that branch executes.
+
+**Therefore: run `smoke.mjs` before shipping.** It stubs Three.js and the DOM with real
+Vector3/Quaternion maths, executes the module, **connects a left and right controller with
+triggers held**, and ticks six frames. Connecting the controllers matters — bugs 8 and 9 both
+lived in branches that never run without a hand on the line, and an earlier version of the
+harness missed bug 9 because its fake gamepad had every button pressed, which raised the net
+and skipped the line-hand path entirely. The context's global object is also a Proxy that
+reports undeclared identifier reads. `node --check` catches none of this.
 
 ---
 
