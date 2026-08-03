@@ -32,6 +32,7 @@ class V3{
 class Q{constructor(){this.x=0;this.y=0;this.z=0;this.w=1;}
   copy(){return this;} set(){return this;} invert(){return this;}
   multiply(){return this;} setFromEuler(){return this;} setFromRotationMatrix(){return this;}}
+class Clock{getDelta(){return 1/72;} get elapsedTime(){return 0;}}
 class E{constructor(){this.x=0;this.y=0;this.z=0;} setFromQuaternion(){return this;} set(){return this;}}
 
 let loopCb=null; const listeners=[];
@@ -72,6 +73,7 @@ function proxy(name){
       if(name.endsWith('Vector3')) return new V3(args[0]||0,args[1]||0,args[2]||0);
       if(name.endsWith('Quaternion')) return new Q();
       if(name.endsWith('Euler')) return new E();
+      if(name.endsWith('Clock')) return new Clock();
       return proxy('new '+name);
     },
     has(){return true;},
@@ -80,10 +82,9 @@ function proxy(name){
 const THREE=proxy('THREE');
 THREE.Vector3=V3; THREE.Quaternion=Q; THREE.Euler=E;
 
-const undeclared=new Set();
 const base={
   THREE, console, Math, JSON, Object, Array, Number, String, Boolean, Symbol, Error, Proxy,
-  Reflect, Date, Float32Array, Float64Array, Int32Array, isNaN, parseFloat, parseInt,
+  Reflect, Date, Float32Array, Float64Array, Int32Array, Uint8Array, Uint16Array, isNaN, parseFloat, parseInt,
   encodeURIComponent, decodeURIComponent, setTimeout, clearTimeout,
   navigator:{xr:null,clipboard:null}, location:{hash:'',href:'x'}, window:{},
   innerWidth:1000, innerHeight:800, addEventListener(){}, requestAnimationFrame(){},
@@ -91,11 +92,10 @@ const base={
     getElementById:()=>({classList:{add(){},remove(){}},addEventListener(){},style:{},
       set innerHTML(v){}, get innerHTML(){return '';}, set textContent(v){}, set disabled(v){}}) },
 };
-const ctx=vm.createContext(new Proxy(base,{
-  has(t,k){ if(!(k in t)&&typeof k==='string'&&!k.startsWith('Symbol')) undeclared.add(k); return true; },
-  get(t,k){ return t[k]; },
-  set(t,k,v){ t[k]=v; return true; },
-}));
+/* A Proxy global with has()->true makes every undeclared read resolve to
+   undefined instead of throwing, which hides exactly the bug class this test
+   exists to catch. Plain context: undeclared reads throw, as in the browser. */
+const ctx=vm.createContext(base);
 
 let fail=false;
 try{ vm.runInContext(body,ctx,{filename:'flycast.js'}); console.log('module top level: OK'); }
@@ -124,7 +124,4 @@ for(let i=0;i<6;i++){
   }
 }
 if(!fail) console.log('animation loop: 6 frames OK (controllers connected, triggers held)');
-const known=new Set(Object.keys(base));
-const suspicious=[...undeclared].filter(k=>!known.has(k)&&/^[a-z_$][A-Za-z0-9_$]*$/.test(k));
-if(suspicious.length) console.log('possible undeclared identifiers:',suspicious.slice(0,20).join(', '));
-else console.log('no undeclared identifier reads observed');
+if(!fail) console.log('(undeclared identifier reads would have thrown above)');

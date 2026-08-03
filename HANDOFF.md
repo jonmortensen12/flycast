@@ -223,6 +223,27 @@ once per pass — not by where the fly lands. Landing only decides whether you s
 (splash, or line dropped within the lining radius). Non-feeders' take chance is multiplied
 down. Fights: tension against tippet; the net lands anything inside the hoop.
 
+### Sound
+
+Everything is synthesised at runtime — one shared noise buffer, no assets. The context is
+created on the **Enter VR** gesture, because browsers will not start audio without one.
+
+- **River**: looping noise through a bandpass, level driven by the flow speed *where you are
+  standing*, so a riffle is louder than a pool. Reads straight off `computeFlow`.
+- **Line**: a second noise voice whose loudness and brightness both follow rod tip speed.
+- **Reel**: a click per 5.5 cm of line off the spool, plus a ratchet while cranking.
+- **Splash**: filtered noise burst with a downward sweep, size from impact speed. Fires on the
+  fly landing, on a rise, and when a hooked fish breaks the surface.
+
+Five levels in the menu: master, river, reel, line, splash.
+
+### Line vs obstacles
+
+Line nodes are pushed out of each obstacle cylinder — over the crown if they are near the top,
+radially off the flank otherwise, with the inward velocity component removed. `obstHeight`
+scales how far obstacles rise off the bed and therefore how hard the water is pushed around
+them; it rebuilds the solver bed live.
+
 ---
 
 ## 3. Calibration table — every number and where it came from
@@ -301,6 +322,12 @@ actually sits. Every fight bug above was found with it rather than by guessing. 
 stub: the proxy's `set` trap silently discards assignments, so `THREE.Clock` has to be handled
 in the `construct` trap. It wasn't, `dt` was NaN, and the harness reported healthy nonsense for
 a while.
+
+**Two harnesses, and they catch different things.** `smoke.mjs` runs the module in a **plain**
+vm context — an earlier version wrapped the global in a Proxy whose `has` trap returned true,
+which made every undeclared read resolve to `undefined` instead of throwing, hiding exactly the
+bug class the test exists for. `diag.mjs` and `diag2.mjs` drive real scenarios and were what
+actually caught the last undeclared variable.
 
 **Therefore: run `smoke.mjs` before shipping.** It stubs Three.js and the DOM with real
 Vector3/Quaternion maths, executes the module, **connects a left and right controller with

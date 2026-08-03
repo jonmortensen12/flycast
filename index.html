@@ -85,15 +85,16 @@ import * as THREE from 'three';
    1. SETTINGS
    ════════════════════════════════════════════════════════════ */
 const P = {
-  nodeLen:0.20, leadNode:0.06, leaderLen:2.74, tippetLen:0.90,
+  nodeLen:0.08, leadNode:0.03, leaderLen:2.74, tippetLen:0.90,
   rodModel:1, rodE:200.0, rodMass:0.077,
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
   massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:1.00, lineWt:5.0, statFric:0.05,
-  reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
+  reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:3.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
+  volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
   waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
-  current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:1.00,
+  current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:0.60, obstHeight:0.80,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
   splashV:4.50, lineRad:0.50, spookT:5.00, fatigue:1.00,
@@ -143,6 +144,12 @@ const MENU=[
   ['Line thickness','lineVis',0.10,4.00,0.05,'Visual only. How fat the line is drawn. Real fly line is far thinner than is comfortable to see at distance.'],
   ['Fly size','flySize',0.50,4.00,0.10,'Visual only. Scales the fly and its hi-vis post.'],
   ['Haptics','haptics',0.00,2.00,0.10,'Vibration strength for rod load, fish tension, and spool clicks.'],
+  ['— SOUND —',null,0,0,0,''],
+  ['Master volume','volume',0.00,1.00,0.05,'Everything you hear. Zero is silence. Sound starts when you press Enter VR, because browsers will not open an audio context without a gesture.'],
+  ['River level','volRiver',0.00,1.50,0.05,'Ambient water. Its loudness follows the flow speed where you are standing, so a riffle is louder than a pool.'],
+  ['Reel level','volReel',0.00,1.50,0.05,'The click of the pawl as line leaves the spool, and the ratchet while you crank.'],
+  ['Line level','volLine',0.00,1.50,0.05,'Air noise off the line during the stroke. Brightness and loudness both follow rod tip speed.'],
+  ['Splash level','volSplash',0.00,1.50,0.05,'The fly hitting the water, a fish rising, and a hooked fish breaking the surface.'],
   ['— PLAYER —',null,0,0,0,''],
   ['Move speed','moveSpeed',0.40,4.00,0.10,'Walking speed on the left stick. Deep water slows you regardless.'],
   ['Invert walk Y','invertY',0,1,1,'Flip the forward and backward walking direction.'],
@@ -162,6 +169,7 @@ const MENU=[
   ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck.'],
   ['Speck range','speckRange',6.00,45.0,1.00,'How far upstream and downstream specks are kept, in metres. A shorter range packs the same count into less river, so you can read the flow with far fewer of them.'],
   ['Speck spread','speckSpread',0.00,1.00,0.05,'Share of specks respawning on a grid around you rather than drifting from upstream. Raise it to see flow in dead water.'],
+  ['Obstacle height','obstHeight',0.00,1.60,0.05,'Scales how far the rocks and log rise off the bed. On the grid model this is what decides how hard the water is pushed around them: an obstacle well under the surface is flowed straight over, one that breaks it splits the current and throws a wake.'],
   ['Eddy strength','vortex',0.00,2.50,0.10,'Strength of vortices shed off the rocks and log. Zero gives smooth steady flow.'],
   ['— FISH —',null,0,0,0,''],
   ['Show zones','showZones',0,1,1,'Draw the take radius ring and feeding lane for each fish.'],
@@ -183,10 +191,10 @@ const MENU=[
 /* values derived from real tackle — see the notes beside each menu row */
 const PHYSICAL={
   rodModel:1, rodE:200.0, rodMass:0.077, massMul:1.00,
-  lineBend:1.00, lineSmooth:0.15, leadNode:0.06,
+  lineBend:1.00, lineSmooth:0.15, leadNode:0.03,
   stiffMul:1.434,   /* first bending mode at 4.0 Hz, which is what a real 5wt does */
   rodDamp:14.0, tipSoft:0.60, rodTaper:1,
-  leaderLen:2.74, tippetLen:0.90, leadNode:0.06,
+  leaderLen:2.74, tippetLen:0.90, leadNode:0.03,
   dragMul:1.00,     /* dragK already carries 0.5*rho*Cd*A/m with Cd=1.1 */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
   guideMu:0.15, statFric:0.05, spoolDrag:1.00, spoolDead:0.05,
@@ -469,7 +477,7 @@ function gridBuildBed(){
       for(const o of OBST){
         const d=Math.hypot(x-o.x,z-o.z);
         if(d<o.r){
-          const top=bedY(o.x,o.z)+o.h*(1-0.35*(d/o.r)*(d/o.r));
+          const top=bedY(o.x,o.z)+o.h*P.obstHeight*(1-0.35*(d/o.r)*(d/o.r));
           if(top>bed) bed=top;
         }
       }
@@ -769,6 +777,25 @@ function waterAndGround(i,h,t){
   /* a hooked fish lives below the film and must be free to sound, so the fly
      node skips the surface clamp and just gets water drag plus a bed floor */
   if(i===0&&hooked&&hooked.state==='hooked') return;   /* driven by the fish body */
+  /* line cannot pass through a rock or the log: push it out of the cylinder */
+  for(let o=0;o<OBST.length;o++){
+    const ob=OBST[o];
+    const dx=x-ob.x, dz=z-ob.z;
+    const d2=dx*dx+dz*dz;
+    if(d2>=ob.r*ob.r) continue;
+    const top=bedY(ob.x,ob.z)+ob.h*P.obstHeight;
+    if(pos[p+1]>top+0.02) continue;
+    const d=Math.sqrt(d2)||1e-4;
+    if(pos[p+1]>top-0.10){                       /* riding over the crown */
+      pos[p+1]=top+0.02; if(vel[p+1]<0) vel[p+1]=0;
+    } else {                                     /* against the flank */
+      const nx=dx/d, nz=dz/d, push=ob.r-d;
+      pos[p]+=nx*push; pos[p+2]+=nz*push;
+      const vn=vel[p]*nx+vel[p+2]*nz;
+      if(vn<0){vel[p]-=nx*vn;vel[p+2]-=nz*vn;}
+      vel[p]*=0.88; vel[p+2]*=0.88;
+    }
+  }
   /* cheap bail-out for line still high in the air — one surfY call instead of
      bedY + bedDepth + filmY + computeFlow. The far bank climbs, so allow for it. */
   const sy=surfY(x);
@@ -802,7 +829,7 @@ const _k0=new THREE.Vector3(),_k1=new THREE.Vector3(),_p0=new THREE.Vector3(),_p
 const SUB=6,ITER=6;
 let simTime=0, handIdx=-1, corkIdx=-1, blewUp=false;
 const _reelW=new THREE.Vector3(),_corkW=new THREE.Vector3(),_handW=new THREE.Vector3();
-let handHeld=false, corkHeld=false, handPinched=false;
+let handHeld=false, corkHeld=false, handPinched=false, grabEase=1;
 
 function sanity(){
   for(let i=0;i<nAct;i++){
@@ -869,7 +896,7 @@ function physics(dt){
       for(let g=0;g<NG;g++) solveGuide(g,0.85);
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
       if(handHeld&&handIdx>0)
-        pinLine(handMode===2?sArc(handIdx):handArc,_handW.x,_handW.y,_handW.z,handMode===2?0.9:0.35);
+        pinLine(handArc,_handW.x,_handW.y,_handW.z,handMode===2?0.9*grabEase:0.35);
       if(corkHeld&&corkIdx>0) pinLine(sArc(corkIdx),_corkW.x,_corkW.y,_corkW.z,0.9);
     }
 
@@ -1072,7 +1099,7 @@ for(const o of OBST){
 }
 function placeObstacles(){
   for(let i=0;i<OBST.length;i++){const o=OBST[i];
-    obstMeshes[i].position.set(o.x,bedY(o.x,o.z)+o.h,o.z);}
+    obstMeshes[i].position.set(o.x,bedY(o.x,o.z)+o.h*P.obstHeight,o.z);}
 }
 placeObstacles();
 
@@ -1552,7 +1579,10 @@ class Trout{
         this.riseAnim-=dt*1.5;
         const u=Math.sin(Math.max(0,this.riseAnim)*Math.PI);
         ty=ty*(1-u)+(surfY(this.p.x)-0.012)*u;
-        if(this.riseAnim>0.48&&this.riseAnim<0.54)spawnRing(this.p.x-0.05,this.p.z,0.9);
+        if(this.riseAnim>0.48&&this.riseAnim<0.54){
+          spawnRing(this.p.x-0.05,this.p.z,0.9);
+          if(SND.ok) sndPlop();
+        }
       }
       this.p.y+=(ty-this.p.y)*Math.min(1,dt*3);
     }
@@ -1802,7 +1832,7 @@ const HW=512, HH=600;
 const HHANDLE={x:8,y:6,w:200,h:26}, HSC_M={x:404,y:6,w:24,h:26}, HSC_P={x:434,y:6,w:24,h:26};
 const hud=makePanel(0.44,0.515,HW,HH);
 hud.mesh.position.set(-0.56,1.16,-0.64);hud.mesh.rotation.y=0.58;player.add(hud.mesh);
-const MW=1400, MH=780, ROWH=23, COLW=450, COLX=[16,478,940];
+const MW=1400, MH=780, ROWH=19, COLW=450, COLX=[16,478,940];
 const HANDLE={x:0,y:8,w:250,h:30}, SCALE_M={x:1240,y:8,w:34,h:30}, SCALE_P={x:1282,y:8,w:34,h:30};
 const TRACKX=168, TRACKW=118, VALX=336, RNGX=352, RNGW=52;
 const menu=makePanel(1.40,0.78,MW,MH);
@@ -1888,7 +1918,7 @@ function afterSettingsChange(){
   speckMat.uniforms.uSize.value=P.speckSize;
   rebuildBed();placeObstacles();
   lastGrade=P.grade;
-  lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft, lastTaper=P.rodTaper, lastCell=P.gridCell;
+  lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft, lastTaper=P.rodTaper, lastCell=P.gridCell, lastObst=P.obstHeight;
 }
 function copySettings(){
   settingsStr=encodeSettings();
@@ -2003,12 +2033,12 @@ function drawMenu(){
     const [label,key,mn,mx]=MENU[i];
     const R=rowRect(i), X=R.x, y=R.y;
     if(key===null){
-      c.font='700 11px "Space Mono",monospace';c.fillStyle='#4d6166';
+      c.font='700 10px "Space Mono",monospace';c.fillStyle='#4d6166';
       c.fillText(label,X+4,y);continue;
     }
     const on=i===menuSel;
-    if(on){c.fillStyle='rgba(181,113,63,0.22)';c.fillRect(X-6,y-15,COLW,ROWH-1);}
-    c.font='700 12px "Space Mono",monospace';
+    if(on){c.fillStyle='rgba(181,113,63,0.22)';c.fillRect(X-6,y-13,COLW,ROWH-1);}
+    c.font='700 11px "Space Mono",monospace';
     c.fillStyle=on?'#e8e3d4':'#93a0a0';c.fillText(label,X+4,y);
     if(key.charCodeAt(0)===33){
       c.fillStyle=on?'#b5713f':'#4d6166';c.fillText('PUSH \u25B6',X+TRACKX,y);
@@ -2016,15 +2046,15 @@ function drawMenu(){
     }
     const [lo,hi]=rowRange(key,mn,mx);
     const f=(P[key]-lo)/((hi-lo)||1);
-    c.fillStyle='#243438';c.fillRect(X+TRACKX,y-9,TRACKW,7);
-    c.fillStyle=on?'#b5713f':'#4d6166';c.fillRect(X+TRACKX,y-9,TRACKW*Math.max(0,Math.min(1,f)),7);
+    c.fillStyle='#243438';c.fillRect(X+TRACKX,y-8,TRACKW,6);
+    c.fillStyle=on?'#b5713f':'#4d6166';c.fillRect(X+TRACKX,y-8,TRACKW*Math.max(0,Math.min(1,f)),6);
     c.fillStyle=on?'#e8e3d4':'#93a0a0';c.textAlign='right';
     c.fillText(P[key].toFixed(Math.abs(P[key])<10?2:1),X+VALX,y);c.textAlign='left';
     const m=rx(key);
-    c.fillStyle=m>1?'#3a2a1c':'#1b262a';c.fillRect(X+RNGX,y-13,RNGW,16);
+    c.fillStyle=m>1?'#3a2a1c':'#1b262a';c.fillRect(X+RNGX,y-11,RNGW,13);
     c.fillStyle=m>1?'#e0a45e':'#5d6f72';
-    c.font='700 10px "Space Mono",monospace';
-    c.fillText(m>=1?(m+'x'):(m===0.1?'.1x':'.01x'),X+RNGX+4,y-1);
+    c.font='700 9px "Space Mono",monospace';
+    c.fillText(m>=1?(m+'x'):(m===0.1?'.1x':'.01x'),X+RNGX+4,y-2);
   }
   /* description strip */
   const sel=MENU[menuSel];
@@ -2155,14 +2185,14 @@ function menuPointer(trigPressed, trigEdge){
   for(let i=0;i<MENU.length;i++){
     if(MENU[i][1]===null) continue;
     const R=rowRect(i);
-    if(px>=R.x-6&&px<=R.x-6+COLW&&py>=R.y-15&&py<=R.y+ROWH-16){row=i;break;}
+    if(px>=R.x-6&&px<=R.x-6+COLW&&py>=R.y-13&&py<=R.y+ROWH-14){row=i;break;}
   }
   if(row<0){if(!trigPressed)dragKey=null;return true;}
   menuSel=row;
   const [,key,mn,mx,st]=MENU[row], R=rowRect(row);
   if(trigEdge){
     if(key.charCodeAt(0)===33){ runAction(key); return true; }
-    if(px>=R.x+RNGX&&px<=R.x+RNGX+RNGW){
+    if(px>=R.x+RNGX&&px<=R.x+RNGX+RNGW&&py>=R.y-11&&py<=R.y+2){
       const m=cycleRange(key,mn,mx);
       say(MENU[row][0]+' range '+m+'x');
       return true;
@@ -2190,6 +2220,62 @@ function onSettingChanged(key){
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
   if(key==='hudScale')hud.mesh.scale.setScalar(P.hudScale);
 }
+
+
+/* ════════════════════════════════════════════════════════════
+   AUDIO — everything synthesised, no assets. Built on the Enter VR gesture
+   because browsers will not start an AudioContext without one.
+   ════════════════════════════════════════════════════════════ */
+const SND={ok:false,ctx:null};
+function audioInit(){
+  if(SND.ok) return;
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC) return;
+    const ctx=new AC();
+    SND.ctx=ctx;
+    SND.master=ctx.createGain(); SND.master.gain.value=P.volume; SND.master.connect(ctx.destination);
+    /* one noise buffer, reused by everything */
+    const len=ctx.sampleRate*2;
+    const buf=ctx.createBuffer(1,len,ctx.sampleRate);
+    const d=buf.getChannelData(0);
+    let last=0;
+    for(let i=0;i<len;i++){ const w=Math.random()*2-1; last=(last+0.02*w)/1.02; d[i]=w*0.5+last*3; }
+    SND.noise=buf;
+    /* river ambience: looping noise through a bandpass, level set by the flow near you */
+    const src=ctx.createBufferSource(); src.buffer=buf; src.loop=true;
+    const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=520; bp.Q.value=0.5;
+    SND.ambGain=ctx.createGain(); SND.ambGain.gain.value=0;
+    src.connect(bp); bp.connect(SND.ambGain); SND.ambGain.connect(SND.master);
+    src.start();
+    /* line swish: a second noise voice whose brightness rides rod tip speed */
+    const s2=ctx.createBufferSource(); s2.buffer=buf; s2.loop=true;
+    SND.swishF=ctx.createBiquadFilter(); SND.swishF.type='bandpass';
+    SND.swishF.frequency.value=900; SND.swishF.Q.value=2.5;
+    SND.swishGain=ctx.createGain(); SND.swishGain.gain.value=0;
+    s2.connect(SND.swishF); SND.swishF.connect(SND.swishGain); SND.swishGain.connect(SND.master);
+    s2.start();
+    SND.ok=true;
+  }catch(e){}
+}
+function sndBurst(freq,Q,dur,vol,sweep){
+  if(!SND.ok||P.volume<=0.001) return;
+  const ctx=SND.ctx, t=ctx.currentTime;
+  const src=ctx.createBufferSource(); src.buffer=SND.noise;
+  src.playbackRate.value=0.7+Math.random()*0.6;
+  const f=ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=freq; f.Q.value=Q;
+  if(sweep) f.frequency.exponentialRampToValueAtTime(Math.max(80,freq*sweep),t+dur);
+  const g=ctx.createGain();
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(vol,t+0.004);
+  g.gain.exponentialRampToValueAtTime(0.0008,t+dur);
+  src.connect(f); f.connect(g); g.connect(SND.master);
+  src.start(t); src.stop(t+dur+0.02);
+}
+const sndClick =()=>sndBurst(2600,9,0.035,0.35*P.volReel,0.6);
+const sndSplash=v=>sndBurst(700+Math.random()*300,1.1,0.16+Math.min(0.5,v*0.09),
+                            Math.min(0.9,0.10+v*0.13)*P.volSplash,0.25);
+const sndPlop  =()=>sndBurst(420,2.0,0.13,0.30*P.volSplash,0.35);
 
 /* ════════════════════════════════════════════════════════════
    6. CONTROLLERS
@@ -2230,16 +2316,25 @@ function handTargets(){
   corkTop.getWorldPosition(_corkW);
 }
 
+/* Nearest point on the belly, measured against SEGMENTS rather than nodes.
+   Node-only search made the line appear to jump into your hand from a hand's
+   width away, because with a pool at your feet the nearest node can sit well
+   off the piece of line you were actually reaching for. */
 function nearestLineNode(x,y,z){
-  let best=-1,bd=1e9;
-  const from=Math.floor(idxAt(lineOut+rodArc))+1;   /* only the loose belly */
-  const to=Math.min(nAct-2,Math.floor(idxAt(offSpool))-1);
+  let best=-1,bd=1e9,bt=0;
+  const from=Math.max(1,Math.floor(idxAt(lineOut+rodArc))+1);
+  const to=Math.min(nAct-3,Math.floor(idxAt(offSpool))-2);
   for(let i=from;i<=to;i++){
-    const p=i*3;
-    const d=(pos[p]-x)**2+(pos[p+1]-y)**2+(pos[p+2]-z)**2;
-    if(d<bd){bd=d;best=i;}
+    const a=i*3,b=a+3;
+    const ex=pos[b]-pos[a],ey=pos[b+1]-pos[a+1],ez=pos[b+2]-pos[a+2];
+    const ll=ex*ex+ey*ey+ez*ez;
+    let t=ll>1e-9?((x-pos[a])*ex+(y-pos[a+1])*ey+(z-pos[a+2])*ez)/ll:0;
+    t=Math.max(0,Math.min(1,t));
+    const px=pos[a]+ex*t-x, py=pos[a+1]+ey*t-y, pz=pos[a+2]+ez*t-z;
+    const d=px*px+py*py+pz*pz;
+    if(d<bd){bd=d;best=i;bt=t;}
   }
-  return {i:best,d:Math.sqrt(bd)};
+  return {i:best,d:Math.sqrt(bd),t:bt};
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2299,9 +2394,10 @@ function resetCast(){
    ════════════════════════════════════════════════════════════ */
 const nowMs=()=>(typeof performance!=='undefined'&&performance.now)?performance.now():0;
 const clock=new THREE.Clock();
-let gridAccum=0,gridMs=0,started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
+let sndAcc=0,crankAcc=0,gridAccum=0,gridMs=0,started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
 let prevTrigR=false,prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=0,prevRodPinch=false;
-let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft, lastTaper=P.rodTaper, lastCell=P.gridCell;
+let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft,
+    lastTaper=P.rodTaper, lastCell=P.gridCell, lastObst=P.obstHeight;
 const _lh=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_netP=new THREE.Vector3();
 
 function pulse(s){
@@ -2367,6 +2463,8 @@ renderer.setAnimationLoop(()=>{
   }
   if(Math.abs(P.grade-lastGrade)>0.005){lastGrade=P.grade;rebuildBed();placeObstacles();
     if(gridReady)gridBuildBed();}
+  if(Math.abs(P.obstHeight-lastObst)>0.01){lastObst=P.obstHeight;placeObstacles();
+    if(gridReady)gridBuildBed();}
   if(Math.abs(P.gridCell-lastCell)>0.005){lastCell=P.gridCell;gridAlloc();gridTexInit();
     for(let i=0;i<60;i++)gridStep(1/20);gridTexUpdate();}
   {
@@ -2400,19 +2498,27 @@ renderer.setAnimationLoop(()=>{
        the span is never over-taut and never generates the back-tension that was
        stopping line from feeding out past your hand. */
     const Dg=Math.hypot(_lh.x-guidePos[0],_lh.y-guidePos[1],_lh.z-guidePos[2]);
-    handArc=Math.min(offSpool-0.15,(lineOut+rodArc)+Dg);
+    /* a touch MORE material than the straight run, so the span sags instead of
+       hanging taut. Exactly taut meant the belly's own weight registered as
+       back-tension and quietly cranked line in through the guides all day. */
+    handArc=Math.min(offSpool-0.15,(lineOut+rodArc)+Dg+0.14);
     handIdx=Math.max(1,Math.round(idxAt(handArc)));
     if(Dg>1.2) handIdx=-1;                 /* hand nowhere near the line */
   } else if(handActive&&prevHandActive!==2&&handMode===2){
     const n=nearestLineNode(_lh.x,_lh.y,_lh.z);
-    handIdx=(n.i>0&&n.d<0.55)?n.i:-1;
-    if(handIdx>0) handArc=sArc(handIdx);
-    if(handIdx<0) say('no line there to grab');
+    if(n.i>0&&n.d<0.22){
+      /* grab the exact point along the segment, not the nearest node */
+      handArc=sArc(n.i)+(sArc(n.i+1)-sArc(n.i))*n.t;
+      handIdx=Math.max(1,Math.round(idxAt(handArc)));
+      grabEase=0;
+    } else { handIdx=-1; say('no line within reach'); }
   }
   if(!handActive) handIdx=-1;
   prevHandActive=handActive?handMode:0;
   handHeld=handActive&&handIdx>0;
   handPinched=handMode===2&&handIdx>0;
+  /* ease the grip in, so taking hold does not snap the line into your fist */
+  grabEase=handPinched?Math.min(1,grabEase+dt*6):1;
   _handW.copy(_lh);
 
   if(rodPinch&&!prevRodPinch){
@@ -2480,6 +2586,7 @@ renderer.setAnimationLoop(()=>{
         flyAir=false;driftAcc=0;driftT=0;
         const speed=Math.hypot(vel[0],vel[1],vel[2]);
         spawnRing(fx,fz,0.6);
+        if(SND.ok) sndSplash(speed);
         const lastFree=Math.floor(idxAt(lineOut));
         for(const f of fishes){
           if(f.state!=='holding')continue;
@@ -2521,6 +2628,7 @@ renderer.setAnimationLoop(()=>{
 
   if(hooked&&hooked.beh==='jump'&&pos[1]>filmY(pos[0],pos[2],simTime)-0.02&&Math.random()<dt*14){
     spawnRing(pos[0],pos[2],1.5);
+    if(SND.ok) sndSplash(3.5+hooked.len*4);
   }
   if(hooked){
     hooked.stamina=Math.max(0,hooked.stamina
@@ -2539,6 +2647,30 @@ renderer.setAnimationLoop(()=>{
     M.drift=0;
   }
   for(const f of fishes) f.update(dt,t);
+
+  /* ---- sound ---- */
+  if(SND.ok){
+    SND.master.gain.value=P.volume;
+    /* river: loudness and brightness from the flow where you stand */
+    computeFlow(_camW.x,_camW.z);
+    const localSp=Math.hypot(flowX,flowZ);
+    const wet=bedDepth(_camW.x,_camW.z)>0.05?1:0.45;
+    const amb=Math.min(0.5,0.06+localSp*0.16)*P.volRiver*wet;
+    SND.ambGain.gain.value+=(amb-SND.ambGain.gain.value)*Math.min(1,dt*3);
+    /* line: air noise off the rod tip */
+    const T=(RN-1)*3;
+    const tipSp=Math.hypot(rvel[T],rvel[T+1],rvel[T+2]);
+    const sw=Math.max(0,tipSp-1.6)*0.035*P.volLine;
+    SND.swishGain.gain.value+=(Math.min(0.35,sw)-SND.swishGain.gain.value)*Math.min(1,dt*14);
+    SND.swishF.frequency.value=700+Math.min(2600,tipSp*190);
+    /* reel: a click per notch of line off the spool, plus a ratchet while cranking */
+    sndAcc+=spoolOut;
+    while(sndAcc>0.055){sndAcc-=0.055;sndClick();}
+    if(reeling&&trigR>0.05){
+      crankAcc+=P.reelSpeed*trigR*dt;
+      while(crankAcc>0.10){crankAcc-=0.10;sndClick();}
+    }
+  }
 
   hapT+=dt;
   if(hapT>0.07){hapT=0;
@@ -2706,6 +2838,7 @@ if(location.hash&&location.hash.indexOf('s=')>=0){
 
 enterBtn.addEventListener('click',async()=>{
   try{
+    audioInit();
     const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
     renderer.xr.setReferenceSpaceType('local-floor');
     renderer.xr.setFoveation(0.6);
