@@ -82,9 +82,42 @@ deadband meaningless. Don't reintroduce that.
   20000 of them for no CPU cost. The GLSL flow function is generated from the same JS obstacle
   list so the two cannot drift apart. If a grid solve ever replaces the analytic field, the
   shader samples a texture instead — cheaper, not harder.
-- Depth-averaged **2D** flow. This is the shallow-water simplification and it is the correct
-  one for dry-fly fishing; 3D would buy plunge-pool recirculation you would never see.
-- Speed follows continuity: `discharge / depth`, so thin water is fast water.
+**Two water models**, toggled by `waterModel`.
+
+**Model 1 (default): a solved shallow-water grid.** ~178x33 cells at 0.45 m over the fishable
+reach, stepped at 12 Hz, unconditionally stable (semi-Lagrangian advection). Per step:
+
+1. Body force — gravity down the *water surface slope*, so riffles run fast because they are
+   steep, not because they are thin.
+2. Bed friction — Manning, `g n^2 |u| u / h^(4/3)`, applied **implicitly** (`u /= 1 + fr dt`).
+   Explicit friction flips sign and explodes wherever `fr dt` approaches 1, i.e. in thin water.
+3. Semi-Lagrangian advection.
+4. Pressure projection enforcing `div(h u) = 0`, Gauss-Seidel, ~20 sweeps.
+
+Depth comes from `surfY - bedY`, with obstacles added as **bed elevation** — that is why flow
+goes round a rock rather than being told to. Cells shallower than 5 cm are solid.
+
+Two traps, both of which bit during the build:
+- The Poisson right-hand side needs `dx` **squared**. With one power of `dx` the projection
+  over-corrects and the field explodes to 11 m/s of noise.
+- Obstacle heights must actually approach the surface. The original rocks sat half a metre
+  under; the solver correctly flowed straight over them and produced no wake at all.
+
+Verified in `diag2.mjs`: parabolic cross-channel profile (0 at the banks, 1.6 m/s mid), thin
+riffles at 1.7 m/s against deep pools at 0.7 m/s, zero velocity inside the rock, **negative
+velocity in its lee** — real recirculation — and flow deflecting outward on both shoulders.
+
+Cost is CPU, not GPU: about 3% of a desktop core at defaults, so budget several times that on
+a Quest. The HUD shows solver milliseconds. `gridCell`, `gridIter` and `gridRate` all trade
+directly against it.
+
+**Model 0: the original analytic field.** Kept for comparison and as a fallback. Speed follows
+`discharge / depth` so thin water is fast, obstacle wakes are hand-written, and eddies are
+faked with shed point vortices.
+
+The grid field also feeds the GPU specks and the water surface colour through a byte texture
+(velocity encoded at +/-6 m/s), so what you see is what the line feels.
+- Depth-averaged **2D** flow. 3D would buy plunge-pool recirculation you would never see.
 - Surface elevation `surfY(x)` is a pool-drop profile: a base grade plus six discrete drops.
   Flow accelerates over each lip via a surface-slope term. The GLSL twin of `surfY` is
   **generated from the same JS array**, so the mesh and the physics cannot drift apart.
@@ -159,7 +192,23 @@ cannot pay line back out. So holding the trigger against a running fish shortens
 until something gives — normally the tippet. Setting `reelPower` below tippet strength makes
 the reel stall first and saves the line instead. Five behaviours cycle on a timer weighted
 by stamina: **run, sound, jump, cruise, easy**. Stamina drains from both tension and the fish's
-own effort, so a fish that fights hard tires fast. **A hooked fish is its own rigid body, not a heavy node on the line.** Hanging 0.7 kg off a
+own effort, so a fish that fights hard tires fast. **The line pulls the fish as an axial spring, not via a measured node tension.** Reading the
+tension off the segment next to the fly does not work, and the harness proved why: with a
+kinematic fly node and a 1.5 microgram tippet neighbour, all the stretch piles up at the fish
+(7x at node 0, 1.01x at the tiptop) and the tip probe reads nothing. So the fish feels
+`lineStretch x (distance - lineOut)` newtons toward the rod tip, with the equal and opposite
+applied to the rod tip node so a run bends the blank. Mass-ratio independent.
+
+**The drag must give line, or every run snaps the tippet.** When a hooked fish out-pulls the
+drag setting, the spool releases exactly the length that relieves the excess. Without this the
+tippet popped within a fifth of a second of any run. Blocked while reeling, which is what lets
+the reel win — and lets you break yourself off by holding the trigger.
+
+**`MIN_OUT` must relax during a fight.** The 4 m floor exists so stripping cannot strand you on
+bare leader while casting, but it made a fish further out than 4 m literally unreelable. Floor
+drops to 0.7 m while hooked.
+
+**A hooked fish is its own rigid body, not a heavy node on the line.** Hanging 0.7 kg off a
 1.5 microgram tippet node is a 60,000:1 mass ratio, and Gauss-Seidel cannot transmit force
 across that — the line could neither drag the fish in nor build tension to break. So while
 hooked, `invM[0] = 0` and the fly node is pinned to the fish each substep; the line tension
@@ -203,7 +252,8 @@ timestep-dependent, so **any calibration must be redone if those change.** XPBD 
 | Input | Action |
 |---|---|
 | Left stick | walk, including wading; deep water slows you |
-| Left trigger | under 15% free · 15–85% **routes** (line slides through the hand, held point re-chosen every frame) · over 85% **pinches** (one material point held fast) |
+| Left trigger | under 15% free · 15–85% **routes** (a PULLEY: the material point at your fingers is set by the straight run from the stripping guide, so the span is never over-taut and never blocks line feeding out) · 15-85% old behaviour was to pin one node, which was what stopped casting past the hand · over 85% **pinches** |
+| ~~old~~ | under 15% free · 15–85% **routes** (line slides through the hand, held point re-chosen every frame) · over 85% **pinches** (one material point held fast) |
 | Left grip | net |
 | Right trigger | reel in, analog · **drives the menu pointer while the menu is open** |
 | Right grip | clamp line at the cork |
@@ -239,8 +289,18 @@ Recorded because each one was mis-diagnosed at least once.
 8. **Nothing loaded at all** — a variable read every frame but never declared. `node --check`
    passes such files happily.
 
-9. **Frozen the moment the left hand grabbed line** — a variable referenced in the stripping
+9. **Routing blocked line feeding past the hand** — pinning a material point made the belly
+   taut, and that back-tension exceeded the guide-slip threshold. Fixed by treating the hand as
+   a pulley rather than an anchor.
+10. **Frozen the moment the left hand grabbed line** — a variable referenced in the stripping
    code that was never declared. Same class as (8): fine until that branch executes.
+
+**`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
+traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
+actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
+stub: the proxy's `set` trap silently discards assignments, so `THREE.Clock` has to be handled
+in the `construct` trap. It wasn't, `dt` was NaN, and the harness reported healthy nonsense for
+a while.
 
 **Therefore: run `smoke.mjs` before shipping.** It stubs Three.js and the DOM with real
 Vector3/Quaternion maths, executes the module, **connects a left and right controller with

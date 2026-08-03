@@ -89,9 +89,10 @@ const P = {
   rodModel:1, rodE:200.0, rodMass:0.077,
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
   massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:1.00, lineWt:5.0, statFric:0.05,
-  reelSpeed:2.60, reelPower:60.0, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
+  reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:1.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
+  waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
   current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -135,6 +136,7 @@ const MENU=[
   ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip, as an exponent on the blank\u2019s real second moment of area. 1.00 is the true tube, whose tip is 500x softer than the butt and goes noodly at this node count. 0.60 keeps the shape without the flop.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
   ['Reel power N','reelPower',1.00,200.0,1.00,'Tension at which the reel finally stalls. Default 60 N is well above a 21 N tippet, so cranking always beats the fish and you can pull hard enough to break yourself off. Set it below tippet strength if you would rather the reel give out before the line does.'],
+  ['Line stretch N/m','lineStretch',5.00,400.0,5.00,'Axial stiffness of the deployed line, which is what a hooked fish actually pulls against. Lower is a stretchy, forgiving connection; higher transmits every head shake and breaks tippets faster.'],
   ['Tippet (N)','tippet',2.00,60.0,0.50,'Breaking strain. 5X is 4.75 lb, about 21 N. 6X is 15.6 N, 4X is 26.7 N.'],
   ['Line float','buoyancy',0.20,3.00,0.05,'How firmly the line is held on the surface film once it is riding on it.'],
   ['Surface stick','stick',0.00,4.00,0.10,'Surface tension. Higher makes line cling and take a harder pull to lift off.'],
@@ -146,7 +148,12 @@ const MENU=[
   ['Invert walk Y','invertY',0,1,1,'Flip the forward and backward walking direction.'],
   ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
   ['— RIVER —',null,0,0,0,''],
-  ['Current','current',0.10,1.40,0.05,'Discharge per unit width. Speed is this divided by depth, so raising it speeds the whole river.'],
+  ['Water model','waterModel',0,1,1,'0 is the analytic field: flow painted on by formula, fast but it can only do what was written into it. 1 solves shallow water on a grid — depth from the bed and obstacles, gravity down the surface slope, Manning bed friction and a pressure projection. Rocks divert flow because they ARE bed elevation, and eddies form because the solver makes them.'],
+  ['Grid cell m','gridCell',0.20,1.00,0.05,'Solver cell size. Smaller resolves rocks and eddies better and costs more. A 0.85 m rock needs cells well under half a metre to shed properly.'],
+  ['Grid iterations','gridIter',4.00,48.0,1.00,'Pressure projection sweeps per step. More enforces continuity harder — too few and flow leaks through obstacles.'],
+  ['Grid rate Hz','gridRate',5.00,40.0,1.00,'How often the fluid is stepped. It is unconditionally stable, so this is purely cost against how lively the eddies look.'],
+  ['Manning n','manningN',0.015,0.120,0.005,'Bed roughness. Gravel trout streams run about 0.035-0.06. This is what sets the actual current speed, together with slope and depth — deeper water runs faster for the same slope, and riffles are fast because they are steep, not because they are shallow.'],
+  ['Current','current',0.10,1.40,0.05,'Master flow multiplier. On the grid model it scales the driving slope; on the analytic model it is discharge per unit width.'],
   ['River grade','grade',0.00,2.50,0.10,'Steepness of the reach and the size of the drops between pools. Rebuilds the bed live.'],
   ['GPU specks','speckGPU',0,1,1,'0 runs the original CPU specks — real particles carried by the flow, capped at 4000 because each one costs a flow evaluation in JavaScript. 1 moves the whole thing into a shader: each speck re-integrates its own short streamline every frame, up to 20000 of them, for no CPU cost at all. Toggle freely; nothing else changes.'],
   ['Speck travel s','speckTravel',2.00,20.0,0.50,'GPU specks only. How many seconds of drift each speck traces before fading out and starting again. Longer reads as transport down the river; shorter reads as local flow direction.'],
@@ -243,11 +250,14 @@ const ripple=(x,z,t)=>
   (Math.sin(x*1.7+t*2.3)*0.011+Math.sin(x*0.7+z*0.9+t*1.5)*0.017+Math.sin(z*2.4-t*1.1)*0.008)*0.55;
 const filmY=(x,z,t)=>surfY(x)+ripple(x,z,t);
 
+/* heights are measured off the bed. The old values left every rock half a metre
+   under water, which the grid solver correctly flowed straight over — no wake,
+   no seam. These two break the surface and two sit just under it. */
 const OBST=[
-  {x:-7.0,z:-7.6,r:0.85,h:0.55,kind:'rock',sh:0,sgn:1},
-  {x: 1.5,z:-10.4,r:1.05,h:0.42,kind:'rock',sh:0,sgn:-1},
-  {x: 6.5,z:-6.9,r:0.62,h:0.30,kind:'rock',sh:0,sgn:1},
-  {x:-3.0,z:-12.2,r:1.60,h:0.26,kind:'log',sh:0,sgn:-1},
+  {x:-7.0,z:-7.6,r:0.85,h:1.25,kind:'rock',sh:0,sgn:1},
+  {x: 1.5,z:-10.4,r:1.05,h:1.60,kind:'rock',sh:0,sgn:-1},
+  {x: 6.5,z:-6.9,r:0.62,h:1.05,kind:'rock',sh:0,sgn:1},
+  {x:-3.0,z:-12.2,r:1.60,h:0.90,kind:'log',sh:0,sgn:-1},
 ];
 const NV=16, vort=[];
 for(let i=0;i<NV;i++) vort.push({x:0,z:0,r:1,k:0,life:0});
@@ -255,6 +265,15 @@ let vNext=0;
 
 let flowX=0,flowZ=0;
 function computeFlow(x,z){
+  if(P.waterModel>0.5&&gridReady&&x>GX0+gdx&&x<GX1-gdx&&z>GZ0+gdx&&z<GZ1-gdx){
+    const fx=(x-GX0)/gdx-0.5, fz=(z-GZ0)/gdx-0.5;
+    flowX=gridSampleField(gu,fx,fz);
+    flowZ=gridSampleField(gv,fx,fz);
+    return;
+  }
+  return analyticFlow(x,z);
+}
+function analyticFlow(x,z){
   const u=(z-CZ)/HALFW,cross=Math.max(0,1-u*u);
   if(cross<=0.001){flowX=0;flowZ=0;return;}
   const d=Math.max(bedDepth(x,z),0.12);
@@ -351,7 +370,7 @@ let offSpool=8.0+ROD_ARC+2.2;
 let rodArc=ROD_ARC;       /* live path length through the guides */
 let handMode=0,rodPinch=false,wrapTotal=0;
 let clickAcc=0,slipOut=0,spoolOut=0,reeling=false;
-let probeOut=0,probeIn=0,probeThr=0,probeSp=0;
+let probeOut=0,probeIn=0,probeThr=0,probeSp=0,fishTension=0;
 
 function lineProfile(s){
   /* [density kg/m, diameter m] at arc length s from the fly.
@@ -409,6 +428,166 @@ function redistribute(oldIdxAt){
   if(corkIdx>0) corkIdx=Math.min(nAct-2,Math.max(1,Math.round(idxAt(corkArc))));
 }
 let handArc=0, corkArc=0;
+
+
+/* ════════════════════════════════════════════════════════════
+   2b. SHALLOW-WATER GRID
+   The analytic field could only have flow painted onto it. Here the flow is
+   SOLVED: depth comes from the bed and the obstacles, a body force comes from
+   the water-surface slope, bed friction is Manning, and a pressure projection
+   enforces continuity. Rocks divert flow because they are bed elevation, riffles
+   run fast because the surface is steep there, eddies form because the solver
+   makes them. Semi-Lagrangian advection, so it is unconditionally stable.
+   ════════════════════════════════════════════════════════════ */
+const GX0=-40, GX1=40, GZ0=CZ-HALFW-0.6, GZ1=CZ+HALFW+0.6;
+let gdx=0.40, GNX=1, GNZ=1, gridReady=false;
+let gu,gv,gu0,gv0,gp,gdiv,gh,ginv43,gsolid,gslope;
+function gridAlloc(){
+  gdx=Math.max(0.2,P.gridCell);
+  GNX=Math.max(8,Math.round((GX1-GX0)/gdx));
+  GNZ=Math.max(6,Math.round((GZ1-GZ0)/gdx));
+  const n=GNX*GNZ;
+  gu=new Float32Array(n); gv=new Float32Array(n);
+  gu0=new Float32Array(n); gv0=new Float32Array(n);
+  gp=new Float32Array(n); gdiv=new Float32Array(n);
+  gh=new Float32Array(n); ginv43=new Float32Array(n);
+  gsolid=new Uint8Array(n); gslope=new Float32Array(GNX);
+  gridBuildBed();
+  gridReady=true;
+}
+function gridBuildBed(){
+  for(let i=0;i<GNX;i++){
+    const x=GX0+(i+0.5)*gdx;
+    gslope[i]=(surfY(x-gdx)-surfY(x+gdx))/(2*gdx);   /* +ve downstream */
+  }
+  for(let j=0;j<GNZ;j++){
+    const z=GZ0+(j+0.5)*gdx;
+    for(let i=0;i<GNX;i++){
+      const x=GX0+(i+0.5)*gdx, k=i+j*GNX;
+      let bed=bedY(x,z);
+      /* obstacles are bed elevation, which is what makes flow go round them */
+      for(const o of OBST){
+        const d=Math.hypot(x-o.x,z-o.z);
+        if(d<o.r){
+          const top=bedY(o.x,o.z)+o.h*(1-0.35*(d/o.r)*(d/o.r));
+          if(top>bed) bed=top;
+        }
+      }
+      const h=surfY(x)-bed;
+      gh[k]=Math.max(h,0);
+      gsolid[k]=(h<0.05)?1:0;
+      ginv43[k]=1/Math.pow(Math.max(h,0.08),4/3);
+      if(gsolid[k]){gu[k]=0;gv[k]=0;}
+    }
+  }
+}
+function gridSampleField(F,fx,fz){
+  let i=Math.floor(fx), j=Math.floor(fz);
+  if(i<0)i=0; if(j<0)j=0;
+  if(i>GNX-2)i=GNX-2; if(j>GNZ-2)j=GNZ-2;
+  const tx=fx-i, tz=fz-j, k=i+j*GNX;
+  return F[k]*(1-tx)*(1-tz)+F[k+1]*tx*(1-tz)+F[k+GNX]*(1-tx)*tz+F[k+GNX+1]*tx*tz;
+}
+function gridStep(dt){
+  if(!gridReady) return;
+  const g=9.81, n2=P.manningN*P.manningN;
+  /* 1. body force: gravity down the surface slope, minus Manning bed friction */
+  for(let k=0;k<gu.length;k++){
+    if(gsolid[k]){gu[k]=0;gv[k]=0;continue;}
+    const i=k%GNX;
+    const sp=Math.hypot(gu[k],gv[k]);
+    const fr=g*n2*sp*ginv43[k];
+    /* friction implicitly, or it flips sign and explodes in thin water */
+    const damp=1/(1+fr*dt);
+    gu[k]=(gu[k]+dt*g*gslope[i]*P.current*2.0)*damp;
+    gv[k]=gv[k]*damp;
+  }
+  /* 2. semi-Lagrangian advection */
+  gu0.set(gu); gv0.set(gv);
+  for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+    const k=i+j*GNX;
+    if(gsolid[k]) continue;
+    const fx=i-gu0[k]*dt/gdx, fz=j-gv0[k]*dt/gdx;
+    gu[k]=gridSampleField(gu0,fx,fz);
+    gv[k]=gridSampleField(gv0,fx,fz);
+  }
+  /* 3. inflow / outflow / walls */
+  gridBounds();
+  /* 4. pressure projection: enforce div(h u) = 0 */
+  const iters=Math.max(4,Math.round(P.gridIter));
+  gp.fill(0);
+  for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+    const k=i+j*GNX;
+    if(gsolid[k]){gdiv[k]=0;continue;}
+    const hE=gsolid[k+1]?0:0.5*(gh[k]+gh[k+1]);
+    const hW=gsolid[k-1]?0:0.5*(gh[k]+gh[k-1]);
+    const hN=gsolid[k+GNX]?0:0.5*(gh[k]+gh[k+GNX]);
+    const hS=gsolid[k-GNX]?0:0.5*(gh[k]+gh[k-GNX]);
+    gdiv[k]=(hE*0.5*(gu[k]+gu[k+1])-hW*0.5*(gu[k]+gu[k-1])
+            +hN*0.5*(gv[k]+gv[k+GNX])-hS*0.5*(gv[k]+gv[k-GNX]))/gdx;
+  }
+  for(let it=0;it<iters;it++){
+    for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+      const k=i+j*GNX;
+      if(gsolid[k]) continue;
+      const hE=gsolid[k+1]?0:0.5*(gh[k]+gh[k+1]);
+      const hW=gsolid[k-1]?0:0.5*(gh[k]+gh[k-1]);
+      const hN=gsolid[k+GNX]?0:0.5*(gh[k]+gh[k+GNX]);
+      const hS=gsolid[k-GNX]?0:0.5*(gh[k]+gh[k-GNX]);
+      const sum=hE+hW+hN+hS;
+      if(sum<1e-6){gp[k]=0;continue;}
+      gp[k]=(hE*gp[k+1]+hW*gp[k-1]+hN*gp[k+GNX]+hS*gp[k-GNX]-gdiv[k]*gdx*gdx)/sum;
+    }
+  }
+  for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+    const k=i+j*GNX;
+    if(gsolid[k]) continue;
+    gu[k]-=(gp[k+1]-gp[k-1])/(2*gdx);
+    gv[k]-=(gp[k+GNX]-gp[k-GNX])/(2*gdx);
+  }
+  for(let k=0;k<gu.length;k++){
+    const sp=Math.hypot(gu[k],gv[k]);
+    if(sp>8){const s2=8/sp;gu[k]*=s2;gv[k]*=s2;}
+  }
+  gridBounds();
+}
+function gridBounds(){
+  const g=9.81;
+  for(let j=0;j<GNZ;j++){
+    const kL=j*GNX, kR=GNX-1+j*GNX;
+    if(!gsolid[kL]){
+      /* inflow at Manning's normal velocity for the local depth and slope */
+      const S=Math.max(1e-5,gslope[0]*P.current*2.0);
+      gu[kL]=(1/Math.max(P.manningN,0.005))*Math.pow(Math.max(gh[kL],0.05),2/3)*Math.sqrt(S);
+      gv[kL]=0;
+    } else {gu[kL]=0;gv[kL]=0;}
+    gu[kR]=gsolid[kR]?0:gu[kR-1];
+    gv[kR]=gsolid[kR]?0:gv[kR-1];
+  }
+  for(let i=0;i<GNX;i++){
+    const kT=i, kB=i+(GNZ-1)*GNX;
+    gu[kT]=0;gv[kT]=0;gu[kB]=0;gv[kB]=0;
+  }
+}
+/* velocity texture for the GPU specks */
+let gridTex=null, gridTexData=null;
+const GRID_VSCALE=6.0;
+function gridTexInit(){
+  gridTexData=new Uint8Array(GNX*GNZ*4);
+  gridTex=new THREE.DataTexture(gridTexData,GNX,GNZ,THREE.RGBAFormat);
+  gridTex.magFilter=THREE.LinearFilter; gridTex.minFilter=THREE.LinearFilter;
+  gridTex.needsUpdate=true;
+}
+function gridTexUpdate(){
+  if(!gridTex) return;
+  for(let k=0,p=0;k<gu.length;k++,p+=4){
+    gridTexData[p]  =Math.max(0,Math.min(255,Math.round((gu[k]/GRID_VSCALE+0.5)*255)));
+    gridTexData[p+1]=Math.max(0,Math.min(255,Math.round((gv[k]/GRID_VSCALE+0.5)*255)));
+    gridTexData[p+2]=Math.max(0,Math.min(255,Math.round(gh[k]*80)));
+    gridTexData[p+3]=255;
+  }
+  gridTex.needsUpdate=true;
+}
 
 /* ════════════════════════════════════════════════════════════
    3. SOLVER
@@ -689,7 +868,8 @@ function physics(dt){
       if(P.lineBend>0.001) for(let i=1;i<bendTo;i++) lineBendXPBD(i,h2);
       for(let g=0;g<NG;g++) solveGuide(g,0.85);
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
-      if(handHeld&&handIdx>0) pinLine(sArc(handIdx),_handW.x,_handW.y,_handW.z,handMode===2?0.9:0.45);
+      if(handHeld&&handIdx>0)
+        pinLine(handMode===2?sArc(handIdx):handArc,_handW.x,_handW.y,_handW.z,handMode===2?0.9:0.35);
       if(corkHeld&&corkIdx>0) pinLine(sArc(corkIdx),_corkW.x,_corkW.y,_corkW.z,0.9);
     }
 
@@ -715,7 +895,7 @@ function physics(dt){
           const avail=Math.max(0,(offSpool-lineOut-rodArc)-MIN_SLACK);
           dl=Math.min(dl,avail);
         }
-        lineOut=Math.max(MIN_OUT,lineOut+dl);
+        lineOut=Math.max(hooked?0.7:MIN_OUT,lineOut+dl);
         slipOut+=dl;
       }
       /* Stripping. Material length from stripping guide to your pinched hand
@@ -729,11 +909,23 @@ function physics(dt){
         const over=Dt-Lt-P.spoolDead;
         if(over>0){
           const pull=Math.min(over,0.06);
-          lineOut=Math.max(MIN_OUT,lineOut-pull);
+          lineOut=Math.max(hooked?0.7:MIN_OUT,lineOut-pull);
           slipOut-=pull;
         }
       }
       const thr=P.spoolDrag*1.15+P.statFric;
+      /* A hooked fish pulls against the drag, not against the belly, so the
+         spool has to give directly. Release exactly the length that relieves
+         the excess over the drag setting — that is what the drag does, and
+         without it any run snapped the tippet within a fifth of a second. */
+      if(hooked&&!reeling&&!rodPinch&&fishTension>thr&&offSpool<TOTAL_LINE){
+        const give=Math.min((fishTension-thr)/Math.max(P.lineStretch,1),0.08);
+        if(give>0){
+          offSpool=Math.min(TOTAL_LINE,offSpool+give);
+          lineOut+=give;
+          spoolOut+=give;clickAcc+=give;
+        }
+      }
       /* a hand on the crank holds the spool: a fish cannot take line while you
          are actively reeling, which is what makes the reel able to win */
       if(Tsp>thr&&offSpool<TOTAL_LINE&&!reeling){
@@ -753,7 +945,7 @@ function physics(dt){
         }
       }
       if(offSpool-lineOut-rodArc<MIN_SLACK)
-        lineOut=Math.max(MIN_OUT,offSpool-rodArc-MIN_SLACK);
+        lineOut=Math.max(hooked?0.7:MIN_OUT,offSpool-rodArc-MIN_SLACK);
       nAct=Math.min(MAXNODE,Math.floor(idxAt(offSpool))+2);
     }
 
@@ -888,9 +1080,12 @@ const waterMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,
   uniforms:{uTime:{value:0},uQ:{value:P.current},uGrade:{value:P.grade},
     uDeep:{value:new THREE.Color(0x1d3f43)},uShal:{value:new THREE.Color(0x53897a)},
-    uFast:{value:new THREE.Color(0x9ab9b0)}},
+    uFast:{value:new THREE.Color(0x9ab9b0)},
+    uUseGrid:{value:0},uFlow:{value:null},
+    uGMin:{value:new THREE.Vector2(GX0,GZ0)},
+    uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)}},
   vertexShader:`
-    uniform float uTime,uQ,uGrade; varying float vD,vS;
+    uniform float uTime,uQ,uGrade; varying float vD,vS; varying vec3 vW;
     ${GLSL_SURF}
     void main(){
       vec4 wp=modelMatrix*vec4(position,1.0);
@@ -903,16 +1098,27 @@ const waterMat=new THREE.ShaderMaterial({
               +sin(wp.x*0.7+wp.z*0.9+uTime*1.5)*0.017
               +sin(wp.z*2.4-uTime*1.1)*0.008)*0.55;
       wp.y=surfY(wp.x)+h*(0.3+s*0.5);
-      vD=d;vS=s;
+      vD=d;vS=s;vW=wp.xyz;
       gl_Position=projectionMatrix*viewMatrix*wp;
     }`,
   fragmentShader:`
-    uniform vec3 uDeep,uShal,uFast; varying float vD,vS;
+    uniform vec3 uDeep,uShal,uFast; uniform float uUseGrid;
+    uniform vec2 uGMin,uGSize; uniform sampler2D uFlow;
+    varying float vD,vS; varying vec3 vW;
     void main(){
-      if(vD<0.02) discard;
-      vec3 c=mix(uShal,uDeep,clamp(vD/1.5,0.0,1.0));
-      c=mix(c,uFast,smoothstep(0.4,1.7,vS)*0.5);
-      gl_FragColor=vec4(c,clamp(0.34+vD*0.30,0.0,0.76));
+      float d=vD, sp=vS;
+      if(uUseGrid>0.5){
+        vec2 tc=vec2((vW.x-uGMin.x)/uGSize.x,(vW.z-uGMin.y)/uGSize.y);
+        if(tc.x>0.004&&tc.x<0.996&&tc.y>0.004&&tc.y<0.996){
+          vec4 t=texture2D(uFlow,tc);
+          sp=length((t.rg-0.5)*${GRID_VSCALE.toFixed(1)});
+          d=t.b*255.0/80.0;
+        }
+      }
+      if(d<0.02) discard;
+      vec3 c=mix(uShal,uDeep,clamp(d/1.5,0.0,1.0));
+      c=mix(c,uFast,smoothstep(0.4,1.7,sp)*0.55);
+      gl_FragColor=vec4(c,clamp(0.34+d*0.30,0.0,0.76));
       #include <colorspace_fragment>
     }`});
 {
@@ -998,6 +1204,13 @@ vec2 obstacle(vec2 p, vec4 o, vec2 v, float s){
   return v;
 }
 vec2 flowAt(vec2 p){
+  if(uUseGrid>0.5){
+    vec2 tc=vec2((p.x-uGMin.x)/uGSize.x,(p.y-uGMin.y)/uGSize.y);
+    if(tc.x>0.004&&tc.x<0.996&&tc.y>0.004&&tc.y<0.996){
+      vec4 t=texture2D(uFlow,tc);
+      return (t.rg-0.5)*${GRID_VSCALE.toFixed(1)};
+    }
+  }
   float u=(p.y-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
   float cr=max(0.0,1.0-u*u);
   if(cr<=0.001) return vec2(0.0);
@@ -1041,11 +1254,16 @@ const gSpeckMat=new THREE.ShaderMaterial({
     uTime:{value:0}, uSize:{value:P.speckSize}, uQ:{value:P.current}, uGrade:{value:P.grade},
     uOriginX:{value:0}, uRange:{value:P.speckRange}, uTravel:{value:P.speckTravel},
     uTrail:{value:P.speckTrail},
+    uUseGrid:{value:0}, uFlow:{value:null},
+    uGMin:{value:new THREE.Vector2(GX0,GZ0)},
+    uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)},
     uVort:{value:Array.from({length:8},()=>new THREE.Vector4(0,0,1,0))},
   },
   vertexShader:`
     attribute vec2 aSeed; attribute vec3 aMisc;
-    uniform float uTime,uSize,uQ,uGrade,uOriginX,uRange,uTravel,uTrail;
+    uniform float uTime,uSize,uQ,uGrade,uOriginX,uRange,uTravel,uTrail,uUseGrid;
+    uniform vec2 uGMin,uGSize;
+    uniform sampler2D uFlow;
     uniform vec4 uVort[8];
     varying float vA;
     ${GLSL_SURF}
@@ -1271,12 +1489,22 @@ class Trout{
       case 'easy':  fx=-ax*F*0.18; fz=-az*F*0.18;             this.effort=0.15; break;
       default:      fx=this.run.x*F*0.7; fz=this.run.z*F*0.7; this.effort=0.5;
     }
-    /* the line pulls the fish toward the rod tip with the tension we measured */
+    /* The line pulls the fish as an axial SPRING over its deployed length.
+       Reading the tension off the segment next to the fish does not work: that
+       neighbour weighs 1.5 micrograms, so all the stretch piles up there and the
+       probe at the rod tip reads nothing. Measured in the harness: 7x stretch at
+       the fly, 1.01x at the tiptop. A spring is mass-ratio independent. */
     const T=(RN-1)*3;
     let lx=rpos[T]-this.p.x, ly=rpos[T+1]-this.p.y, lz=rpos[T+2]-this.p.z;
     const ll=Math.hypot(lx,ly,lz)||1; lx/=ll;ly/=ll;lz/=ll;
-    const Tn=Math.min(probeOut,400);
-    fx+=lx*Tn; fy+=ly*Tn; fz+=lz*Tn;
+    const over=ll-lineOut;
+    fishTension=over>0?Math.min(P.lineStretch*over,600):0;
+    fx+=lx*fishTension; fy+=ly*fishTension; fz+=lz*fishTension;
+    /* equal and opposite on the rod tip, so a running fish bends the blank */
+    if(fishTension>0&&rinvM[RN-1]>0){
+      const a=fishTension*rinvM[RN-1]*h;
+      rvel[T]-=lx*a; rvel[T+1]-=ly*a; rvel[T+2]-=lz*a;
+    }
     this.v.x+=fx/m*h; this.v.y+=fy/m*h; this.v.z+=fz/m*h;
     /* water: drag relative to the current, and gravity when airborne */
     const film=filmY(this.p.x,this.p.z,simTime);
@@ -1357,7 +1585,7 @@ class Trout{
   }
   spook(msg,mult){
     this.state='spooked';this.timer=P.spookT*(mult||1);
-    if(hooked===this){hooked=null;rebuildMasses();}
+    if(hooked===this){hooked=null;fishTension=0;rebuildMasses();}
     say(msg);
   }
   reseat(){
@@ -1604,6 +1832,7 @@ function drawHUD(){
   const slack=Math.max(0,offSpool-lineOut-rodArc);
   const rows=[
     ['FPS',M.fps.toFixed(0)+'   NODES '+nAct],
+    ['WATER',(P.waterModel>0.5?'GRID '+GNX+'x'+GNZ+'  '+gridMs.toFixed(1)+'ms':'ANALYTIC')],
     ['SPECKS',(P.speckGPU>0.5?'GPU ':'CPU ')+Math.floor((P.speckGPU>0.5?GSPECK:SPECK)*P.specks)],
     ['NODE LEN',(nodeLen*100).toFixed(0)+' cm'],
     ['LINE OUT',lineOut.toFixed(2)+' m'],
@@ -1659,7 +1888,7 @@ function afterSettingsChange(){
   speckMat.uniforms.uSize.value=P.speckSize;
   rebuildBed();placeObstacles();
   lastGrade=P.grade;
-  lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft, lastTaper=P.rodTaper;
+  lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft, lastTaper=P.rodTaper, lastCell=P.gridCell;
 }
 function copySettings(){
   settingsStr=encodeSettings();
@@ -1691,6 +1920,8 @@ function runAction(key){
       best.p.set(pos[0],pos[1],pos[2]);
       best.state='hooked';best.stamina=1;best.behT=0;best.effort=0.5;
       best.v.set(0,0,0);hooked=best;invM[0]=0;
+      {const T=(RN-1)*3;
+       lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.1);}
       say('test fish on \u2014 '+(best.len*100).toFixed(0)+' cm');
     } else say('no fish available to hook');
   }
@@ -2066,10 +2297,11 @@ function resetCast(){
 /* ════════════════════════════════════════════════════════════
    8. LOOP
    ════════════════════════════════════════════════════════════ */
+const nowMs=()=>(typeof performance!=='undefined'&&performance.now)?performance.now():0;
 const clock=new THREE.Clock();
-let started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
+let gridAccum=0,gridMs=0,started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
 let prevTrigR=false,prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=0,prevRodPinch=false;
-let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft, lastTaper=P.rodTaper;
+let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft, lastTaper=P.rodTaper, lastCell=P.gridCell;
 const _lh=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_netP=new THREE.Vector3();
 
 function pulse(s){
@@ -2080,7 +2312,23 @@ function pulse(s){
 
 renderer.setAnimationLoop(()=>{
   const dt=Math.min(clock.getDelta(),1/45);
-  if(!started){resetCast();started=true;}
+  if(!started){
+    resetCast();
+    gridAlloc(); gridTexInit();
+    for(let i=0;i<120;i++) gridStep(1/20);   /* settle the flow before play */
+    gridTexUpdate();
+    started=true;
+  }
+  /* fluid runs on its own clock, independent of render rate */
+  if(P.waterModel>0.5){
+    if(!gridReady){gridAlloc();gridTexInit();}
+    gridAccum+=dt;
+    const step=1/Math.max(2,P.gridRate);
+    let guard=0;
+    const t0=nowMs();
+    while(gridAccum>=step&&guard++<3){ gridStep(step); gridAccum-=step; }
+    if(guard>1){ gridMs+=((nowMs()-t0)-gridMs)*0.15; gridTexUpdate(); }
+  }
   M.fps+=(1/Math.max(dt,1e-4)-M.fps)*0.06;
   const t=simTime;
 
@@ -2117,7 +2365,10 @@ renderer.setAnimationLoop(()=>{
     player.position.y=Math.max(lim,gy);
     M.depth=Math.max(0,surfY(_camW.x)-gy);
   }
-  if(Math.abs(P.grade-lastGrade)>0.005){lastGrade=P.grade;rebuildBed();placeObstacles();}
+  if(Math.abs(P.grade-lastGrade)>0.005){lastGrade=P.grade;rebuildBed();placeObstacles();
+    if(gridReady)gridBuildBed();}
+  if(Math.abs(P.gridCell-lastCell)>0.005){lastCell=P.gridCell;gridAlloc();gridTexInit();
+    for(let i=0;i<60;i++)gridStep(1/20);gridTexUpdate();}
   {
     const sig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;
     if(Math.abs(sig-lastSig)>0.004){
@@ -2144,12 +2395,14 @@ renderer.setAnimationLoop(()=>{
 
   const handActive=handMode>0&&haveLeft&&!netOn;
   if(handActive&&handMode===1){
-    /* routing: the line runs through your fingers but is free to slide, so the
-       held material point is re-chosen every frame. Pinning one node here was
-       what stopped line feeding out past the hand while casting. */
-    const n=nearestLineNode(_lh.x,_lh.y,_lh.z);
-    handIdx=(n.i>0&&n.d<0.75)?n.i:-1;
-    if(handIdx>0) handArc=sArc(handIdx);
+    /* Routing is a PULLEY, not an anchor. The material point at your fingers is
+       whatever arc length the straight run from the stripping guide reaches, so
+       the span is never over-taut and never generates the back-tension that was
+       stopping line from feeding out past your hand. */
+    const Dg=Math.hypot(_lh.x-guidePos[0],_lh.y-guidePos[1],_lh.z-guidePos[2]);
+    handArc=Math.min(offSpool-0.15,(lineOut+rodArc)+Dg);
+    handIdx=Math.max(1,Math.round(idxAt(handArc)));
+    if(Dg>1.2) handIdx=-1;                 /* hand nowhere near the line */
   } else if(handActive&&prevHandActive!==2&&handMode===2){
     const n=nearestLineNode(_lh.x,_lh.y,_lh.z);
     handIdx=(n.i>0&&n.d<0.55)?n.i:-1;
@@ -2186,7 +2439,11 @@ renderer.setAnimationLoop(()=>{
     const fromSlack=Math.min(Math.max(0,slack-MIN_SLACK),take);
     offSpool-=fromSlack;take-=fromSlack;
     if(take>0&&!rodPinch){
-      const d=Math.min(take,Math.max(0,lineOut-MIN_OUT));
+      /* MIN_OUT keeps fly line out of the guides while casting, but during a
+         fight you reel the fish to the tip — the old 4 m floor made a running
+         fish literally unreelable once it was further out than that. */
+      const floorOut=hooked?0.7:MIN_OUT;
+      const d=Math.min(take,Math.max(0,lineOut-floorOut));
       lineOut-=d;offSpool-=d;
     }
   }
@@ -2206,7 +2463,8 @@ renderer.setAnimationLoop(()=>{
     bend+=Math.acos(Math.max(-1,Math.min(1,(ux*vx+uy*vy+uz*vz)/(ul*vl))));
   }
   M.bend=bend*180/Math.PI;
-  M.tension+=(Math.min(200,probeOut)-M.tension)*Math.min(1,dt*12);
+  const instT=hooked?Math.max(probeOut,fishTension):probeOut;
+  M.tension+=(Math.min(600,instT)-M.tension)*Math.min(1,dt*12);
 
   /* ---- fly ---- */
   const fx=pos[0],fy=pos[1],fz=pos[2];
@@ -2254,6 +2512,8 @@ renderer.setAnimationLoop(()=>{
       if(Math.random()<chance){
         f.state='hooked';f.stamina=1;f.runT=0;hooked=f;
         f.v.set(0,0,0);f.p.set(pos[0],pos[1],pos[2]);invM[0]=0;
+        {const T=(RN-1)*3;
+         lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.1);}
         say('EAT \u2014 he\u2019s on');pulse(1.0);spawnRing(fx,fz,1.2);
       } else say(!clean?'drag \u2014 refused':(f.feeding?'he looked and passed':'that one isn\u2019t feeding'));
     }
@@ -2266,14 +2526,14 @@ renderer.setAnimationLoop(()=>{
     hooked.stamina=Math.max(0,hooked.stamina
       -(M.tension*0.0060+hooked.effort*0.055)*P.fatigue*dt-dt*0.008);
     if(M.tension>P.tippet){
-      hooked.spook('tippet popped',1);hooked=null;rebuildMasses();pulse(1.0);
+      hooked.spook('tippet popped',1);hooked=null;fishTension=0;rebuildMasses();pulse(1.0);
     } else if(netOn&&haveLeft){
       netMouth.getWorldPosition(_netP);
       const d=Math.hypot(fx-_netP.x,fy-_netP.y,fz-_netP.z);
       if(d<P.netRadius){
         hooked.state='landed';hooked.timer=4;
         say('netted him \u2014 '+(hooked.len*100).toFixed(0)+' cm');
-        hooked=null;rebuildMasses();pulse(0.6);
+        hooked=null;fishTension=0;rebuildMasses();pulse(0.6);
       }
     }
     M.drift=0;
@@ -2314,6 +2574,8 @@ renderer.setAnimationLoop(()=>{
     u.uRange.value=P.speckRange;
     u.uTravel.value=Math.max(1,P.speckTravel);
     u.uTrail.value=P.speckTrail;
+    u.uUseGrid.value=(P.waterModel>0.5&&gridTex)?1:0;
+    u.uFlow.value=gridTex;
     /* the seed field only re-snaps when you have walked most of its width, so
        the jump is rare and mostly hidden by the fade */
     if(Math.abs(_camW.x-u.uOriginX.value)>P.speckRange*0.6) u.uOriginX.value=_camW.x;
@@ -2408,6 +2670,8 @@ renderer.setAnimationLoop(()=>{
     flyWake.material.opacity=0.35;
   }
   waterMat.uniforms.uTime.value=simTime;
+  waterMat.uniforms.uUseGrid.value=(P.waterModel>0.5&&gridTex)?1:0;
+  waterMat.uniforms.uFlow.value=gridTex;
 
   hudT+=dt;
   if(hudT>0.1){hudT=0;drawHUD();if(menuOpen)drawMenu();}
