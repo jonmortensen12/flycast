@@ -88,11 +88,12 @@ const P = {
   nodeLen:0.08, leadNode:0.03, leaderLen:2.74, tippetLen:0.90,
   rodModel:1, rodE:200.0, rodMass:0.077,
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
-  massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:1.00, lineWt:5.0, statFric:0.05,
-  reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:3.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:21.0,
+  massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:0.40, lineWt:5.0, statFric:0.05,
+  reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:3.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:40.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
+  lineTaper:1,
   waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
   current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:0.60, obstHeight:0.80,
   showZones:1, showMarkers:1,
@@ -119,16 +120,17 @@ const MENU=[
   ['Line mass mult','massMul',0.20,8.00,0.05,'Multiplier on top of the AFFTA line weight, applied to leader and line alike. 1.00 is physically real. The build you liked ran about 6.2, which is why loops carried further.'],
   ['Line bend stiff','lineBend',0.00,200.0,1.00,'Bending stiffness of the line itself, as a multiple of its real value. Real fly line is almost limp at this node spacing, so values well above 1 are cosmetic.'],
   ['Line smoothing','lineSmooth',0.00,0.50,0.01,'Numerical viscosity along the line. Not a physical force — it removes node-to-node jitter left by discretisation.'],
-  ['Line node length','nodeLen',0.08,0.50,0.01,'Spacing of simulated points along the fly line, in metres. Smaller is smoother and slower — watch the FPS row.'],
-  ['Leader node length','leadNode',0.03,0.25,0.01,'Spacing along the leader and tippet, which needs finer resolution than the fly line because it is far lighter and turns over more sharply.'],
+  ['Line node length','nodeLen',0.02,0.14,0.01,'Spacing of simulated points along the fly line, in metres. Smaller is smoother and slower — watch the FPS row.'],
+  ['Leader node length','leadNode',0.01,0.05,0.005,'Spacing along the leader and tippet, which needs finer resolution than the fly line because it is far lighter and turns over more sharply.'],
   ['Leader length','leaderLen',1.50,5.00,0.10,'Total leader from fly to fly line. A 9 ft leader is 2.74 m.'],
   ['Tippet length','tippetLen',0.20,2.50,0.05,'Level tippet at the fly end, cut from the leader total. Longer tippet drifts more freely but turns over less crisply.'],
   ['Line weight','lineWt',3.00,8.00,0.50,'AFFTA line rating. Sets real mass per metre: a 5wt head is 140 grains over 30 ft, which is 0.99 g/m. Heavier line loads the rod harder and carries further.'],
-  ['Line air drag','dragMul',0.10,4.00,0.05,'Multiplier on the physical drag coefficient. 1.00 is a real cylinder in crossflow — raise it only if loops refuse to turn over.'],
+  ['Line air drag','dragMul',0.10,1.50,0.05,'Multiplier on the physical drag coefficient. 1.00 is a real cylinder in crossflow at this diameter. Drag force is LINEAR in diameter and inverse in mass, so this knob and Line mass mult move the same underlying ratio — change this one if the line moves wrong through the air but the rod loads right.'],
+  ['Line taper','lineTaper',0,1,1,'0 is a level line: uniform mass and diameter for all 27 m. 1 is a real weight-forward profile — front taper, belly, rear taper, running line — normalised so the first 30 ft still weighs the AFFTA head weight. The front taper is what makes a loop unroll, so a level line needs far more air drag to look right.'],
   ['— FRICTION —',null,0,0,0,''],
   ['Guide friction','guideMu',0.00,0.60,0.01,'Capstan friction through the eyelets. Around 0.15 for fly line on chrome snakes. Every radian of rod bend multiplies the tension needed to make line slide.'],
   ['Static friction','statFric',0.00,0.60,0.01,'Force that must be beaten before line slides at all. Raise it if line creeps out on false casts.'],
-  ['Spool drag','spoolDrag',0.05,3.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
+  ['Spool drag','spoolDrag',0.05,5.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
   ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
   ['— ROD & TACKLE —',null,0,0,0,''],
   ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 1.43 puts the first bending mode at 4.0 Hz, which is what a real 9 ft 5wt measures. Calibrating on frequency rather than static sag is what stopped it feeling like a noodle.'],
@@ -194,12 +196,12 @@ const PHYSICAL={
   lineBend:1.00, lineSmooth:0.15, leadNode:0.03,
   stiffMul:1.434,   /* first bending mode at 4.0 Hz, which is what a real 5wt does */
   rodDamp:14.0, tipSoft:0.60, rodTaper:1,
-  leaderLen:2.74, tippetLen:0.90, leadNode:0.03,
-  dragMul:1.00,     /* dragK already carries 0.5*rho*Cd*A/m with Cd=1.1 */
+  leaderLen:2.74, tippetLen:0.90,
+  dragMul:0.40,     /* felt value. 1.00 is the isolated-cylinder physics; see notes */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
-  guideMu:0.15, statFric:0.05, spoolDrag:1.00, spoolDead:0.05,
-  tippet:21.0,      /* 5X = 4.75 lb */
-  buoyancy:1.00, stick:1.00, nodeLen:0.20,
+  guideMu:0.15, statFric:0.05, spoolDrag:3.00, spoolDead:0.05,
+  tippet:40.0,      /* raised while the fight is being tuned; 5X would be 21 */
+  buoyancy:1.00, stick:1.00, nodeLen:0.08, lineTaper:1,
 };
 /* The tackle from the build he liked, measured back out of that version:
    fly line 6.11 g/m against a real 5wt's 0.99, drag chosen to reproduce the
@@ -229,7 +231,7 @@ const GUIDE_ARC=GUIDE_S.map(s=>ROD_LEN*(1-s));
 const ROD_ARC=GUIDE_ARC[0];
 
 /* ---- line: one continuous chain, material coordinate = arc length from the fly ---- */
-const MAXNODE=620, TOTAL_LINE=34.0, FLYLINE_LEN=27.0;
+const MAXNODE=1900, TOTAL_LINE=34.0, FLYLINE_LEN=27.0;
 const MIN_SLACK=0.25, MIN_OUT=4.0;
 let hooked=null;
 
@@ -380,6 +382,22 @@ let handMode=0,rodPinch=false,wrapTotal=0;
 let clickAcc=0,slipOut=0,spoolOut=0,reeling=false;
 let probeOut=0,probeIn=0,probeThr=0,probeSp=0,fishTension=0;
 
+/* Weight-forward taper. A real WF line is not a uniform cylinder: a short front
+   taper, a heavy belly, a rear taper, then thin running line. The front taper is
+   what lets a loop unroll — mass falling away ahead of the belly is the whole
+   mechanism of turnover. The shape is normalised so the first 30 ft still weighs
+   exactly the AFFTA head weight, so switching this on does not change how the rod
+   loads, only how the line behaves once it is moving. */
+function wfShape(u){
+  if(u<0.80) return 0.55+(1.25-0.55)*(u/0.80);   /* front taper */
+  if(u<9.00) return 1.25;                         /* belly */
+  if(u<11.00) return 1.25+(0.62-1.25)*((u-9.00)/2.00);  /* rear taper */
+  return 0.62;                                    /* running line */
+}
+const WF_NORM=(()=>{let s=0;const n=400,L=9.144;
+  for(let i=0;i<n;i++) s+=wfShape((i+0.5)*L/n);
+  return s/n;})();
+
 function lineProfile(s){
   /* [density kg/m, diameter m] at arc length s from the fly.
      Level 5X tippet (0.152 mm, 0.021 g/m) out to the tippet length, then a
@@ -393,8 +411,12 @@ function lineProfile(s){
     return [Math.PI*(d*0.5)*(d*0.5)*1140, d];
   }
   if(s<LT+FLYLINE_LEN){
-    const d=0.00090+(P.lineWt-3)*0.00006;
-    return [lineWeightDensity(P.lineWt), d];
+    const d0=0.00090+(P.lineWt-3)*0.00006;
+    const rho=lineWeightDensity(P.lineWt);
+    if(P.lineTaper<0.5) return [rho, d0];
+    const k=wfShape(s-LT)/WF_NORM;
+    /* mass per length goes as d^2 for a coated line, so diameter follows sqrt */
+    return [rho*k, d0*Math.sqrt(k)];
   }
   return [0.00040,0.00050];
 }
@@ -691,6 +713,29 @@ function lineBend(a,b,c,k){
   pos[B]-=dx*s*invM[b];    pos[B+1]-=dy*s*invM[b];    pos[B+2]-=dz*s*invM[b];
 }
 
+/* Routing is a pulley, not a cleat. Pin only the component PERPENDICULAR to the
+   line's own tangent, so the line rests across your fingers but slides freely
+   along itself. Pinning all three axes meant a light grip could build tension at
+   the tiptop and shoot line — and it dragged the material point along the belly
+   toward your hand, which is why a later pinch always caught the middle of the
+   pool: routing had already put it there. */
+function pinLinePerp(sVal,x,y,z,k){
+  const f=idxAt(sVal), a=Math.floor(f);
+  if(a<1||a+2>=nAct) return;
+  const t=f-a,b=a+1,A=a*3,B=b*3;
+  const px=pos[A]+(pos[B]-pos[A])*t, py=pos[A+1]+(pos[B+1]-pos[A+1])*t, pz=pos[A+2]+(pos[B+2]-pos[A+2])*t;
+  let tx=pos[B]-pos[A],ty=pos[B+1]-pos[A+1],tz=pos[B+2]-pos[A+2];
+  const tl=Math.hypot(tx,ty,tz)||1; tx/=tl;ty/=tl;tz/=tl;
+  let ex=x-px, ey=y-py, ez=z-pz;
+  const et=ex*tx+ey*ty+ez*tz;
+  ex-=et*tx; ey-=et*ty; ez-=et*tz;
+  const wa=(1-t)*(1-t)*invM[a], wb=t*t*invM[b], w=wa+wb;
+  if(w<=0) return;
+  const lx=ex*k/w, ly=ey*k/w, lz=ez*k/w;
+  pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
+  pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
+}
+
 /* pin an interpolated point on the line to a fixed world point */
 function pinLine(sVal,x,y,z,k){
   const f=idxAt(sVal);
@@ -777,25 +822,7 @@ function waterAndGround(i,h,t){
   /* a hooked fish lives below the film and must be free to sound, so the fly
      node skips the surface clamp and just gets water drag plus a bed floor */
   if(i===0&&hooked&&hooked.state==='hooked') return;   /* driven by the fish body */
-  /* line cannot pass through a rock or the log: push it out of the cylinder */
-  for(let o=0;o<OBST.length;o++){
-    const ob=OBST[o];
-    const dx=x-ob.x, dz=z-ob.z;
-    const d2=dx*dx+dz*dz;
-    if(d2>=ob.r*ob.r) continue;
-    const top=bedY(ob.x,ob.z)+ob.h*P.obstHeight;
-    if(pos[p+1]>top+0.02) continue;
-    const d=Math.sqrt(d2)||1e-4;
-    if(pos[p+1]>top-0.10){                       /* riding over the crown */
-      pos[p+1]=top+0.02; if(vel[p+1]<0) vel[p+1]=0;
-    } else {                                     /* against the flank */
-      const nx=dx/d, nz=dz/d, push=ob.r-d;
-      pos[p]+=nx*push; pos[p+2]+=nz*push;
-      const vn=vel[p]*nx+vel[p+2]*nz;
-      if(vn<0){vel[p]-=nx*vn;vel[p+2]-=nz*vn;}
-      vel[p]*=0.88; vel[p+2]*=0.88;
-    }
-  }
+  /* obstacle collision now runs in pushOutObstacles(), after the solver */
   /* cheap bail-out for line still high in the air — one surfY call instead of
      bedY + bedDepth + filmY + computeFlow. The far bank climbs, so allow for it. */
   const sy=surfY(x);
@@ -809,7 +836,17 @@ function waterAndGround(i,h,t){
   const target=filmY(x,z,t)+RIDE;
   const above=pos[p+1]-target;
   if(above>0.10) return;
-  if(above<0){pos[p+1]=target;if(vel[p+1]<0)vel[p+1]=0;}
+  if(above<0){
+    /* Tippet is 0.15 mm nylon, denser than water — it should slice through the
+       film, not sit on it. Hard-clamping every node was why a hooked fish showed
+       a dead vertical line: the leader was nailed to the surface and the whole
+       transition happened across one segment. */
+    if(hooked&&sArc(i)<P.tippetLen*1.3){
+      vel[p+1]-=1.2*h;
+    } else {
+      pos[p+1]=target;if(vel[p+1]<0)vel[p+1]=0;
+    }
+  }
   else if(vel[p+1]<BREAK){
     vel[p+1]-=P.stick*26*h*(1-above/0.10);
     if(vel[p+1]<0&&pos[p+1]<=target+0.002) vel[p+1]=0;
@@ -825,11 +862,55 @@ function waterAndGround(i,h,t){
   vel[p]=flowX+rx;vel[p+1]=ry;vel[p+2]=flowZ+rz;
 }
 
+/* Obstacle collision.
+   Two bugs in the old version. placeObstacles() puts the mesh CENTRE at
+   bedY + h*obstHeight, but the collision test treated that same height as the
+   top and bailed on anything above it — so the entire upper hemisphere of every
+   rock, which is exactly the part above water, was transparent. And the test ran
+   inside the integration loop, before the constraint solve, so anything it did
+   push out got dragged straight back in.
+   This version uses the real ellipsoid, shrinks the radius with height so the
+   line follows the visible rock rather than an invisible cylinder, and is called
+   once per substep AFTER the iterations so it survives them. */
+function pushOutObstacles(){
+  for(let o=0;o<OBST.length;o++){
+    const ob=OBST[o];
+    const cy=bedY(ob.x,ob.z)+ob.h*P.obstHeight;
+    const hy=ob.r*(ob.kind==='log'?0.55:0.72);      /* vertical semi-axis */
+    const top=cy+hy;
+    for(let i=0;i<nAct;i++){
+      const p=i*3;
+      const y=pos[p+1];
+      if(y>top) continue;
+      let rr=ob.r;
+      if(y>cy){const u=(y-cy)/hy; rr=ob.r*Math.sqrt(Math.max(0,1-u*u));}
+      if(rr<1e-3) continue;
+      const dx=pos[p]-ob.x, dz=pos[p+2]-ob.z;
+      const d2=dx*dx+dz*dz;
+      if(d2>=rr*rr) continue;
+      const d=Math.sqrt(d2)||1e-4;
+      if(y>top-0.06){                                /* over the crown */
+        pos[p+1]=top+0.01;
+        if(vel[p+1]<0) vel[p+1]=(i===0)?-vel[p+1]*0.35:0;
+      } else {                                       /* against the flank */
+        const nx=dx/d, nz=dz/d, push=rr-d;
+        pos[p]+=nx*push; pos[p+2]+=nz*push;
+        const vn=vel[p]*nx+vel[p+2]*nz;
+        /* the fly bounces off; the line just stops */
+        if(vn<0){const k=(i===0)?1.35:1.0; vel[p]-=nx*vn*k; vel[p+2]-=nz*vn*k;}
+        vel[p]*=0.90; vel[p+2]*=0.90;
+      }
+    }
+  }
+}
+
 const _k0=new THREE.Vector3(),_k1=new THREE.Vector3(),_p0=new THREE.Vector3(),_p1=new THREE.Vector3();
 const SUB=6,ITER=6;
 let simTime=0, handIdx=-1, corkIdx=-1, blewUp=false;
 const _reelW=new THREE.Vector3(),_corkW=new THREE.Vector3(),_handW=new THREE.Vector3();
 let handHeld=false, corkHeld=false, handPinched=false, grabEase=1;
+let grabArc=0;
+const _grabW=new THREE.Vector3(), _grabFrom=new THREE.Vector3();
 
 function sanity(){
   for(let i=0;i<nAct;i++){
@@ -895,10 +976,14 @@ function physics(dt){
       if(P.lineBend>0.001) for(let i=1;i<bendTo;i++) lineBendXPBD(i,h2);
       for(let g=0;g<NG;g++) solveGuide(g,0.85);
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
-      if(handHeld&&handIdx>0)
-        pinLine(handArc,_handW.x,_handW.y,_handW.z,handMode===2?0.9*grabEase:0.35);
+      if(handHeld&&handIdx>0){
+        if(handMode===2) pinLine(grabArc,_grabW.x,_grabW.y,_grabW.z,0.9);
+        else             pinLinePerp(handArc,_handW.x,_handW.y,_handW.z,0.30);
+      }
       if(corkHeld&&corkIdx>0) pinLine(sArc(corkIdx),_corkW.x,_corkW.y,_corkW.z,0.9);
     }
+
+    pushOutObstacles();
 
     /* ---- material flow, decided purely by tension vs friction ----
        Tension now comes from the solved constraint impulses, so these are
@@ -931,7 +1016,7 @@ function physics(dt){
          that governs the spool, and like the spool it beats a fish because it
          is geometry rather than a friction contest. */
       if(handPinched&&!rodPinch){
-        const Lt=sArc(handIdx)-(lineOut+rodArc);
+        const Lt=grabArc-(lineOut+rodArc);
         const Dt=Math.hypot(_handW.x-guidePos[0],_handW.y-guidePos[1],_handW.z-guidePos[2]);
         const over=Dt-Lt-P.spoolDead;
         if(over>0){
@@ -958,7 +1043,7 @@ function physics(dt){
       if(Tsp>thr&&offSpool<TOTAL_LINE&&!reeling){
         let give=0;
         if(handHeld&&handIdx>0){
-          const Lr=offSpool-sArc(handIdx);
+          const Lr=offSpool-(handMode===2?grabArc:handArc);
           const Dr=Math.hypot(_handW.x-_reelW.x,_handW.y-_reelW.y,_handW.z-_reelW.z);
           give=Dr-Lr-P.spoolDead;
         } else {
@@ -1446,6 +1531,7 @@ function makeTrout(len){
   const eye=new THREE.Mesh(new THREE.SphereGeometry(0.014,6,5),eyeMat);
   eye.position.set(-0.40,0.028,0.042);g.add(eye);
   const eye2=eye.clone();eye2.position.z=-0.042;g.add(eye2);
+  g.rotation.order='YZX';        /* yaw, then pitch, then roll */
   g.scale.setScalar(len);return g;
 }
 const LIES=[{x:-2.0,z:-7.2,len:0.40},{x:-6.2,z:-6.6,len:0.32},
@@ -1489,7 +1575,13 @@ class Trout{
     if(s<0.22){ this.beh=r<0.75?'easy':'cruise'; this.behT=1.6+Math.random()*2.2; }
     else if(r<0.28){ this.beh='run';    this.behT=1.0+Math.random()*1.8; this.newRunDir(); }
     else if(r<0.48){ this.beh='sound';  this.behT=1.2+Math.random()*1.6; }
-    else if(r<0.58&&s>0.5){ this.beh='jump'; this.behT=0.60; this.newRunDir(); }
+    else if(r<0.58&&s>0.5){
+      this.beh='jump'; this.behT=0.45; this.newRunDir();
+      /* One impulse, then ballistic. The old version held 3.2x the swim force
+         for 0.6 s, which is ~13 m/s at release and an apex near 8 m. */
+      this.v.y=3.0+Math.random()*1.2;
+      this.v.x+=this.run.x*1.1; this.v.z+=this.run.z*1.1;
+    }
     else if(r<0.80){ this.beh='cruise'; this.behT=1.0+Math.random()*1.6; this.newRunDir(); }
     else { this.beh='easy'; this.behT=1.0+Math.random()*1.6; }
     say('fish: '+this.beh);
@@ -1512,7 +1604,7 @@ class Trout{
     switch(this.beh){
       case 'run':   fx=this.run.x*F*2.6; fz=this.run.z*F*2.6; this.effort=1.6; break;
       case 'sound': fy=-F*1.5; fx=ax*F*0.5; fz=az*F*0.5;      this.effort=1.1; break;
-      case 'jump':  fy=F*3.2;  fx=this.run.x*F*0.9; fz=this.run.z*F*0.9; this.effort=1.4; break;
+      case 'jump':  fx=this.run.x*F*0.35; fz=this.run.z*F*0.35; this.effort=1.4; break;
       case 'easy':  fx=-ax*F*0.18; fz=-az*F*0.18;             this.effort=0.15; break;
       default:      fx=this.run.x*F*0.7; fz=this.run.z*F*0.7; this.effort=0.5;
     }
@@ -1593,7 +1685,15 @@ class Trout{
        toward +X, so upstream is a heading of zero. */
     const hd=this.state==='hooked'?Math.atan2(this.v.z,-this.v.x):0;
     m.rotation.y+=((hd-m.rotation.y+Math.PI*3)%(Math.PI*2)-Math.PI)*Math.min(1,dt*3);
-    m.rotation.z=this.state==='hooked'?Math.sin(t*9)*0.22:Math.sin(t*1.6+this.lie.x)*0.04;
+    /* nose leads the velocity vector. The nose is local -X, so a positive Z
+       rotation swings it DOWN — hence the minus. */
+    let pitch=0;
+    if(this.state==='hooked'){
+      const sp=Math.hypot(this.v.x,this.v.y,this.v.z);
+      if(sp>0.25) pitch=Math.asin(Math.max(-1,Math.min(1,this.v.y/sp)));
+    }
+    const roll=this.state==='hooked'?Math.sin(t*9)*0.12:Math.sin(t*1.6+this.lie.x)*0.04;
+    m.rotation.z+=((-pitch+roll)-m.rotation.z)*Math.min(1,dt*8);
     m.rotation.x=this.riseAnim>0?-0.35*Math.sin(Math.max(0,this.riseAnim)*Math.PI):0;
     /* body wave: faster and wider when hooked, lazy while holding */
     const u=m.userData.swim.userData.u;
@@ -1951,7 +2051,7 @@ function runAction(key){
       best.state='hooked';best.stamina=1;best.behT=0;best.effort=0.5;
       best.v.set(0,0,0);hooked=best;invM[0]=0;
       {const T=(RN-1)*3;
-       lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.1);}
+       lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.6);}
       say('test fish on \u2014 '+(best.len*100).toFixed(0)+' cm');
     } else say('no fish available to hook');
   }
@@ -2273,8 +2373,12 @@ function sndBurst(freq,Q,dur,vol,sweep){
   src.start(t); src.stop(t+dur+0.02);
 }
 const sndClick =()=>sndBurst(2600,9,0.035,0.35*P.volReel,0.6);
-const sndSplash=v=>sndBurst(700+Math.random()*300,1.1,0.16+Math.min(0.5,v*0.09),
-                            Math.min(0.9,0.10+v*0.13)*P.volSplash,0.25);
+/* Quadratic in impact speed with no floor, so a delicate presentation is almost
+   silent and you can hear when you got it right. The old curve had a 0.10 floor
+   and saturated by about 6 m/s. */
+const sndSplash=v=>sndBurst(560+Math.random()*260+v*40, 1.1,
+                            0.10+Math.min(0.55,v*0.075),
+                            Math.min(0.85,0.012*v*v)*P.volSplash, 0.25);
 const sndPlop  =()=>sndBurst(420,2.0,0.13,0.30*P.volSplash,0.35);
 
 /* ════════════════════════════════════════════════════════════
@@ -2509,7 +2613,16 @@ renderer.setAnimationLoop(()=>{
     if(n.i>0&&n.d<0.22){
       /* grab the exact point along the segment, not the nearest node */
       handArc=sArc(n.i)+(sArc(n.i+1)-sArc(n.i))*n.t;
+      grabArc=handArc;
       handIdx=Math.max(1,Math.round(idxAt(handArc)));
+      /* remember where the line actually WAS and walk the pin target from there
+         to the hand. Easing the pin stiffness (the old grabEase) did not remove
+         the jump — the target was the hand from frame one, so the line still
+         travelled the whole distance, just slightly less violently. */
+      {const a=n.i*3,b=a+3;
+       _grabFrom.set(pos[a]+(pos[b]-pos[a])*n.t,
+                     pos[a+1]+(pos[b+1]-pos[a+1])*n.t,
+                     pos[a+2]+(pos[b+2]-pos[a+2])*n.t);}
       grabEase=0;
     } else { handIdx=-1; say('no line within reach'); }
   }
@@ -2518,8 +2631,10 @@ renderer.setAnimationLoop(()=>{
   handHeld=handActive&&handIdx>0;
   handPinched=handMode===2&&handIdx>0;
   /* ease the grip in, so taking hold does not snap the line into your fist */
-  grabEase=handPinched?Math.min(1,grabEase+dt*6):1;
+  grabEase=handPinched?Math.min(1,grabEase+dt*4):1;
   _handW.copy(_lh);
+  {const e=grabEase*grabEase*(3-2*grabEase);   /* smoothstep the target across */
+   _grabW.lerpVectors(_grabFrom,_lh,e);}
 
   if(rodPinch&&!prevRodPinch){
     const n=nearestLineNode(_corkW.x,_corkW.y,_corkW.z);
@@ -2620,7 +2735,7 @@ renderer.setAnimationLoop(()=>{
         f.state='hooked';f.stamina=1;f.runT=0;hooked=f;
         f.v.set(0,0,0);f.p.set(pos[0],pos[1],pos[2]);invM[0]=0;
         {const T=(RN-1)*3;
-         lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.1);}
+         lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.6);}
         say('EAT \u2014 he\u2019s on');pulse(1.0);spawnRing(fx,fz,1.2);
       } else say(!clean?'drag \u2014 refused':(f.feeding?'he looked and passed':'that one isn\u2019t feeding'));
     }
@@ -2660,8 +2775,11 @@ renderer.setAnimationLoop(()=>{
     /* line: air noise off the rod tip */
     const T=(RN-1)*3;
     const tipSp=Math.hypot(rvel[T],rvel[T+1],rvel[T+2]);
-    const sw=Math.max(0,tipSp-1.6)*0.035*P.volLine;
-    SND.swishGain.gain.value+=(Math.min(0.35,sw)-SND.swishGain.gain.value)*Math.min(1,dt*14);
+    /* Higher threshold and a superlinear ramp below the cap. The old curve hit
+       its 0.35 ceiling at a tip speed of 11.6 m/s, which is a gentle roll cast —
+       everything faster sounded identical and loud. */
+    const sw=Math.pow(Math.max(0,tipSp-3.0),1.5)*0.006*P.volLine;
+    SND.swishGain.gain.value+=(Math.min(0.22,sw)-SND.swishGain.gain.value)*Math.min(1,dt*12);
     SND.swishF.frequency.value=700+Math.min(2600,tipSp*190);
     /* reel: a click per notch of line off the spool, plus a ratchet while cranking */
     sndAcc+=spoolOut;
