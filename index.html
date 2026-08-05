@@ -1026,8 +1026,12 @@ function physics(dt){
       for(let g=0;g<NG;g++) solveGuide(g,0.85);
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
       if(handHeld&&handIdx>0){
+        /* Same target for both: the point on the line you took hold of, held at
+           the offset it already had from your hand. Nothing travels to meet your
+           fist. Routing pins perpendicular only, so the line still slides along
+           itself; a pinch pins all three axes and it cannot. */
         if(handMode===2) pinLine(grabArc,_grabW.x,_grabW.y,_grabW.z,0.9);
-        else             pinLinePerp(handArc,_handW.x,_handW.y,_handW.z,0.30);
+        else             pinLinePerp(grabArc,_grabW.x,_grabW.y,_grabW.z,0.30);
       }
       if(corkHeld&&corkIdx>0) pinLine(sArc(corkIdx),_corkW.x,_corkW.y,_corkW.z,0.9);
     }
@@ -2646,34 +2650,30 @@ renderer.setAnimationLoop(()=>{
   } else {leftHand.visible=false;netGrp.visible=false;}
 
   const handActive=handMode>0&&haveLeft&&!netOn;
-  if(handActive&&handMode===1){
-    /* Routing is a PULLEY, not an anchor. The material point at your fingers is
-       whatever arc length the straight run from the stripping guide reaches, so
-       the span is never over-taut and never generates the back-tension that was
-       stopping line from feeding out past your hand. */
-    const Dg=Math.hypot(_lh.x-guidePos[0],_lh.y-guidePos[1],_lh.z-guidePos[2]);
-    /* a touch MORE material than the straight run, so the span sags instead of
-       hanging taut. Exactly taut meant the belly's own weight registered as
-       back-tension and quietly cranked line in through the guides all day. */
-    handArc=Math.min(offSpool-0.15,(lineOut+rodArc)+Dg+0.14);
-    handIdx=Math.max(1,Math.round(idxAt(handArc)));
-    if(Dg>1.2) handIdx=-1;                 /* hand nowhere near the line */
-  } else if(handActive&&prevHandActive!==2&&handMode===2){
+  /* Latch on the FIRST frame the hand becomes active, whatever the grip
+     strength. The trigger is analogue, so a pinch is always preceded by a few
+     frames of routing — and routing used to pin toward the hand itself, which
+     dragged the line into your fingers before the pinch ever ran. Capturing the
+     offset at the pinch was therefore capturing zero. One latch, both modes. */
+  if(handActive&&prevHandActive===0){
     const n=nearestLineNode(_lh.x,_lh.y,_lh.z);
-    if(n.i>0&&n.d<0.22){
-      /* grab the exact point along the segment, not the nearest node */
-      handArc=sArc(n.i)+(sArc(n.i+1)-sArc(n.i))*n.t;
-      grabArc=handArc;
-      handIdx=Math.max(1,Math.round(idxAt(handArc)));
-      /* capture the hand-to-line offset once; the line keeps that offset for
-         as long as you hold it, so there is nothing to snap */
-      {const a=n.i*3,b=a+3;
-       _grabOff.set(pos[a]+(pos[b]-pos[a])*n.t-_lh.x,
-                    pos[a+1]+(pos[b+1]-pos[a+1])*n.t-_lh.y,
-                    pos[a+2]+(pos[b+2]-pos[a+2])*n.t-_lh.z);}
-      grabEase=1;
+    if(n.i>0&&n.d<0.40){
+      grabArc=sArc(n.i)+(sArc(n.i+1)-sArc(n.i))*n.t;
+      handArc=grabArc;
+      handIdx=Math.max(1,Math.round(idxAt(grabArc)));
+      const a=n.i*3,b=a+3;
+      _grabOff.set(pos[a]+(pos[b]-pos[a])*n.t-_lh.x,
+                   pos[a+1]+(pos[b+1]-pos[a+1])*n.t-_lh.y,
+                   pos[a+2]+(pos[b+2]-pos[a+2])*n.t-_lh.z);
     } else { handIdx=-1; say('no line within reach'); }
+  } else if(handActive&&handIdx>0){
+    handArc=grabArc;
+    handIdx=Math.max(1,Math.round(idxAt(grabArc)));
   }
+  /* Routing no longer recomputes the material point from the straight run to
+     your hand. That geometric pulley was what slid the line along its own
+     length into your fingers; the latched offset above replaces it. */
+
   if(!handActive) handIdx=-1;
   prevHandActive=handActive?handMode:0;
   handHeld=handActive&&handIdx>0;
