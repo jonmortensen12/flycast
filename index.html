@@ -88,7 +88,7 @@ const P = {
   nodeLen:0.08, leadNode:0.03, leaderLen:2.74, tippetLen:0.90,
   rodModel:1, rodE:200.0, rodMass:0.077,
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
-  massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:0.40, lineWt:5.0, statFric:0.05,
+  massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:0.85, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:3.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:40.0,
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
@@ -197,7 +197,7 @@ const PHYSICAL={
   stiffMul:1.434,   /* first bending mode at 4.0 Hz, which is what a real 5wt does */
   rodDamp:14.0, tipSoft:0.60, rodTaper:1,
   leaderLen:2.74, tippetLen:0.90,
-  dragMul:0.40,     /* felt value. 1.00 is the isolated-cylinder physics; see notes */
+  dragMul:0.85,     /* felt value. 1.00 is the isolated-cylinder physics */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
   guideMu:0.15, statFric:0.05, spoolDrag:3.00, spoolDead:0.05,
   tippet:40.0,      /* raised while the fight is being tuned; 5X would be 21 */
@@ -437,6 +437,30 @@ function rebuildMasses(){
 }
 rebuildMasses();
 
+/* Nodes past nAct are not simulated, so their stored positions are stale —
+   left over from the last time that index was active, or from resetCast. When
+   line pays off the spool nAct grows, and those stale nodes became live with
+   positions metres away from where the line actually is. The solver then yanked
+   them into place over the next few frames, which is the jiggle between the
+   reel and the stripping guide. Newly activated nodes now get laid out along
+   the line toward the reel instead. */
+let nActPrev=0;
+function setActive(n){
+  n=Math.min(MAXNODE,n);
+  for(let i=Math.max(1,nActPrev);i<n;i++){
+    const p=i*3,q=p-3;
+    let dx=_reelW.x-pos[q], dy=_reelW.y-pos[q+1], dz=_reelW.z-pos[q+2];
+    const d=Math.hypot(dx,dy,dz);
+    const L=restOf(i-1);
+    if(d>1e-6){dx=dx/d*L;dy=dy/d*L;dz=dz/d*L;} else {dx=0;dy=-L;dz=0;}
+    pos[p]=pos[q]+dx; pos[p+1]=pos[q+1]+dy; pos[p+2]=pos[q+2]+dz;
+    prd[p]=pos[p]; prd[p+1]=pos[p+1]; prd[p+2]=pos[p+2];
+    vel[p]=vel[q]; vel[p+1]=vel[q+1]; vel[p+2]=vel[q+2];
+  }
+  nActPrev=n;
+  return n;
+}
+
 /* re-discretise when node length changes: sample the old shape by arc length */
 const tmpP=new Float32Array(MAXNODE*3),tmpV=new Float32Array(MAXNODE*3);
 function redistribute(oldIdxAt){
@@ -453,6 +477,7 @@ function redistribute(oldIdxAt){
     }
   }
   nAct=newN;
+  nActPrev=newN;
   rebuildMasses();
   if(handIdx>0) handIdx=Math.min(nAct-2,Math.max(1,Math.round(idxAt(handArc))));
   if(corkIdx>0) corkIdx=Math.min(nAct-2,Math.max(1,Math.round(idxAt(corkArc))));
@@ -914,12 +939,22 @@ const SUB=6;
    all of that is unconverged solve, and it reads as a soft, elastic line that
    stores energy and springs back when released. Scale with node count. */
 let ITER=6;
-const iterFor=n=>Math.max(8,Math.min(34,Math.round(n/8)));
+/* Iterations scale with node count, but convergence also depends on LOAD: more
+   air drag means more line tension, and at fixed iterations the solve falls
+   behind. Measured at 8 cm spacing, peak stretch was 0.6% at dragMul 0.4 and
+   13.3% at 0.85 with the same 27 iterations. So the rule now carries a drag
+   term too. Diminishing returns are steep past ~50 — if this is costing frames,
+   coarser node spacing buys convergence far more cheaply than iterations do. */
+const iterFor=n=>Math.max(8,Math.min(60,Math.round(n/8*(0.55+0.75*Math.min(2,P.dragMul)))));
 let simTime=0, handIdx=-1, corkIdx=-1, blewUp=false;
 const _reelW=new THREE.Vector3(),_corkW=new THREE.Vector3(),_handW=new THREE.Vector3();
 let handHeld=false, corkHeld=false, handPinched=false, grabEase=1;
 let grabArc=0;
-const _grabW=new THREE.Vector3(), _grabFrom=new THREE.Vector3();
+/* _grabOff is the vector from your hand to the point on the line you grabbed,
+   captured once at the moment of the grab and then held fixed. The pin target
+   is hand + offset rather than the hand itself, so the line never travels to
+   meet your fist — it simply starts moving with it, from wherever it was. */
+const _grabW=new THREE.Vector3(), _grabOff=new THREE.Vector3();
 
 function sanity(){
   for(let i=0;i<nAct;i++){
@@ -957,7 +992,7 @@ function physics(dt){
 
     if(hooked&&hooked.state==='hooked') hooked.step(h);
     /* line integration */
-    nAct=Math.min(MAXNODE,Math.floor(idxAt(offSpool))+2);
+    nAct=setActive(Math.floor(idxAt(offSpool))+2);
     for(let i=0;i<nAct;i++){
       const p=i*3;
       vel[p+1]-=9.81*h;
@@ -1031,7 +1066,7 @@ function physics(dt){
          is geometry rather than a friction contest. */
       if(handPinched&&!rodPinch){
         const Lt=grabArc-(lineOut+rodArc);
-        const Dt=Math.hypot(_handW.x-guidePos[0],_handW.y-guidePos[1],_handW.z-guidePos[2]);
+        const Dt=Math.hypot(_grabW.x-guidePos[0],_grabW.y-guidePos[1],_grabW.z-guidePos[2]);
         const over=Dt-Lt-P.spoolDead;
         if(over>0){
           const pull=Math.min(over,0.06);
@@ -1058,7 +1093,7 @@ function physics(dt){
         let give=0;
         if(handHeld&&handIdx>0){
           const Lr=offSpool-(handMode===2?grabArc:handArc);
-          const Dr=Math.hypot(_handW.x-_reelW.x,_handW.y-_reelW.y,_handW.z-_reelW.z);
+          const Dr=Math.hypot((handMode===2?_grabW.x:_handW.x)-_reelW.x,(handMode===2?_grabW.y:_handW.y)-_reelW.y,(handMode===2?_grabW.z:_handW.z)-_reelW.z);
           give=Dr-Lr-P.spoolDead;
         } else {
           const wS=invM[Math.max(0,probeI[2])]+invM[Math.max(0,probeI[2])+1];
@@ -1072,7 +1107,7 @@ function physics(dt){
       }
       if(offSpool-lineOut-rodArc<MIN_SLACK)
         lineOut=Math.max(hooked?0.7:MIN_OUT,offSpool-rodArc-MIN_SLACK);
-      nAct=Math.min(MAXNODE,Math.floor(idxAt(offSpool))+2);
+      nAct=setActive(Math.floor(idxAt(offSpool))+2);
     }
 
     for(let i=2;i<RN;i++){const p=i*3;
@@ -2470,6 +2505,7 @@ function resetCast(){
   offSpool=lineOut+rodArc+2.2;
   rebuildMasses();
   nAct=Math.min(MAXNODE,Math.floor(idxAt(offSpool))+2);
+  nActPrev=nAct;
   const T=(NG-1)*3;                                   /* tiptop */
   const tipx=guidePos[T],tipy=guidePos[T+1],tipz=guidePos[T+2];
   for(let i=0;i<nAct;i++){
@@ -2629,38 +2665,23 @@ renderer.setAnimationLoop(()=>{
       handArc=sArc(n.i)+(sArc(n.i+1)-sArc(n.i))*n.t;
       grabArc=handArc;
       handIdx=Math.max(1,Math.round(idxAt(handArc)));
-      /* remember where the line actually WAS and walk the pin target from there
-         to the hand. Easing the pin stiffness (the old grabEase) did not remove
-         the jump — the target was the hand from frame one, so the line still
-         travelled the whole distance, just slightly less violently. */
+      /* capture the hand-to-line offset once; the line keeps that offset for
+         as long as you hold it, so there is nothing to snap */
       {const a=n.i*3,b=a+3;
-       _grabFrom.set(pos[a]+(pos[b]-pos[a])*n.t,
-                     pos[a+1]+(pos[b+1]-pos[a+1])*n.t,
-                     pos[a+2]+(pos[b+2]-pos[a+2])*n.t);}
-      grabEase=0;
+       _grabOff.set(pos[a]+(pos[b]-pos[a])*n.t-_lh.x,
+                    pos[a+1]+(pos[b+1]-pos[a+1])*n.t-_lh.y,
+                    pos[a+2]+(pos[b+2]-pos[a+2])*n.t-_lh.z);}
+      grabEase=1;
     } else { handIdx=-1; say('no line within reach'); }
   }
   if(!handActive) handIdx=-1;
   prevHandActive=handActive?handMode:0;
   handHeld=handActive&&handIdx>0;
   handPinched=handMode===2&&handIdx>0;
-  /* ease the grip in, so taking hold does not snap the line into your fist */
-  grabEase=handPinched?Math.min(1,grabEase+dt*4):1;
+  grabEase=1;
   _handW.copy(_lh);
-  /* Track where the line actually IS at the grabbed arc, and blend from there
-     to the hand. Latching a fixed world point meant the line drifted away from
-     it and the pin yanked back toward somewhere stale. */
-  if(handPinched&&grabEase<1){
-    const f=idxAt(grabArc),a=Math.floor(f);
-    if(a>=0&&a+1<nAct){
-      const t=f-a,A=a*3,B=A+3;
-      _grabFrom.set(pos[A]+(pos[B]-pos[A])*t,
-                    pos[A+1]+(pos[B+1]-pos[A+1])*t,
-                    pos[A+2]+(pos[B+2]-pos[A+2])*t);
-    }
-  }
-  {const e=grabEase*grabEase*(3-2*grabEase);   /* smoothstep the target across */
-   _grabW.lerpVectors(_grabFrom,_lh,e);}
+  /* the grabbed material point rides at a constant offset from the hand */
+  _grabW.copy(_lh).add(_grabOff);
 
   if(rodPinch&&!prevRodPinch){
     const n=nearestLineNode(_corkW.x,_corkW.y,_corkW.z);
