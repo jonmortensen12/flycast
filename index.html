@@ -905,7 +905,16 @@ function pushOutObstacles(){
 }
 
 const _k0=new THREE.Vector3(),_k1=new THREE.Vector3(),_p0=new THREE.Vector3(),_p1=new THREE.Vector3();
-const SUB=6,ITER=6;
+const SUB=6;
+/* Iterations are no longer fixed. Gauss-Seidel propagates tension roughly one
+   node per sweep, so a fixed count means a fixed physical reach — and halving
+   node length halves how far the solve carries in a frame. Measured in the
+   headless harness at 9.5 m of line out: 6 iterations leave 11% stretch at
+   20 cm spacing and 28% at 8 cm. The line is inextensible by construction, so
+   all of that is unconverged solve, and it reads as a soft, elastic line that
+   stores energy and springs back when released. Scale with node count. */
+let ITER=6;
+const iterFor=n=>Math.max(8,Math.min(34,Math.round(n/8)));
 let simTime=0, handIdx=-1, corkIdx=-1, blewUp=false;
 const _reelW=new THREE.Vector3(),_corkW=new THREE.Vector3(),_handW=new THREE.Vector3();
 let handHeld=false, corkHeld=false, handPinched=false, grabEase=1;
@@ -967,11 +976,16 @@ function physics(dt){
     probeLam[0]=probeLam[1]=probeLam[2]=0;
 
     rodLam.fill(0);lineLam.fill(0);
+    ITER=iterFor(nAct);
     for(let it=0;it<ITER;it++){
       for(let i=0;i<RN-1;i++) rodDist(i,i+1,ROD_SEG);
       if(P.rodModel>0.5){ for(let i=1;i<RN-1;i++) rodBendXPBD(i,h2); }
       else { for(let i=1;i<RN-1;i++) rodBend(i-1,i,i+1,Math.min(1,rbendK[i]*P.stiffMul)); }
-      for(let i=0;i<nAct-1;i++) lineDist(i,i+1);
+      /* alternate sweep direction: a one-way sweep biases which end of the
+         chain converges first, and reversing on odd iterations roughly halved
+         the residual at coarse spacing for no extra cost */
+      if(it&1){ for(let i=nAct-2;i>=0;i--) lineDist(i,i+1); }
+      else    { for(let i=0;i<nAct-1;i++) lineDist(i,i+1); }
       const bendTo=Math.min(nAct-2,Math.floor(idxAt(lineOut)));
       if(P.lineBend>0.001) for(let i=1;i<bendTo;i++) lineBendXPBD(i,h2);
       for(let g=0;g<NG;g++) solveGuide(g,0.85);
@@ -1961,7 +1975,7 @@ function drawHUD(){
   const feed=fishes.filter(f=>f.feeding&&f.state==='holding').length;
   const slack=Math.max(0,offSpool-lineOut-rodArc);
   const rows=[
-    ['FPS',M.fps.toFixed(0)+'   NODES '+nAct],
+    ['FPS',M.fps.toFixed(0)+'   NODES '+nAct+'  IT '+ITER],
     ['WATER',(P.waterModel>0.5?'GRID '+GNX+'x'+GNZ+'  '+gridMs.toFixed(1)+'ms':'ANALYTIC')],
     ['SPECKS',(P.speckGPU>0.5?'GPU ':'CPU ')+Math.floor((P.speckGPU>0.5?GSPECK:SPECK)*P.specks)],
     ['NODE LEN',(nodeLen*100).toFixed(0)+' cm'],
@@ -2633,6 +2647,18 @@ renderer.setAnimationLoop(()=>{
   /* ease the grip in, so taking hold does not snap the line into your fist */
   grabEase=handPinched?Math.min(1,grabEase+dt*4):1;
   _handW.copy(_lh);
+  /* Track where the line actually IS at the grabbed arc, and blend from there
+     to the hand. Latching a fixed world point meant the line drifted away from
+     it and the pin yanked back toward somewhere stale. */
+  if(handPinched&&grabEase<1){
+    const f=idxAt(grabArc),a=Math.floor(f);
+    if(a>=0&&a+1<nAct){
+      const t=f-a,A=a*3,B=A+3;
+      _grabFrom.set(pos[A]+(pos[B]-pos[A])*t,
+                    pos[A+1]+(pos[B+1]-pos[A+1])*t,
+                    pos[A+2]+(pos[B+2]-pos[A+2])*t);
+    }
+  }
   {const e=grabEase*grabEase*(3-2*grabEase);   /* smoothstep the target across */
    _grabW.lerpVectors(_grabFrom,_lh,e);}
 
