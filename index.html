@@ -108,6 +108,7 @@ const MENU=[
   ['Load my default','!mydefault',0,0,0,'Push right to load whatever you last saved as your default.'],
   ['Save as my default','!save',0,0,0,'Push right to store every current value as your default.'],
   ['Hook a test fish','!hookfish',0,0,0,'Hooks the fish nearest your fly straight away, so you can work on the fight without having to earn it first.'],
+  ['Motion recorder','!record',0,0,0,'Opens the recorder. Record yourself casting, then replay your own motion as a ghost rod and practise following it. Trim the take with the two timeline handles.'],
   ['Recenter panel','!recenter',0,0,0,'Puts the panel back in front of you at a comfortable distance. Use this if you ever lose track of it.'],
   ['Stats scale','hudScale',0.40,3.00,0.05,'Size of the statistics window. It has its own drag handle and plus/minus buttons in its top corners, usable any time the menu is open.'],
   ['Panel scale','menuScale',0.40,3.00,0.05,'Size of this panel. The plus and minus buttons in its top right do the same thing, and the handle at the top left drags it around.'],
@@ -1073,7 +1074,11 @@ function physics(dt){
         const Dt=Math.hypot(_grabW.x-guidePos[0],_grabW.y-guidePos[1],_grabW.z-guidePos[2]);
         const over=Dt-Lt-P.spoolDead;
         if(over>0){
-          const pull=Math.min(over,0.06);
+          /* Was 0.06 m per SUBSTEP — six substeps a frame at 72 fps works out
+             to roughly 26 m/s of line retraction, and every step of it shifts
+             which material sits in each guide, which is what snapped the pool
+             around. 0.015 is still 6 m/s, far faster than a hand can strip. */
+          const pull=Math.min(over,0.015);
           lineOut=Math.max(hooked?0.7:MIN_OUT,lineOut-pull);
           slipOut-=pull;
         }
@@ -1906,6 +1911,44 @@ class RodTube{
 }
 const rodTube=new RodTube(RN,6);scene.add(rodTube.mesh);
 
+/* ── GHOST ROD ─────────────────────────────────────────────────────────────
+   Replays a recording of your own rod. Storing the whole rod rather than just
+   the hand pose means the ghost shows real blank flex, which is most of what
+   there is to copy — the hand alone would just be a stick waving. */
+const ghostTube=new RodTube(RN,6);
+ghostTube.mesh.material=new THREE.MeshBasicMaterial({
+  color:0x4fd18b,transparent:true,opacity:0.5,depthWrite:false});
+ghostTube.mesh.renderOrder=6;ghostTube.mesh.visible=false;scene.add(ghostTube.mesh);
+const ghostHand=new THREE.Mesh(new THREE.SphereGeometry(0.035,10,8),
+  new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true,opacity:0.45,depthWrite:false}));
+ghostHand.renderOrder=6;ghostHand.visible=false;scene.add(ghostHand);
+const _ghostRod=new Float32Array(RN*3);
+
+/* ~72 Hz of rod nodes plus the line hand. A minute is about 600 KB, which is
+   nothing, so the cap exists to bound the timeline rather than the memory. */
+const REC_MAX=4600;
+const REC={frames:[],recording:false,play:false,head:0,inF:0,outF:0,scrub:false};
+function recPush(){
+  if(REC.frames.length>=REC_MAX){REC.recording=false;say('recording full');return;}
+  const r=new Float32Array(RN*3+4);
+  r.set(rpos.subarray(0,RN*3));
+  r[RN*3]=_lh.x;r[RN*3+1]=_lh.y;r[RN*3+2]=_lh.z;r[RN*3+3]=handMode;
+  REC.frames.push(r);
+}
+function recShow(i){
+  const n=REC.frames.length;
+  if(!n){ghostTube.mesh.visible=false;ghostHand.visible=false;return;}
+  const k=Math.max(0,Math.min(n-1,Math.round(i)));
+  const f=REC.frames[k];
+  _ghostRod.set(f.subarray(0,RN*3));
+  ghostTube.update(_ghostRod);
+  ghostTube.mesh.visible=true;
+  ghostHand.position.set(f[RN*3],f[RN*3+1],f[RN*3+2]);
+  ghostHand.visible=true;
+  /* the line hand goes bright while it is gripping, so hauls read clearly */
+  ghostHand.material.color.setHex(f[RN*3+3]>1.5?0xffb320:f[RN*3+3]>0.5?0x9ad8b0:0x4fd18b);
+}
+
 const guideMeshes=[];
 for(let g=0;g<NG;g++){
   const m=new THREE.Mesh(new THREE.TorusGeometry(GUIDE_R[g]*0.55,0.0016,4,10),
@@ -1990,6 +2033,15 @@ const HANDLE={x:0,y:8,w:250,h:30}, SCALE_M={x:1240,y:8,w:34,h:30}, SCALE_P={x:12
 const TRACKX=168, TRACKW=118, VALX=336, RNGX=352, RNGW=52;
 const menu=makePanel(1.40,0.78,MW,MH);
 menu.mesh.position.set(0,1.45,-1.05);menu.mesh.visible=false;player.add(menu.mesh);
+
+/* recorder panel */
+const RW=760, RH=330;
+const RB={rec:{x:26,y:60,w:168,h:60},play:{x:210,y:60,w:168,h:60},
+          clr:{x:394,y:60,w:168,h:60},close:{x:578,y:60,w:156,h:60}};
+const RTL={x:36,y:196,w:688,h:26};
+const rec=makePanel(0.76,0.33,RW,RH);
+rec.mesh.position.set(0,1.05,-0.95);rec.mesh.visible=false;player.add(rec.mesh);
+let recOpen=false, recDrag=null;
 
 let note='',noteT=0;
 function say(s){note=s;noteT=3.6;}
@@ -2108,7 +2160,8 @@ function runAction(key){
       say('test fish on \u2014 '+(best.len*100).toFixed(0)+' cm');
     } else say('no fish available to hook');
   }
-  else if(key==='!recenter'){recenterPanel(menu.mesh);recenterPanel(hud.mesh);say('panels recentred');}
+  else if(key==='!record'){recOpen=!recOpen;rec.mesh.visible=recOpen;if(recOpen)recenterPanel(rec.mesh);say(recOpen?'recorder open':'recorder closed');}
+  else if(key==='!recenter'){recenterPanel(menu.mesh);recenterPanel(hud.mesh);if(recOpen)recenterPanel(rec.mesh);say('panels recentred');}
   else if(key==='!copy'){copySettings();say('settings copied');}
 }
 let menuOpen=false, menuSel=1;
@@ -2222,6 +2275,57 @@ function drawMenu(){
   menu.tex.needsUpdate=true;
 }
 
+function drawRec(){
+  const c=rec.cx;
+  c.clearRect(0,0,RW,RH);
+  c.fillStyle='rgba(10,20,24,0.95)';c.fillRect(0,0,RW,RH);
+  c.fillStyle='#b5713f';c.fillRect(0,0,RW,5);
+  c.font='700 17px "Space Mono",monospace';c.fillStyle='#b5713f';
+  c.fillText('MOTION RECORDER',26,36);
+  const n=REC.frames.length, secs=n/72;
+  c.font='700 12px "Space Mono",monospace';c.fillStyle='#7d8b8c';
+  c.fillText(REC.recording?'RECORDING…':(n?`${secs.toFixed(1)} s captured`:'nothing recorded yet'),290,36);
+
+  const btn=(b,label,on,dim)=>{
+    c.fillStyle=on?'#5a3320':(dim?'#141d21':'#1b262a');c.fillRect(b.x,b.y,b.w,b.h);
+    c.fillStyle=on?'#e0a45e':(dim?'#3d4a4d':'#a9b5b3');
+    c.font='700 15px "Space Mono",monospace';
+    const w=c.measureText(label).width;
+    c.fillText(label,b.x+(b.w-w)/2,b.y+b.h/2+6);
+  };
+  btn(RB.rec,REC.recording?'STOP':'RECORD',REC.recording,false);
+  btn(RB.play,REC.play?'PAUSE':'PLAY',REC.play,!n);
+  btn(RB.clr,'CLEAR',false,!n);
+  btn(RB.close,'CLOSE',false,false);
+
+  /* timeline with a trim handle at each end */
+  c.fillStyle='#141d21';c.fillRect(RTL.x,RTL.y,RTL.w,RTL.h);
+  if(n>1){
+    const px=i=>RTL.x+RTL.w*(i/(n-1));
+    const a=px(REC.inF), b=px(REC.outF);
+    c.fillStyle='#2c4a3a';c.fillRect(a,RTL.y,Math.max(2,b-a),RTL.h);
+    c.fillStyle='#4fd18b';
+    c.fillRect(a-5,RTL.y-7,10,RTL.h+14);
+    c.fillRect(b-5,RTL.y-7,10,RTL.h+14);
+    const h=px(REC.head);
+    c.fillStyle='#ffb320';c.fillRect(h-1.5,RTL.y-10,3,RTL.h+20);
+    c.font='700 11px "Space Mono",monospace';c.fillStyle='#7d8b8c';
+    c.fillText(`in ${(REC.inF/72).toFixed(2)} s`,RTL.x,RTL.y+RTL.h+30);
+    const lab=`out ${(REC.outF/72).toFixed(2)} s`;
+    c.fillText(lab,RTL.x+RTL.w-c.measureText(lab).width,RTL.y+RTL.h+30);
+    const mid=`loop ${((REC.outF-REC.inF)/72).toFixed(2)} s`;
+    c.fillStyle='#e8e3d4';
+    c.fillText(mid,RTL.x+RTL.w/2-c.measureText(mid).width/2,RTL.y+RTL.h+30);
+  } else {
+    c.font='700 12px "Space Mono",monospace';c.fillStyle='#4d6166';
+    c.fillText('press RECORD, make a cast, press STOP',RTL.x+8,RTL.y+18);
+  }
+  c.font='400 12px "Space Mono",monospace';c.fillStyle='#7d8b8c';
+  c.fillText('Drag the green handles to trim. The ghost follows as you drag.',
+             26,RH-18);
+  rec.tex.needsUpdate=true;
+}
+
 /* ---- pointer: ray from the rod hand onto the panel ---- */
 const _ray=new THREE.Raycaster();
 const _rayOrigin=new THREE.Vector3(), _rayDir=new THREE.Vector3();
@@ -2270,13 +2374,13 @@ function recenterPanel(m){
 }
 function menuPointer(trigPressed, trigEdge){
   if(!menuOpen||!rodGrip){
-    pointerDot.visible=false;rayLine.visible=false;dragKey=null;panelDrag=false;
+    pointerDot.visible=false;rayLine.visible=false;dragKey=null;panelDrag=false;recDrag=null;
     return false;
   }
   rodGrip.getWorldPosition(_rayOrigin);
   _rayDir.set(0,0,-1).applyQuaternion(_q).normalize();
   _ray.set(_rayOrigin,_rayDir);
-  const hits=_ray.intersectObjects([menu.mesh,hud.mesh],false);
+  const hits=_ray.intersectObjects(recOpen?[menu.mesh,hud.mesh,rec.mesh]:[menu.mesh,hud.mesh],false);
   const hit=hits[0];
   rayLine.visible=true;
   const rp=rayLine.geometry.attributes.position.array;
@@ -2304,6 +2408,39 @@ function menuPointer(trigPressed, trigEdge){
   }
   if(!hit||!hit.uv){pointerDot.visible=false;if(!trigPressed)dragKey=null;return false;}
   pointerDot.visible=true;pointerDot.position.copy(hit.point);
+  if(hit.object===rec.mesh){
+    const rx=hit.uv.x*RW, ry=(1-hit.uv.y)*RH;
+    const inB=b=>rx>=b.x&&rx<=b.x+b.w&&ry>=b.y&&ry<=b.y+b.h;
+    const n=REC.frames.length;
+    if(trigEdge){
+      if(inB(RB.rec)){
+        if(REC.recording){REC.recording=false;
+          REC.inF=0;REC.outF=Math.max(0,REC.frames.length-1);REC.head=0;
+          say(`recorded ${(REC.frames.length/72).toFixed(1)} s`);}
+        else {REC.frames.length=0;REC.recording=true;REC.play=false;
+          ghostTube.mesh.visible=false;ghostHand.visible=false;say('recording');}
+        return true;
+      }
+      if(inB(RB.play)&&n){REC.play=!REC.play;if(REC.play&&(REC.head<REC.inF||REC.head>=REC.outF))REC.head=REC.inF;return true;}
+      if(inB(RB.clr)){REC.frames.length=0;REC.play=false;REC.recording=false;
+        ghostTube.mesh.visible=false;ghostHand.visible=false;say('cleared');return true;}
+      if(inB(RB.close)){recOpen=false;rec.mesh.visible=false;return true;}
+      /* grab whichever trim handle is nearer */
+      if(n>1&&ry>=RTL.y-16&&ry<=RTL.y+RTL.h+16&&rx>=RTL.x-14&&rx<=RTL.x+RTL.w+14){
+        const f=(rx-RTL.x)/RTL.w*(n-1);
+        recDrag=Math.abs(f-REC.inF)<Math.abs(f-REC.outF)?'in':'out';
+      }
+    }
+    if(trigPressed&&recDrag&&n>1){
+      let f=Math.round((rx-RTL.x)/RTL.w*(n-1));
+      f=Math.max(0,Math.min(n-1,f));
+      if(recDrag==='in') REC.inF=Math.min(f,REC.outF-1);
+      else REC.outF=Math.max(f,REC.inF+1);
+      REC.head=f; REC.play=false; recShow(f);      /* ghost follows the handle */
+    }
+    if(!trigPressed) recDrag=null;
+    return true;
+  }
   if(hit.object===hud.mesh){
     const hx=hit.uv.x*HW, hy=(1-hit.uv.y)*HH;
     const inH=(b)=>hx>=b.x&&hx<=b.x+b.w&&hy>=b.y&&hy<=b.y+b.h;
@@ -2970,8 +3107,16 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uUseGrid.value=(P.waterModel>0.5&&gridTex)?1:0;
   waterMat.uniforms.uFlow.value=gridTex;
 
+  /* recorder */
+  if(REC.recording) recPush();
+  if(REC.play&&REC.frames.length>1){
+    REC.head+=dt*72;
+    if(REC.head>=REC.outF) REC.head=REC.inF;      /* loop the trimmed take */
+    recShow(REC.head);
+  }
+
   hudT+=dt;
-  if(hudT>0.1){hudT=0;drawHUD();if(menuOpen)drawMenu();}
+  if(hudT>0.1){hudT=0;drawHUD();if(menuOpen)drawMenu();if(recOpen)drawRec();}
   renderer.render(scene,camera);
 });
 
