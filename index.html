@@ -1025,7 +1025,10 @@ function physics(dt){
       const bendTo=Math.min(nAct-2,Math.floor(idxAt(lineOut)));
       if(P.lineBend>0.001) for(let i=1;i<bendTo;i++) lineBendXPBD(i,h2);
       for(let g=0;g<NG;g++) solveGuide(g,0.85);
-      pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
+      /* Full stiffness here drove huge velocities into the backing, which is
+         the lightest line in the system, every time the solver corrected it.
+         The reel does not need to be rigid — it just needs to hold. */
+      pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,0.5);
       if(handHeld&&handIdx>0){
         /* Same target for both: the point on the line you took hold of, held at
            the offset it already had from your hand. Nothing travels to meet your
@@ -1917,10 +1920,10 @@ const rodTube=new RodTube(RN,6);scene.add(rodTube.mesh);
    there is to copy — the hand alone would just be a stick waving. */
 const ghostTube=new RodTube(RN,6);
 ghostTube.mesh.material=new THREE.MeshBasicMaterial({
-  color:0x4fd18b,transparent:true,opacity:0.5,depthWrite:false});
+  color:0xff3ec8,transparent:true,opacity:0.62,depthWrite:false});
 ghostTube.mesh.renderOrder=6;ghostTube.mesh.visible=false;scene.add(ghostTube.mesh);
-const ghostHand=new THREE.Mesh(new THREE.SphereGeometry(0.035,10,8),
-  new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true,opacity:0.45,depthWrite:false}));
+const ghostHand=new THREE.Mesh(new THREE.SphereGeometry(0.042,10,8),
+  new THREE.MeshBasicMaterial({color:0xff3ec8,transparent:true,opacity:0.55,depthWrite:false}));
 ghostHand.renderOrder=6;ghostHand.visible=false;scene.add(ghostHand);
 const _ghostRod=new Float32Array(RN*3);
 
@@ -1946,7 +1949,7 @@ function recShow(i){
   ghostHand.position.set(f[RN*3],f[RN*3+1],f[RN*3+2]);
   ghostHand.visible=true;
   /* the line hand goes bright while it is gripping, so hauls read clearly */
-  ghostHand.material.color.setHex(f[RN*3+3]>1.5?0xffb320:f[RN*3+3]>0.5?0x9ad8b0:0x4fd18b);
+  ghostHand.material.color.setHex(f[RN*3+3]>1.5?0xffd23e:f[RN*3+3]>0.5?0xff8fdc:0xff3ec8);
 }
 
 const guideMeshes=[];
@@ -2190,22 +2193,37 @@ function cycleRange(key,mn,mx){
   } else delete RANGEWIN[key];
   return m;
 }
+/* Tabs. Each '— SECTION —' header becomes a tab, and only one section is on
+   screen at a time, which buys enough room to make every row and slider about
+   twice the size they were. */
+const TABS=(()=>{
+  const out=[]; let cur=null;
+  for(let i=0;i<MENU.length;i++){
+    if(MENU[i][1]===null){cur={name:MENU[i][0].replace(/[—-]/g,'').trim(),rows:[]};out.push(cur);}
+    else if(cur) cur.rows.push(i);
+  }
+  return out;
+})();
+let selTab=0;
+const TABY=44, TABH=46, ROW_Y0=150, ROWH2=44, PERCOL=12;
+const COLX2=[44,738], ROWW=620;
+const TRACKX2=300, TRACKW2=210, VALX2=540, RNGX2=556, RNGW2=62;
+function tabRect(i){
+  const w=(MW-80)/TABS.length;
+  return {x:40+i*w,y:TABY,w:w-6,h:TABH};
+}
 /* layout: MENU split into two columns at a header boundary */
 /* split at the two header boundaries closest to the thirds, so sections
    never straddle a column break */
-const SPLITS=(()=>{
-  const hdr=[];
-  for(let i=0;i<MENU.length;i++) if(MENU[i][1]===null) hdr.push(i);
-  const pick=f=>hdr.reduce((b,i)=>Math.abs(i-MENU.length*f)<Math.abs(b-MENU.length*f)?i:b,hdr[0]);
-  const a=pick(1/3); let bb=pick(2/3);
-  if(bb<=a) bb=Math.min(MENU.length,a+Math.ceil(MENU.length/3));
-  return [a,bb];
-})();
+/* (section splitting replaced by tabs) */
 function rowRect(i){
-  const col=i<SPLITS[0]?0:(i<SPLITS[1]?1:2);
-  const r=i-(col===0?0:SPLITS[col-1]);
-  return {x:COLX[col], y:60+r*ROWH, col, r};
+  const t=TABS[selTab];
+  const r=t?t.rows.indexOf(i):-1;
+  if(r<0) return null;                       /* not on the visible tab */
+  const col=r>=PERCOL?1:0;
+  return {x:COLX2[col], y:ROW_Y0+(r%PERCOL)*ROWH2, col, r};
 }
+function firstRowOf(t){return TABS[t]&&TABS[t].rows.length?TABS[t].rows[0]:1;}
 function wrapText(c,text,maxW){
   const words=text.split(' '),lines=[];let cur='';
   for(const w of words){
@@ -2235,32 +2253,44 @@ function drawMenu(){
   }
   c.fillStyle='#5d6f72';c.font='700 11px "Space Mono",monospace';
   c.fillText(P.menuScale.toFixed(2)+'x',SCALE_P.x+42,SCALE_P.y+20);
-  for(let i=0;i<MENU.length;i++){
+  /* tab bar */
+  for(let i=0;i<TABS.length;i++){
+    const b=tabRect(i), on=i===selTab;
+    c.fillStyle=on?'#3a2a1c':'#141d21';c.fillRect(b.x,b.y,b.w,b.h);
+    if(on){c.fillStyle='#b5713f';c.fillRect(b.x,b.y+b.h-4,b.w,4);}
+    c.font='700 15px "Space Mono",monospace';
+    c.fillStyle=on?'#e0a45e':'#7d8b8c';
+    const w=c.measureText(TABS[i].name).width;
+    c.fillText(TABS[i].name,b.x+Math.max(6,(b.w-w)/2),b.y+b.h/2+6);
+  }
+  const rows=TABS[selTab]?TABS[selTab].rows:[];
+  for(const i of rows){
     const [label,key,mn,mx]=MENU[i];
-    const R=rowRect(i), X=R.x, y=R.y;
-    if(key===null){
-      c.font='700 10px "Space Mono",monospace';c.fillStyle='#4d6166';
-      c.fillText(label,X+4,y);continue;
-    }
+    const R=rowRect(i); if(!R) continue;
+    const X=R.x, y=R.y;
     const on=i===menuSel;
-    if(on){c.fillStyle='rgba(181,113,63,0.22)';c.fillRect(X-6,y-13,COLW,ROWH-1);}
-    c.font='700 11px "Space Mono",monospace';
-    c.fillStyle=on?'#e8e3d4':'#93a0a0';c.fillText(label,X+4,y);
+    if(on){c.fillStyle='rgba(181,113,63,0.22)';c.fillRect(X-10,y-24,ROWW,ROWH2-4);}
+    c.font='700 17px "Space Mono",monospace';
+    c.fillStyle=on?'#e8e3d4':'#a3b0b0';c.fillText(label,X,y);
     if(key.charCodeAt(0)===33){
-      c.fillStyle=on?'#b5713f':'#4d6166';c.fillText('PUSH \u25B6',X+TRACKX,y);
+      c.fillStyle=on?'#b5713f':'#4d6166';
+      c.font='700 16px "Space Mono",monospace';
+      c.fillText('PUSH \u25B6',X+TRACKX2,y);
       continue;
     }
     const [lo,hi]=rowRange(key,mn,mx);
     const f=(P[key]-lo)/((hi-lo)||1);
-    c.fillStyle='#243438';c.fillRect(X+TRACKX,y-8,TRACKW,6);
-    c.fillStyle=on?'#b5713f':'#4d6166';c.fillRect(X+TRACKX,y-8,TRACKW*Math.max(0,Math.min(1,f)),6);
-    c.fillStyle=on?'#e8e3d4':'#93a0a0';c.textAlign='right';
-    c.fillText(P[key].toFixed(Math.abs(P[key])<10?2:1),X+VALX,y);c.textAlign='left';
+    c.fillStyle='#243438';c.fillRect(X+TRACKX2,y-14,TRACKW2,12);
+    c.fillStyle=on?'#b5713f':'#4d6166';
+    c.fillRect(X+TRACKX2,y-14,TRACKW2*Math.max(0,Math.min(1,f)),12);
+    c.fillStyle=on?'#e8e3d4':'#a3b0b0';c.textAlign='right';
+    c.font='700 17px "Space Mono",monospace';
+    c.fillText(P[key].toFixed(Math.abs(P[key])<10?2:1),X+VALX2,y);c.textAlign='left';
     const m=rx(key);
-    c.fillStyle=m>1?'#3a2a1c':'#1b262a';c.fillRect(X+RNGX,y-11,RNGW,13);
+    c.fillStyle=m>1?'#3a2a1c':'#1b262a';c.fillRect(X+RNGX2,y-19,RNGW2,20);
     c.fillStyle=m>1?'#e0a45e':'#5d6f72';
-    c.font='700 9px "Space Mono",monospace';
-    c.fillText(m>=1?(m+'x'):(m===0.1?'.1x':'.01x'),X+RNGX+4,y-2);
+    c.font='700 13px "Space Mono",monospace';
+    c.fillText(m>=1?(m+'x'):(m===0.1?'.1x':'.01x'),X+RNGX2+6,y-5);
   }
   /* description strip */
   const sel=MENU[menuSel];
@@ -2470,19 +2500,27 @@ function menuPointer(trigPressed, trigEdge){
     if(inBox(SCALE_M)){P.menuScale=Math.max(0.40,P.menuScale-0.10);menu.mesh.scale.setScalar(P.menuScale);return true;}
     if(inBox(SCALE_P)){P.menuScale=Math.min(3.00,P.menuScale+0.10);menu.mesh.scale.setScalar(P.menuScale);return true;}
   }
+  /* tab bar */
+  if(trigEdge){
+    for(let i=0;i<TABS.length;i++){
+      const b=tabRect(i);
+      if(px>=b.x&&px<=b.x+b.w&&py>=b.y&&py<=b.y+b.h){
+        selTab=i;menuSel=firstRowOf(i);dragKey=null;return true;
+      }
+    }
+  }
   /* which row */
   let row=-1;
-  for(let i=0;i<MENU.length;i++){
-    if(MENU[i][1]===null) continue;
-    const R=rowRect(i);
-    if(px>=R.x-6&&px<=R.x-6+COLW&&py>=R.y-13&&py<=R.y+ROWH-14){row=i;break;}
+  for(const i of (TABS[selTab]?TABS[selTab].rows:[])){
+    const R=rowRect(i); if(!R) continue;
+    if(px>=R.x-10&&px<=R.x-10+ROWW&&py>=R.y-24&&py<=R.y+ROWH2-28){row=i;break;}
   }
   if(row<0){if(!trigPressed)dragKey=null;return true;}
   menuSel=row;
   const [,key,mn,mx,st]=MENU[row], R=rowRect(row);
   if(trigEdge){
     if(key.charCodeAt(0)===33){ runAction(key); return true; }
-    if(px>=R.x+RNGX&&px<=R.x+RNGX+RNGW&&py>=R.y-11&&py<=R.y+2){
+    if(px>=R.x+RNGX2&&px<=R.x+RNGX2+RNGW2&&py>=R.y-19&&py<=R.y+1){
       const m=cycleRange(key,mn,mx);
       say(MENU[row][0]+' range '+m+'x');
       return true;
@@ -2491,7 +2529,7 @@ function menuPointer(trigPressed, trigEdge){
   }
   if(trigPressed&&dragKey===key){
     const [lo,hi]=rowRange(key,mn,mx);
-    let f=(px-(R.x+TRACKX))/TRACKW;
+    let f=(px-(R.x+TRACKX2))/TRACKW2;
     f=Math.max(0,Math.min(1,f));
     let v=lo+(hi-lo)*f;
     if(st>=1) v=Math.round(v/st)*st;
@@ -2792,7 +2830,7 @@ renderer.setAnimationLoop(()=>{
      frames of routing — and routing used to pin toward the hand itself, which
      dragged the line into your fingers before the pinch ever ran. Capturing the
      offset at the pinch was therefore capturing zero. One latch, both modes. */
-  if(handActive&&prevHandActive===0){
+  if(handActive&&(prevHandActive===0||handIdx<0)){
     const n=nearestLineNode(_lh.x,_lh.y,_lh.z);
     if(n.i>0&&n.d<0.40){
       grabArc=sArc(n.i)+(sArc(n.i+1)-sArc(n.i))*n.t;
@@ -2804,12 +2842,23 @@ renderer.setAnimationLoop(()=>{
                    pos[a+2]+(pos[b+2]-pos[a+2])*n.t-_lh.z);
     } else { handIdx=-1; say('no line within reach'); }
   } else if(handActive&&handIdx>0){
+    if(handMode===1){
+      /* PULLEY, rate-limited. The material point at your fingers is still set by
+         the straight run from the stripping guide, so line slides through your
+         hand the way it should. What was wrong before was that this arc tracked
+         the hand INSTANTLY: a 5 cm hand jitter moved the pinned material 5 cm
+         along the line in one frame, which is line sliding through your fingers
+         at several metres a second and is what threw the pool around. Real
+         fingers cannot pass line that fast, so cap the rate. */
+      const Dg=Math.hypot(_lh.x-guidePos[0],_lh.y-guidePos[1],_lh.z-guidePos[2]);
+      const want=Math.min(offSpool-0.15,(lineOut+rodArc)+Dg+0.14);
+      const maxSlide=1.2*dt;                       /* metres of line per second */
+      grabArc+=Math.max(-maxSlide,Math.min(maxSlide,want-grabArc));
+      if(Dg>1.4) handIdx=-1;
+    }
     handArc=grabArc;
-    handIdx=Math.max(1,Math.round(idxAt(grabArc)));
+    if(handIdx>0) handIdx=Math.max(1,Math.round(idxAt(grabArc)));
   }
-  /* Routing no longer recomputes the material point from the straight run to
-     your hand. That geometric pulley was what slid the line along its own
-     length into your fingers; the latched offset above replaces it. */
 
   if(!handActive) handIdx=-1;
   prevHandActive=handActive?handMode:0;
