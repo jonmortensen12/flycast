@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08h</title>
+<title>Flycast — v8 one line — build 2026-08-08i</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08h</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08i</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -1660,7 +1660,7 @@ for(let i=0;i<TREE_N;i++)
   TREE_SEED.push({x:(Math.random()*2-1)*52,side:Math.random()<0.5?-1:1,
     off:2.2+Math.pow(Math.random(),0.55)*15.0,yaw:Math.random()*6.28,
     sc:0.70+Math.random()*1.5,conifer:Math.random()<0.62,lean:(Math.random()-0.5)*0.10});
-let assetTrees=null;   /* filled in if real models are found on disk */
+let assetTrees=null, assetVariants=null;   /* set if real models are found */
 function placeTrees(){
   if(!coniferMesh) return;
   const n=Math.round(TREE_N*Math.max(0,Math.min(1,P.bankGrass)));
@@ -1677,17 +1677,22 @@ function placeTrees(){
     _gQ.setFromEuler(_treeE.set(s.lean,s.yaw,s.lean*0.7,'YXZ'));
     _gS.setScalar(ok?s.sc:0.0001);
     _gM.compose(_gP,_gQ,_gS);
-    if(assetTrees){
-      /* every loaded mesh carries the whole placement, so a model made of a
-         trunk mesh and a leaf mesh stays assembled */
-      for(const im of assetTrees) im.setMatrixAt(i,ok?_gM:hidden);
+    if(assetVariants){
+      /* Instance i belongs to one variant. Every mesh WITHIN that variant gets
+         the same matrix, so a model split into a trunk mesh and a leaf mesh
+         stays assembled; every other variant hides that slot. */
+      const nV=assetVariants.length, mine=i%nV;
+      for(let vi=0;vi<nV;vi++){
+        const use=ok&&vi===mine;
+        for(const im of assetVariants[vi].meshes) im.setMatrixAt(i,use?_gM:hidden);
+      }
       continue;
     }
     if(s.conifer){ if(ci<TREE_N) coniferMesh.setMatrixAt(ci++,_gM); }
     else         { if(bi<TREE_N) broadMesh.setMatrixAt(bi++,_gM); }
   }
-  if(assetTrees){
-    for(const im of assetTrees) im.instanceMatrix.needsUpdate=true;
+  if(assetVariants){
+    for(const V of assetVariants) for(const im of V.meshes) im.instanceMatrix.needsUpdate=true;
     return;
   }
   for(let k=ci;k<TREE_N;k++) coniferMesh.setMatrixAt(k,hidden);
@@ -1706,43 +1711,90 @@ function placeTrees(){
    Each model is auto-fitted: measured, floored to y=0, and scaled so it stands
    about 4.5 m, because no two packs agree on units or origin.
 
-   Recommended source: Quaternius "Ultimate Stylized Nature Pack" (CC0), which
-   ships GLB directly — quaternius.com/packs/ultimatestylizednature.html or
-   poly.pizza. Use the untextured/low-poly variants; a 2K leaf atlas per tree
-   is the one thing that will actually cost you frames here. */
-const TREE_ASSETS=['assets/tree1.glb','assets/tree2.glb','assets/tree3.glb'];
+   Both .glb and .gltf are accepted — GLTFLoader reads either. A .gltf is the
+   JSON form and references a sibling .bin and its textures by relative path,
+   so keep the folder exactly as it was extracted and point the filename below
+   at the .gltf itself. A .glb is the same data in one file and is tidier if
+   you have the choice.
+
+   Recommended source: Quaternius "Ultimate Stylized Nature Pack" (CC0) at
+   quaternius.com/packs/ultimatestylizednature.html — the site download is
+   .gltf; poly.pizza serves the same models and can hand you a single file.
+   Prefer the low-poly variants: a 2K leaf atlas per tree is the one thing here
+   that will actually cost frames, and every mesh inside a model becomes its
+   own instanced draw call against a budget that is already the tighter of the
+   two. */
+const TREE_ASSETS=[
+  'assets/tree1.glb','assets/tree2.glb','assets/tree3.glb',
+  'assets/tree1.gltf','assets/tree2.gltf','assets/tree3.gltf',
+  'assets/trees.glb','assets/trees.gltf'
+];
 async function loadTreeAssets(){
   try{
     const mod=await import('https://unpkg.com/three@0.169.0/examples/jsm/loaders/GLTFLoader.js');
     const loader=new mod.GLTFLoader();
-    const built=[];
+    const variants=[];
     for(const url of TREE_ASSETS){
       let gltf=null;
       try{ gltf=await loader.loadAsync(url); }catch(e){ continue; }
       if(!gltf||!gltf.scene) continue;
       const root=gltf.scene;
       root.updateWorldMatrix(true,true);
-      const box=new THREE.Box3().setFromObject(root);
-      const h=Math.max(0.001,box.max.y-box.min.y);
-      const fit=4.5/h;
+
+      /* Collect every mesh, baked into world space. */
+      const items=[];
       root.traverse(o=>{
         if(!o.isMesh||!o.geometry) return;
         const geo=o.geometry.clone();
         geo.applyMatrix4(o.matrixWorld);
-        geo.scale(fit,fit,fit);
-        geo.translate(0,-box.min.y*fit,0);   /* scale first, then floor it */
-        const mat=Array.isArray(o.material)?o.material[0]:o.material;
-        const im=new THREE.InstancedMesh(geo,mat,TREE_N);
-        im.frustumCulled=false;
-        scene.add(im);built.push(im);
+        geo.computeBoundingBox();
+        items.push({geo,bb:geo.boundingBox,
+          mat:Array.isArray(o.material)?o.material[0]:o.material});
       });
+      if(!items.length) continue;
+
+      /* These packs frequently lay six or eight different trees side by side in
+         one file. Treating that as a single model would stack every tree in the
+         pack at every position on the bank. Cluster meshes by how close their
+         footprints are: a trunk and its canopy share a footprint, two different
+         trees do not. */
+      let unit=0;
+      for(const it of items)
+        unit=Math.max(unit,it.bb.max.x-it.bb.min.x,it.bb.max.z-it.bb.min.z);
+      unit=Math.max(unit*0.70,1e-4);
+      const groups=[];
+      for(const it of items){
+        const cx=(it.bb.max.x+it.bb.min.x)*0.5, cz=(it.bb.max.z+it.bb.min.z)*0.5;
+        let G=null;
+        for(const g of groups) if(Math.hypot(g.cx-cx,g.cz-cz)<unit){G=g;break;}
+        if(!G){G={cx,cz,items:[]};groups.push(G);}
+        G.items.push(it);
+      }
+      for(const G of groups) variants.push(G);
     }
-    if(built.length){
-      assetTrees=built;
-      coniferMesh.visible=false;broadMesh.visible=false;
-      placeTrees();
-      say('tree models loaded ('+built.length+' meshes)');
+    if(!variants.length) return;
+
+    /* Fit each variant on its own: no two packs agree on units, origin, or
+       whether the model is centred or corner-anchored. */
+    const built=[];
+    for(const G of variants){
+      const bb=new THREE.Box3();
+      for(const it of G.items) bb.union(it.bb);
+      const h=Math.max(1e-4,bb.max.y-bb.min.y), fit=4.5/h;
+      const cx=(bb.max.x+bb.min.x)*0.5, cz=(bb.max.z+bb.min.z)*0.5;
+      G.meshes=[];
+      for(const it of G.items){
+        it.geo.translate(-cx,-bb.min.y,-cz);   /* centre in XZ, floor to y=0 */
+        it.geo.scale(fit,fit,fit);
+        const im=new THREE.InstancedMesh(it.geo,it.mat,TREE_N);
+        im.frustumCulled=false;
+        scene.add(im);built.push(im);G.meshes.push(im);
+      }
     }
+    assetVariants=variants;assetTrees=built;
+    coniferMesh.visible=false;broadMesh.visible=false;
+    placeTrees();
+    say('trees: '+variants.length+' models, '+built.length+' draw calls');
   }catch(e){ /* no loader, no network, or no assets: procedural trees stay */ }
 }
 
