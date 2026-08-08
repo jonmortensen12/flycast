@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08i</title>
+<title>Flycast — v8 one line — build 2026-08-08j</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08i</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08j</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -97,6 +97,7 @@ const P = {
   waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
   current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:0.60, obstHeight:0.80,
   waterDetail:1.00, foam:1.00, fogAmt:1.00, bankGrass:1.00, skyGlint:1.00,
+  treeRange:38.0, sceneTris:140.0, assetOn:1,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -187,6 +188,9 @@ const MENU=[
   ['Foam','foam',0.00,3.00,0.05,'How much white water appears. Foam is driven by the divergence and shear of the solved flow field, so it forms where the water genuinely tears itself apart — seams, rock shoulders, the lee of the log — instead of being painted on by hand. Zero for a glassy river.'],
   ['Sun glint','skyGlint',0.00,3.00,0.05,'Specular sun highlight and sky reflection on the surface, through a Fresnel term. Strong glint reads as bright midday; low reads as overcast and makes the bed far easier to see.'],
   ['Haze','fogAmt',0.00,3.00,0.05,'Distance haze. Costs nothing and does most of the work of making the reach feel long. Zero is perfectly clear air, which looks flat and makes the far bank feel like a wall.'],
+  ['Scenery range m','treeRange',10.0,90.0,2.00,'How far away trees and loose rock are still drawn. Anything past this is scaled away, costing no fill and no vertex work. This is the most effective knob if the frame rate drops after loading models \u2014 the reach is over 100 m long and you can only ever see a slice of it.'],
+  ['Scenery tri budget k','sceneTris',20.0,600.0,10.0,'Thousands of triangles allowed for instanced scenery. A loaded model is measured on arrival and the instance count is capped to fit, so a 15,000-triangle tree gets placed a few dozen times rather than 250 times and 3.7 million triangles. That measurement is reported when the model loads.'],
+  ['Use model assets','assetOn',0,1,1,'Whether files in the assets folder are used at all. Turning this off falls back to the built-in procedural meshes without deleting anything, which is the quickest way to confirm whether a model is what cost you the frame rate. Takes effect on reload.'],
   ['Bank growth','bankGrass',0.00,1.00,0.05,'Density of grass and scrub along the banks. Drawn as a single instanced mesh, so the whole bank is one draw call regardless of this setting.'],
   ['Fish detail','fishDetail',0.00,2.00,0.05,'Strength of the scale and spot relief on the trout. This is a generated normal map, not extra geometry, so it costs nothing per fish.'],
   ['Wet shine','wetShine',0.00,3.00,0.05,'How much glossier a trout goes the instant it clears the water. A wet fish out of the river is close to a mirror; this is what sells a jump and a landed fish in the hand.'],
@@ -1655,24 +1659,31 @@ let coniferMesh=null,broadMesh=null;
   coniferMesh.frustumCulled=false;broadMesh.frustumCulled=false;
   scene.add(coniferMesh);scene.add(broadMesh);
 }
+/* where the scatter is centred — the player, refreshed as they wade */
+let _scatterX=0,_scatterZ=CZ,_scatterT=0;
 const TREE_SEED=[];
 for(let i=0;i<TREE_N;i++)
   TREE_SEED.push({x:(Math.random()*2-1)*52,side:Math.random()<0.5?-1:1,
     off:2.2+Math.pow(Math.random(),0.55)*15.0,yaw:Math.random()*6.28,
     sc:0.70+Math.random()*1.5,conifer:Math.random()<0.62,lean:(Math.random()-0.5)*0.10});
-let assetTrees=null, assetVariants=null;   /* set if real models are found */
 function placeTrees(){
   if(!coniferMesh) return;
-  const n=Math.round(TREE_N*Math.max(0,Math.min(1,P.bankGrass)));
+  let n=Math.round(TREE_N*Math.max(0,Math.min(1,P.bankGrass)));
+  if(assetVariants) n=Math.min(n,budgetInstances(assetTreeTris,TREE_N));
   const hidden=new THREE.Matrix4();
   {const q=new THREE.Quaternion(),s0=new THREE.Vector3(0.0001,0.0001,0.0001),
          p0=new THREE.Vector3(0,-999,0);hidden.compose(p0,q,s0);}
+  const rng=P.treeRange, rng2=rng*rng;
   let ci=0,bi=0;
   for(let i=0;i<TREE_N;i++){
     const s=TREE_SEED[i];
     const z=CZ+s.side*(HALFW+s.off);
     const y=bedY(s.x,z);
-    const ok=i<n&&y>surfY(s.x)+0.06;
+    /* range cull: the reach is far longer than you can see, and a tree behind
+       you costs exactly as much as one in front unless it is scaled away */
+    const dx=s.x-_scatterX, dz=z-_scatterZ;
+    const near=(dx*dx+dz*dz)<rng2;
+    const ok=i<n&&near&&y>surfY(s.x)+0.06;
     _gP.set(s.x,y-0.05,z);
     _gQ.setFromEuler(_treeE.set(s.lean,s.yaw,s.lean*0.7,'YXZ'));
     _gS.setScalar(ok?s.sc:0.0001);
@@ -1701,47 +1712,67 @@ function placeTrees(){
   broadMesh.instanceMatrix.needsUpdate=true;
 }
 
-/* ── OPTIONAL MODEL ASSETS ────────────────────────────────────────────────
-   Drop CC0 .glb trees into an assets/ folder next to index.html and they get
-   picked up on load; if they are not there, nothing happens and the procedural
-   trees stay. That ordering matters — the game must never fail to start
-   because a file is missing, and the single-file edit-and-refresh loop still
-   works for everything except the models themselves.
+let troutAsset=null;   /* set if a fish model is found */
 
-   Each model is auto-fitted: measured, floored to y=0, and scaled so it stands
-   about 4.5 m, because no two packs agree on units or origin.
+/* ── MODEL ASSETS ─────────────────────────────────────────────────────────
+   Every slot in the game that can take a model. Drop a file at one of these
+   paths and it is used; leave it out and the built-in procedural version
+   stays. Nothing here is required, nothing fails loudly, and the game starts
+   the same either way.
 
-   Both .glb and .gltf are accepted — GLTFLoader reads either. A .gltf is the
-   JSON form and references a sibling .bin and its textures by relative path,
-   so keep the folder exactly as it was extracted and point the filename below
-   at the .gltf itself. A .glb is the same data in one file and is tidier if
-   you have the choice.
+     files  candidate names, tried as .glb then .gltf, first hit wins
+     fit    the size the model is normalised to, in metres
+     axis   which dimension `fit` refers to
+     kind   'scatter' many instances · 'attach' one mesh on a rig
+            'trout'   the fish, which also inherits the swim shader
 
-   Recommended source: Quaternius "Ultimate Stylized Nature Pack" (CC0) at
-   quaternius.com/packs/ultimatestylizednature.html — the site download is
-   .gltf; poly.pizza serves the same models and can hand you a single file.
-   Prefer the low-poly variants: a 2K leaf atlas per tree is the one thing here
-   that will actually cost frames, and every mesh inside a model becomes its
-   own instanced draw call against a budget that is already the tighter of the
-   two. */
-const TREE_ASSETS=[
-  'assets/tree1.glb','assets/tree2.glb','assets/tree3.glb',
-  'assets/tree1.gltf','assets/tree2.gltf','assets/tree3.gltf',
-  'assets/trees.glb','assets/trees.gltf'
-];
-async function loadTreeAssets(){
-  try{
-    const mod=await import('https://unpkg.com/three@0.169.0/examples/jsm/loaders/GLTFLoader.js');
-    const loader=new mod.GLTFLoader();
-    const variants=[];
-    for(const url of TREE_ASSETS){
+   The rod BLANK is deliberately not here. It bends every frame from twelve
+   simulated nodes, so it has to remain generated geometry — a static mesh
+   cannot flex. The grip and the reel do not bend and can be swapped freely. */
+const ASSET_SLOTS={
+  tree:  {files:['tree1','tree2','tree3','trees'], fit:4.50,  axis:'y', kind:'scatter'},
+  rock:  {files:['rock1','rock2','rocks'],         fit:0.55,  axis:'y', kind:'scatter'},
+  bush:  {files:['bush1','bushes'],                fit:0.65,  axis:'y', kind:'scatter'},
+  trout: {files:['trout','fish'],                  fit:1.00,  axis:'x', kind:'trout'},
+  reel:  {files:['reel'],                          fit:0.090, axis:'y', kind:'attach'},
+  grip:  {files:['grip','handle'],                 fit:0.280, axis:'z', kind:'attach'},
+  net:   {files:['net'],                           fit:0.560, axis:'z', kind:'attach'},
+  fly:   {files:['fly'],                           fit:0.022, axis:'y', kind:'attach'},
+};
+
+/* Foliage that arrives with alpha BLENDING is close to the worst thing you can
+   hand a tile GPU: depth write off, per-object sorting, and every leaf card
+   paying full fill cost through everything behind it. Alpha TESTING gives the
+   same silhouette for a fraction of the price, and is what these models
+   actually want. */
+function tameMaterial(m){
+  if(!m) return m;
+  if(m.transparent){ m.transparent=false; m.alphaTest=0.5; m.depthWrite=true; }
+  if(m.map) m.map.anisotropy=1;
+  return m;
+}
+const triCount=geo=>Math.floor(((geo.index?geo.index.count:geo.attributes.position.count))/3);
+
+let assetLoader=null;
+async function getLoader(){
+  if(assetLoader) return assetLoader;
+  const mod=await import('https://unpkg.com/three@0.169.0/examples/jsm/loaders/GLTFLoader.js');
+  assetLoader=new mod.GLTFLoader();
+  return assetLoader;
+}
+
+/* Load one slot. Returns variants — each a group of {geo,mat} that belong to
+   the same model — already normalised, or null, which is the normal case. */
+async function loadSlot(slot){
+  const spec=ASSET_SLOTS[slot];
+  if(!spec||P.assetOn<0.5) return null;
+  let loader; try{ loader=await getLoader(); }catch(e){ return null; }
+  for(const base of spec.files){
+    for(const url of ['assets/'+base+'.glb','assets/'+base+'.gltf']){
       let gltf=null;
       try{ gltf=await loader.loadAsync(url); }catch(e){ continue; }
       if(!gltf||!gltf.scene) continue;
-      const root=gltf.scene;
-      root.updateWorldMatrix(true,true);
-
-      /* Collect every mesh, baked into world space. */
+      const root=gltf.scene; root.updateWorldMatrix(true,true);
       const items=[];
       root.traverse(o=>{
         if(!o.isMesh||!o.geometry) return;
@@ -1749,15 +1780,14 @@ async function loadTreeAssets(){
         geo.applyMatrix4(o.matrixWorld);
         geo.computeBoundingBox();
         items.push({geo,bb:geo.boundingBox,
-          mat:Array.isArray(o.material)?o.material[0]:o.material});
+          mat:tameMaterial(Array.isArray(o.material)?o.material[0]:o.material)});
       });
       if(!items.length) continue;
 
-      /* These packs frequently lay six or eight different trees side by side in
-         one file. Treating that as a single model would stack every tree in the
-         pack at every position on the bank. Cluster meshes by how close their
-         footprints are: a trunk and its canopy share a footprint, two different
-         trees do not. */
+      /* These packs often lay several separate models side by side in one
+         file. Cluster by footprint: a trunk and its canopy share one, two
+         different trees do not. Without this the whole pack would be stacked
+         at every position on the bank. */
       let unit=0;
       for(const it of items)
         unit=Math.max(unit,it.bb.max.x-it.bb.min.x,it.bb.max.z-it.bb.min.z);
@@ -1770,32 +1800,115 @@ async function loadTreeAssets(){
         if(!G){G={cx,cz,items:[]};groups.push(G);}
         G.items.push(it);
       }
-      for(const G of groups) variants.push(G);
-    }
-    if(!variants.length) return;
 
-    /* Fit each variant on its own: no two packs agree on units, origin, or
-       whether the model is centred or corner-anchored. */
-    const built=[];
-    for(const G of variants){
-      const bb=new THREE.Box3();
-      for(const it of G.items) bb.union(it.bb);
-      const h=Math.max(1e-4,bb.max.y-bb.min.y), fit=4.5/h;
-      const cx=(bb.max.x+bb.min.x)*0.5, cz=(bb.max.z+bb.min.z)*0.5;
-      G.meshes=[];
-      for(const it of G.items){
-        it.geo.translate(-cx,-bb.min.y,-cz);   /* centre in XZ, floor to y=0 */
-        it.geo.scale(fit,fit,fit);
-        const im=new THREE.InstancedMesh(it.geo,it.mat,TREE_N);
-        im.frustumCulled=false;
-        scene.add(im);built.push(im);G.meshes.push(im);
+      /* Normalise. No two packs agree on units, origin, or which way is up. */
+      const out=[];
+      for(const G of groups){
+        const bb=new THREE.Box3();
+        for(const it of G.items) bb.union(it.bb);
+        const sz=new THREE.Vector3(); bb.getSize(sz);
+        const along=spec.axis==='x'?Math.max(sz.x,sz.z)
+                   :spec.axis==='z'?Math.max(sz.z,sz.x):sz.y;
+        const fit=spec.fit/Math.max(1e-4,along);
+        const cx=(bb.max.x+bb.min.x)*0.5, cy=(bb.max.y+bb.min.y)*0.5,
+              cz=(bb.max.z+bb.min.z)*0.5;
+        G.tris=0;
+        for(const it of G.items){
+          /* scatter stands on the ground; a rig anchor is a point, so centre */
+          if(spec.kind==='scatter') it.geo.translate(-cx,-bb.min.y,-cz);
+          else                      it.geo.translate(-cx,-cy,-cz);
+          it.geo.scale(fit,fit,fit);
+          it.geo.computeBoundingSphere();
+          G.tris+=triCount(it.geo);
+        }
+        out.push(G);
       }
+      return out;
     }
-    assetVariants=variants;assetTrees=built;
-    coniferMesh.visible=false;broadMesh.visible=false;
-    placeTrees();
-    say('trees: '+variants.length+' models, '+built.length+' draw calls');
-  }catch(e){ /* no loader, no network, or no assets: procedural trees stay */ }
+  }
+  return null;
+}
+
+/* ── SCATTER SLOTS ──────────────────────────────────────────────────────── */
+let assetTrees=null, assetVariants=null, assetTreeTris=0;
+let assetRocks=null, assetRockVariants=null, assetRockTris=0;
+
+/* A detailed model placed 250 times is 250x its triangle count, and that is
+   almost always what a frame-rate drop after loading an asset turns out to be.
+   Measure the model and cap the instance count to the budget instead of
+   letting the user discover it in the headset. */
+function budgetInstances(trisPerModel,want){
+  if(trisPerModel<=0) return want;
+  const budget=Math.max(1,P.sceneTris*1000);
+  return Math.max(6,Math.min(want,Math.floor(budget/trisPerModel)));
+}
+
+function buildScatter(variants,count){
+  const built=[];
+  for(const G of variants){
+    G.meshes=[];
+    for(const it of G.items){
+      const im=new THREE.InstancedMesh(it.geo,it.mat,count);
+      im.frustumCulled=false;
+      scene.add(im);built.push(im);G.meshes.push(im);
+    }
+  }
+  return built;
+}
+
+async function loadSceneAssets(){
+  try{
+    const tv=await loadSlot('tree');
+    if(tv&&coniferMesh){
+      assetTreeTris=Math.round(tv.reduce((s,G)=>s+G.tris,0)/tv.length);
+      assetVariants=tv;
+      assetTrees=buildScatter(tv,TREE_N);
+      coniferMesh.visible=false;broadMesh.visible=false;
+      placeTrees();
+      const cap=budgetInstances(assetTreeTris,TREE_N);
+      say('trees: '+tv.length+' model'+(tv.length>1?'s':'')+', '
+          +assetTreeTris+' tris each, drawing '+cap);
+    }
+    const rv=await loadSlot('rock');
+    if(rv&&rockMesh){
+      assetRockTris=Math.round(rv.reduce((s,G)=>s+G.tris,0)/rv.length);
+      assetRockVariants=rv;
+      assetRocks=buildScatter(rv,ROCK_N);
+      rockMesh.visible=false;
+      placeRocks();
+    }
+
+    /* ── THE FISH ────────────────────────────────────────────────────────
+       A loaded trout keeps everything the procedural one had except the
+       geometry: the same travelling-wave vertex shader, the same wetness
+       response, the same rise and strike code. That works because the shader
+       only needs the body to run along local X from -0.5 to +0.5, which is
+       exactly what the normaliser produces. The separate tail pivot is
+       dropped — a real model has its tail attached, and the body wave carries
+       it. Every fin and eye comes from the model, so nothing is added. */
+    const fv=await loadSlot('trout');
+    if(fv&&fv.length){
+      const G=fv[0];
+      troutAsset={geo:G.items[0].geo,mat:G.items[0].mat,extra:G.items.slice(1)};
+      for(const f of fishes) f.rebuildMesh();
+      say('trout model loaded, '+G.tris+' tris');
+    }
+
+    /* ── RIG PARTS ───────────────────────────────────────────────────────
+       Static meshes hung on an anchor. The procedural version is hidden
+       rather than deleted, so toggling Use model assets brings it back. */
+    for(const [slot,anchor,rot] of [['reel',reelAnchor,0],['grip',gripAnchor,0],
+                                    ['net',netAnchor,0],['fly',flyAnchor,0]]){
+      const v=await loadSlot(slot);
+      if(!v||!v.length||!anchor) continue;
+      const grp=new THREE.Group();
+      for(const it of v[0].items) grp.add(new THREE.Mesh(it.geo,it.mat));
+      if(rot) grp.rotation.y=rot;
+      anchor.add(grp);
+      for(const ch of anchor.children) if(ch!==grp) ch.visible=false;
+      say(slot+' model loaded');
+    }
+  }catch(e){ /* no loader, no network, or no assets: procedural scenery stays */ }
 }
 
 /* ── LOOSE ROCK ───────────────────────────────────────────────────────────
@@ -1826,6 +1939,9 @@ for(let i=0;i<ROCK_N;i++){
     yaw:Math.random()*6.28,r:(inRiver?0.10:0.07)+Math.pow(Math.random(),1.7)*(inRiver?0.30:0.34),
     tone:Math.random()});
 }
+const _rockHidden=new THREE.Matrix4().compose(
+  new THREE.Vector3(0,-999,0),new THREE.Quaternion(),
+  new THREE.Vector3(1e-4,1e-4,1e-4));
 function placeRocks(){
   if(!rockMesh) return;
   for(let i=0;i<ROCK_N;i++){
@@ -1834,21 +1950,36 @@ function placeRocks(){
     const y=bedY(s.x,z);
     /* in-river rock only where it will actually break or dimple the surface */
     const sub=surfY(s.x)-y;
-    const ok=s.inRiver?(sub<s.r*1.9&&sub>-0.05):(y>surfY(s.x)-0.05);
+    const dxr=s.x-_scatterX, dzr=z-_scatterZ;
+    const nearR=(dxr*dxr+dzr*dzr)<P.treeRange*P.treeRange;
+    const ok=nearR&&(s.inRiver?(sub<s.r*1.9&&sub>-0.05):(y>surfY(s.x)-0.05));
     _gP.set(s.x,y+s.r*0.34,z);
     _gQ.setFromAxisAngle(_gAxis.set(0,1,0),s.yaw);
     _gS.set(s.r,s.r*(0.62+s.tone*0.35),s.r*(0.82+s.tone*0.3));
     if(!ok) _gS.setScalar(0.0001);
     _gM.compose(_gP,_gQ,_gS);
+    if(assetRockVariants){
+      const nV=assetRockVariants.length, mine=i%nV;
+      for(let vi=0;vi<nV;vi++){
+        const use=ok&&vi===mine;
+        for(const im of assetRockVariants[vi].meshes)
+          im.setMatrixAt(i,use?_gM:_rockHidden);
+      }
+      continue;
+    }
     rockMesh.setMatrixAt(i,_gM);
     const wet=s.inRiver?0.55:0.0;
     _gC.setHSL(0.09+s.tone*0.05,0.06+s.tone*0.05,(0.30+s.tone*0.20)*(1-wet*0.45));
     rockMesh.setColorAt(i,_gC);
   }
+  if(assetRockVariants){
+    for(const V of assetRockVariants) for(const im of V.meshes) im.instanceMatrix.needsUpdate=true;
+    return;
+  }
   rockMesh.instanceMatrix.needsUpdate=true;
   if(rockMesh.instanceColor) rockMesh.instanceColor.needsUpdate=true;
 }
-placeTrees();placeRocks();loadTreeAssets();
+placeTrees();placeRocks();loadSceneAssets();
 
 /* A tiling ripple normal map, generated rather than downloaded — it keeps the
    whole game a single file with no binary assets and no cache-busting. Four
@@ -2316,8 +2447,8 @@ const troutBodyMat=new THREE.MeshStandardMaterial({map:troutTex,normalMap:troutN
   roughness:0.34,metalness:0.20});
 /* a real trout holds by undulating, not by sitting rigid. Each fish gets its
    own material so it can carry its own phase, amplitude and beat rate. */
-function makeSwimMaterial(){
-  const m=troutBodyMat.clone();
+function makeSwimMaterial(base){
+  const m=(base||troutBodyMat).clone();
   m.normalScale=new THREE.Vector2(P.fishDetail,P.fishDetail);
   m.userData.wet=0;
   m.userData.u={uT:{value:Math.random()*10},uAmp:{value:1},uSpd:{value:3},uPh:{value:Math.random()*6.28}};
@@ -2410,6 +2541,18 @@ function finShape(pts){
 }
 function makeTrout(len){
   const g=new THREE.Group();
+  if(troutAsset){
+    /* the model's own material inherits the swim shader, so a loaded fish
+       still undulates and still goes glossy the moment it clears the water */
+    const mat=makeSwimMaterial(troutAsset.mat);
+    g.userData.swim=mat;
+    g.add(new THREE.Mesh(troutAsset.geo,mat));
+    for(const it of troutAsset.extra) g.add(new THREE.Mesh(it.geo,it.mat));
+    g.userData.tail={position:{z:0},rotation:{y:0}};   /* no separate tail */
+    g.rotation.order='YZX';
+    g.scale.setScalar(len);
+    return g;
+  }
   const mat=makeSwimMaterial();
   g.userData.swim=mat;
   g.add(new THREE.Mesh(TROUT_GEO,mat));
@@ -2842,6 +2985,12 @@ class Trout{
     if(hooked===this){hooked=null;fishTension=0;rebuildMasses();}
     say(msg);
   }
+  /* swap the mesh for a freshly built one — used when a model finishes
+     loading after the fish already exist */
+  rebuildMesh(){
+    if(this.mesh){scene.remove(this.mesh);}
+    this.mesh=makeTrout(this.len);scene.add(this.mesh);
+  }
   reseat(){
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
     this.p.copy(this.lie);this.p.y=this.restY();
@@ -3202,6 +3351,7 @@ for(let g=0;g<NG;g++){
 }
 
 const flyGrp=new THREE.Group();
+const flyAnchor=new THREE.Group();flyGrp.add(flyAnchor);
 {
   const body=new THREE.Mesh(new THREE.SphereGeometry(0.011,8,6),
     new THREE.MeshStandardMaterial({color:0x2e2a22,roughness:0.9}));
@@ -3211,7 +3361,7 @@ const flyGrp=new THREE.Group();
   const post=new THREE.Mesh(new THREE.ConeGeometry(0.008,0.030,6),
     new THREE.MeshStandardMaterial({color:0xff5a2b,emissive:0xff3300,emissiveIntensity:0.6,roughness:0.6}));
   post.position.y=0.020;
-  flyGrp.add(body,hackle,post);
+  flyAnchor.add(body,hackle,post);
 }
 flyGrp.renderOrder=4;scene.add(flyGrp);
 const flyWake=new THREE.Mesh(new THREE.RingGeometry(0.90,1.0,20),
@@ -3220,6 +3370,12 @@ flyWake.rotation.x=-Math.PI/2;flyWake.renderOrder=5;scene.add(flyWake);
 
 /* rod hand */
 const handRig=new THREE.Group();scene.add(handRig);
+/* Anchor groups for the swappable rig parts. Everything procedural goes INTO
+   these rather than straight onto handRig, so a loaded model can hide its
+   siblings without hunting for them by name. */
+const reelAnchor=new THREE.Group(); reelAnchor.position.set(0,-0.055,0.20);
+const gripAnchor=new THREE.Group();
+handRig.add(reelAnchor,gripAnchor);
 let reelHandParts=null;
 function applyReelHand(){
   if(!reelHandParts) return;
@@ -3337,7 +3493,13 @@ const reelFaceTex=(()=>{
   const foot=new THREE.Mesh(new THREE.BoxGeometry(0.011,0.030,0.046),
     new THREE.MeshStandardMaterial({color:0x7fb23a,roughness:0.32,metalness:0.62}));
   foot.position.set(RX,RY+0.029,RZ);
-  handRig.add(grip,seat,cage,faceA,faceB,knob,handle,foot,reelLip,corkTop);
+  /* the reel parts are positioned in handRig space, so shift them into the
+     anchor's local space as they move across */
+  for(const m of [cage,faceA,faceB,knob,handle,foot]){
+    m.position.sub(reelAnchor.position); reelAnchor.add(m);
+  }
+  gripAnchor.add(grip,seat);
+  handRig.add(reelLip,corkTop);
 }
 const leftHand=new THREE.Mesh(new THREE.SphereGeometry(0.035,10,8),
   new THREE.MeshStandardMaterial({color:0xc9a882,roughness:0.9}));
@@ -3345,6 +3507,7 @@ scene.add(leftHand);
 
 const netGrp=new THREE.Group();netGrp.visible=false;scene.add(netGrp);
 const netMouth=new THREE.Object3D();netMouth.position.set(0,0,-0.50);netGrp.add(netMouth);
+const netAnchor=new THREE.Group();netGrp.add(netAnchor);
 {
   const wood=new THREE.MeshStandardMaterial({color:0x8a6a42,roughness:0.82});
   const handle=new THREE.Mesh(new THREE.CylinderGeometry(0.017,0.013,0.26,8),wood);
@@ -3357,7 +3520,7 @@ const netMouth=new THREE.Object3D();netMouth.position.set(0,0,-0.50);netGrp.add(
     new THREE.SphereGeometry(0.19,18,10,0,Math.PI*2,Math.PI/2,Math.PI/2),
     new THREE.MeshBasicMaterial({color:0x33453a,wireframe:true,transparent:true,opacity:0.65}));
   bag.scale.set(0.80,1.25,1.30);bag.position.copy(netMouth.position);
-  netGrp.add(handle,throat,hoop,bag);
+  netAnchor.add(handle,throat,hoop,bag);
 }
 
 /* panels */
@@ -3896,6 +4059,7 @@ function onSettingChanged(key){
   if(key==='grade'){waterMat.uniforms.uGrade.value=P.grade;placeTrees();placeRocks();}
   if(key==='bankGrass'){placeGrass();placeTrees();}
   if(key==='reelHand')applyReelHand();
+  if(key==='treeRange'||key==='sceneTris'){placeTrees();placeRocks();}
   if(key==='speckSize'){speckMat.uniforms.uSize.value=P.speckSize;gSpeckMat.uniforms.uSize.value=P.speckSize;}
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
   if(key==='hudScale')hud.mesh.scale.setScalar(P.hudScale);
@@ -4556,6 +4720,16 @@ renderer.setAnimationLoop(()=>{
   }
   waterMat.uniforms.uTime.value=simTime;
   skyMat.uniforms.uTime.value=simTime;
+  /* Re-centre the scenery scatter on the player, but only once they have
+     actually walked somewhere — rebuilding 250 instance matrices every frame
+     would cost more than the trees it saves. */
+  _scatterT-=dt;
+  if(_scatterT<=0){
+    _scatterT=0.5;
+    if(Math.hypot(_camW.x-_scatterX,_camW.z-_scatterZ)>6.0){
+      _scatterX=_camW.x;_scatterZ=_camW.z;placeTrees();placeRocks();
+    }
+  }
   skyMat.uniforms.uGlint.value=P.skyGlint;
   waterMat.uniforms.uDetail.value=P.waterDetail;
   waterMat.uniforms.uFoamK.value=P.foam;
