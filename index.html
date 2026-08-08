@@ -94,7 +94,7 @@ const P = {
   moveSpeed:1.60, netRadius:0.30, invertY:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
   lineTaper:1, pinLimit:1, guideSlop:1.00, handRadius:0.040,
-  coneHeight:0.06, coneWidth:0.030, showCones:0,
+  coneHeight:0.00, coneWidth:0.030, showCones:0,
   waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
   current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:0.60, obstHeight:0.80,
   showZones:1, showMarkers:1,
@@ -128,9 +128,9 @@ const MENU=[
   ['Tippet length','tippetLen',0.20,2.50,0.05,'Level tippet at the fly end, cut from the leader total. Longer tippet drifts more freely but turns over less crisply.'],
   ['Line weight','lineWt',3.00,8.00,0.50,'AFFTA line rating. Sets real mass per metre: a 5wt head is 140 grains over 30 ft, which is 0.99 g/m. Heavier line loads the rod harder and carries further.'],
   ['Line air drag','dragMul',0.10,1.50,0.05,'Multiplier on the physical drag coefficient. 1.00 is a real cylinder in crossflow at this diameter. Drag force is LINEAR in diameter and inverse in mass, so this knob and Line mass mult move the same underlying ratio — change this one if the line moves wrong through the air but the rod loads right.'],
-  ['Cone height m','coneHeight',0.00,0.40,0.01,'How far each guide\u2019s contact surface reaches back toward your hand. The ring end stays the real ring size; the surface widens along this distance so line coming from the reel side is funnelled in rather than snapped to a point. 0 turns the cone off, leaving a bare ring.'],
+  ['Cone height m','coneHeight',0.00,0.40,0.01,'How far each guide\u2019s contact surface reaches back toward your hand. DEFAULTS TO 0 (off): with the funnel active, measured loop straightness drops from 0.99 to about 0.89, so turn it up deliberately and judge it in the headset. The ring end stays the real ring size; the surface widens along this distance so line coming from the reel side is funnelled in rather than snapped to a point. 0 turns the cone off, leaving a bare ring.'],
   ['Cone width m','coneWidth',0.00,0.20,0.005,'How wide the contact surface has opened out at the far end of the cone. Larger means the line can wander further off the guide before anything pushes it, which is smoother but looser.'],
-  ['Show contact surfaces','showCones',0,1,1,'Draws each guide\u2019s contact cone as a translucent shell so you can see exactly what the solver treats as free space. Rebuilt live from the rod, so it follows the blank as it bends.'],
+  ['Show contact surfaces','showCones',0,1,1,'Draws each guide\u2019s contact cone, and your line hand\u2019s contact sphere, as translucent shells showing exactly what the solver treats as free space. Rebuilt live, so they follow the blank as it bends. The hand sphere sits at the point on the line you grabbed, which is offset from your hand by however far apart they were when you took hold.'],
   ['Guide slop','guideSlop',0.00,4.00,0.10,'Scales how much clearance the line has inside each guide ring before the ring pushes back. The rod\u2019s real ring radii are used as the base \u2014 3.8 cm at the stripping guide down to 1.0 cm at the tiptop. 0 makes every guide a hard point again, which is what it used to be; 1 is the true ring size. Larger values let the line float further off the guide before it is corrected, which is smoother but looser.'],
   ['Hand radius m','handRadius',0.00,0.15,0.005,'How big a surface your line hand presents. The line routes around this rather than being held at one exact point, so small hand movements no longer flick slack line about. 0 restores the old single-point behaviour.'],
   ['Pin rate limit','pinLimit',0,1,1,'1 caps how far any one guide, the reel or your hand may drag the line within a single solver substep, scaled by how fast that anchor is itself moving. It exists to stop a nearly stationary hand flinging slack line at 40 m/s. Set it to 0 if the line ever drifts away from the reel or skips the top guides and will not recover \u2014 that would mean the cap is also blocking the constraint from correcting real error.'],
@@ -1131,6 +1131,47 @@ function pushOutObstacles(){
   }
 }
 
+/* GUIDE FUNNEL.
+   solveGuide only ever constrains ONE material point per guide -- whichever
+   arc length happens to sit at that guide. That is why the cone had no effect
+   you could feel: the visualisation showed a volume, but nothing tested any
+   other part of the line against it, so line held out to the side fell
+   straight through. This pass is the missing half: every line node whose arc
+   lies within the cone's reach is tested against the cone surface and pushed
+   back inside it. That makes the guide a surface the line rides on rather than
+   a single point it is pinned to, which is what was actually asked for. */
+function guideFunnel(){
+  if(P.coneHeight<=1e-4) return;
+  const H=P.coneHeight;
+  for(let g=0;g<NG;g++){
+    const gArc=lineOut+GUIDE_ARC[g];
+    const rf=GUIDE_S[g]*(RN-1), a=Math.min(RN-2,Math.floor(rf)), b=a+1;
+    const A=a*3,B=b*3;
+    let axx=rpos[A]-rpos[B], axy=rpos[A+1]-rpos[B+1], axz=rpos[A+2]-rpos[B+2];
+    const axl=Math.hypot(axx,axy,axz)||1; axx/=axl;axy/=axl;axz/=axl;
+    const gx=guidePos[g*3], gy=guidePos[g*3+1], gz=guidePos[g*3+2];
+    const ringR=RING_R[g]*P.guideSlop, coneW=Math.max(P.coneWidth,ringR);
+    /* the cone reaches back toward the butt, i.e. toward LARGER arc */
+    const i0=Math.max(1,Math.floor(idxAt(gArc))-1);
+    const i1=Math.min(nAct-1,Math.ceil(idxAt(gArc+H))+1);
+    for(let i=i0;i<=i1;i++){
+      const p=i*3;
+      const ex=pos[p]-gx, ey=pos[p+1]-gy, ez=pos[p+2]-gz;
+      const along=ex*axx+ey*axy+ez*axz;
+      if(along<-0.02||along>H) continue;          /* outside the cone's length */
+      const p2=ex*ex+ey*ey+ez*ez-along*along;
+      const perp=p2>0?Math.sqrt(p2):0;
+      const u=Math.max(0,Math.min(1,along/H));
+      const r=ringR+(coneW-ringR)*u;
+      if(perp<=r||perp<1e-9) continue;
+      /* pull the node back onto the cone surface, radially */
+      const px=ex-along*axx, py=ey-along*axy, pz=ez-along*axz;
+      const s=(perp-r)/perp;
+      pos[p]-=px*s; pos[p+1]-=py*s; pos[p+2]-=pz*s;
+    }
+  }
+}
+
 const _k0=new THREE.Vector3(),_k1=new THREE.Vector3(),_p0=new THREE.Vector3(),_p1=new THREE.Vector3();
 const SUB=6;
 let _hSub=1/432;                 /* current substep length, for pin budgeting */
@@ -1238,8 +1279,13 @@ function physics(dt){
          and the drag rule then never released any line. That is both the
          "big gap to the reel" and the "cannot pull line out once a lot is
          already out" report: same cause. */
+      /* Back to a HARD pin. Softening this to 0.5 was meant to stop the reel
+         driving velocity into the very light backing, but tension at the spool
+         is measured from constraint impulses -- a soft pin never builds them,
+         so Tsp stayed under the drag threshold and the spool simply refused to
+         release line. Reverted along with the budget exemption. */
       pinBudget=1e9;
-      pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,0.5);
+      pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,1.0);
       if(handHeld&&handIdx>0){
         setPinBudget(_lhSpeed,h);
         /* Same target for both: the point on the line you took hold of, held at
@@ -1255,6 +1301,7 @@ function physics(dt){
     }
 
     pushOutObstacles();
+    guideFunnel();
 
     /* ---- material flow, decided purely by tension vs friction ----
        Tension now comes from the solved constraint impulses, so these are
@@ -2308,8 +2355,24 @@ const _coneUp=new THREE.Vector3(0,1,0), _coneAx=new THREE.Vector3();
     m.renderOrder=7;m.visible=false;scene.add(m);coneMeshes.push(m);
   }
 }
+/* the hand's own contact sphere, same toggle */
+const handSphere=new THREE.Mesh(new THREE.SphereGeometry(1,16,12),
+  new THREE.MeshBasicMaterial({color:0xffb320,transparent:true,opacity:0.20,
+    side:THREE.DoubleSide,depthWrite:false}));
+handSphere.renderOrder=7;handSphere.visible=false;scene.add(handSphere);
+
 function updateCones(){
   const on=P.showCones>0.5;
+  /* Drawn at the grabbed point rather than at the hand itself: that offset is
+     the whole point of the current grab model, so showing it at the hand would
+     hide the thing you would most want to see. */
+  handSphere.visible=on&&handHeld&&handIdx>0&&P.handRadius>0.001;
+  if(handSphere.visible){
+    handSphere.position.copy(_grabW);
+    const r=handMode===2?P.handRadius*0.5:P.handRadius;
+    handSphere.scale.setScalar(r);
+    handSphere.material.color.setHex(handMode===2?0xffd23e:0xffb320);
+  }
   for(let g=0;g<NG;g++){
     const m=coneMeshes[g];
     m.visible=on;
