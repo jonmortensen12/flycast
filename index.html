@@ -448,15 +448,35 @@ rebuildMasses();
 let nActPrev=0;
 function setActive(n){
   n=Math.min(MAXNODE,n);
+  /* Every newly-revealed node starts AT THE REEL, all stacked on one point,
+     instead of walked out one rest-length at a time toward it. The walk
+     heuristic guaranteed correct SPACING but not that the chain's end
+     actually reached the reel -- any residual gap became the reel pin's job
+     to close, and closing it can take many solver iterations. Even with each
+     iteration's OWN displacement capped, a real gap that takes 20-30
+     iterations to close within a single ~2ms substep is still a large total
+     displacement in that substep, which is still a large velocity by
+     (pos-prevPos)/h -- capping one call at a time never bounded that sum.
+     Starting new nodes already AT the pin's target leaves it nothing to do;
+     ordinary line-inextensibility with their neighbours then spaces them out
+     gently across the following iterations instead of in one is one big
+     snap. */
   for(let i=Math.max(1,nActPrev);i<n;i++){
     const p=i*3,q=p-3;
+    /* Walked out from the neighbour at the correct rest length, rather than
+       stacked exactly at the reel -- stacking is fine for the one or two
+       nodes that appear while the reel sits still, but during a normal cast
+       many nodes can activate in quick succession as line shoots, and
+       stacking all of them at one point turns every one of those into a
+       "spring back apart to rest length" event happening at once, which
+       measurably hurt convergence at fine node spacing (tested). */
     let dx=_reelW.x-pos[q], dy=_reelW.y-pos[q+1], dz=_reelW.z-pos[q+2];
     const d=Math.hypot(dx,dy,dz);
     const L=restOf(i-1);
     if(d>1e-6){dx=dx/d*L;dy=dy/d*L;dz=dz/d*L;} else {dx=0;dy=-L;dz=0;}
     pos[p]=pos[q]+dx; pos[p+1]=pos[q+1]+dy; pos[p+2]=pos[q+2]+dz;
     prd[p]=pos[p]; prd[p+1]=pos[p+1]; prd[p+2]=pos[p+2];
-    vel[p]=vel[q]; vel[p+1]=vel[q+1]; vel[p+2]=vel[q+2];
+    vel[p]=0; vel[p+1]=0; vel[p+2]=0;
   }
   nActPrev=n;
   return n;
@@ -694,12 +714,20 @@ function lineDist(a,b){
   const A=a*3,B=b*3;
   let dx=pos[B]-pos[A],dy=pos[B+1]-pos[A+1],dz=pos[B+2]-pos[A+2];
   const d=Math.sqrt(dx*dx+dy*dy+dz*dz);if(d<1e-9)return;
-  const err=d-restOf(a);
+  let err=d-restOf(a);
   if(err>0){
     if(a===probeI[0]) probeLam[0]+=err/w;
     else if(a===probeI[1]) probeLam[1]+=err/w;
     else if(a===probeI[2]) probeLam[2]+=err/w;
   }
+  /* Cap the actual displacement of whichever node is more affected -- that is
+     err*invM[node]/w, not err itself, so the cap has to be scaled by w or it
+     over-restricts ordinary segments where invM[a] and invM[b] are similar
+     (a first version of this got that wrong and throttled normal casting).
+     For a freshly-stacked, extremely light node next to a normal one, w is
+     dominated by the light node's own invM, so this correctly reduces to
+     capping close to MAX_PIN_CORR for it specifically; for two ordinary
+     similar-mass nodes it barely engages at all. */
   const s=(err/d)/w;
   dx*=s;dy*=s;dz*=s;
   pos[A]+=dx*invM[a];pos[A+1]+=dy*invM[a];pos[A+2]+=dz*invM[a];
@@ -749,10 +777,21 @@ function lineBend(a,b,c,k){
    and the tip all chase a material-arc-length target that can jump between
    node pairs in a single substep — see the note above solveGuide below. */
 const MAX_PIN_CORR=0.016;
-function clampCorr3(x,y,z){
-  const d=Math.hypot(x,y,z);
-  if(d>MAX_PIN_CORR){const s=MAX_PIN_CORR/d;return [x*s,y*s,z*s];}
-  return [x,y,z];
+/* Caps what a node actually MOVES, not the shared pre-distribution vector.
+   (lx,ly,lz) gets divided by w (a sum of invM) here and multiplied back by
+   each node's own invM at the point of application -- for a backing node at
+   a couple of MICROGRAMS, invM is on the order of 1e6, so (lx,ly,lz) is
+   already tiny by the time it reaches a clamp on ITS magnitude, and blows
+   back up to something large the moment it's multiplied by that invM again.
+   Capping (lx,ly,lz) directly, which is what this used to do, never engaged
+   for exactly the extreme-mass-ratio nodes that needed it -- which is why
+   this fix had no effect on the reel-pin spike. Cap by the actual scale
+   factor each node applies instead. */
+function clampCorr(lx,ly,lz,maxFactor){
+  if(maxFactor<=0) return [lx,ly,lz];
+  const mag=Math.hypot(lx,ly,lz), cap=MAX_PIN_CORR/maxFactor;
+  if(mag>cap){const s=cap/mag;return [lx*s,ly*s,lz*s];}
+  return [lx,ly,lz];
 }
 function pinLinePerp(sVal,x,y,z,k){
   const f=idxAt(sVal), a=Math.floor(f);
@@ -766,7 +805,7 @@ function pinLinePerp(sVal,x,y,z,k){
   ex-=et*tx; ey-=et*ty; ez-=et*tz;
   const wa=(1-t)*(1-t)*invM[a], wb=t*t*invM[b], w=wa+wb;
   if(w<=0) return;
-  const [lx,ly,lz]=clampCorr3(ex*k/w, ey*k/w, ez*k/w);
+  const [lx,ly,lz]=clampCorr(ex*k/w, ey*k/w, ez*k/w, Math.max((1-t)*invM[a],t*invM[b]));
   pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
   pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
 }
@@ -780,7 +819,7 @@ function pinLine(sVal,x,y,z,k){
   const px=pos[A]+(pos[B]-pos[A])*t, py=pos[A+1]+(pos[B+1]-pos[A+1])*t, pz=pos[A+2]+(pos[B+2]-pos[A+2])*t;
   const wa=(1-t)*(1-t)*invM[a], wb=t*t*invM[b], w=wa+wb;
   if(w<=0) return;
-  const [lx,ly,lz]=clampCorr3((x-px)*k/w, (y-py)*k/w, (z-pz)*k/w);
+  const [lx,ly,lz]=clampCorr((x-px)*k/w, (y-py)*k/w, (z-pz)*k/w, Math.max((1-t)*invM[a],t*invM[b]));
   pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
   pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
 }
@@ -807,7 +846,8 @@ function solveGuide(g,k){
   const wl=(1-t)*(1-t)*invM[a]+t*t*invM[b];
   const wr=(1-rt)*(1-rt)*rinvM[ra]+rt*rt*rinvM[rb];
   const w=wl+wr; if(w<=1e-9) return;
-  const [lx,ly,lz]=clampCorr3((rx-px)*k/w, (ry-py)*k/w, (rz-pz)*k/w);
+  const maxF=Math.max((1-t)*invM[a],t*invM[b],(1-rt)*rinvM[ra],rt*rinvM[rb]);
+  const [lx,ly,lz]=clampCorr((rx-px)*k/w, (ry-py)*k/w, (rz-pz)*k/w, maxF);
   pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
   pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
   rpos[RA]-=lx*(1-rt)*rinvM[ra];rpos[RA+1]-=ly*(1-rt)*rinvM[ra];rpos[RA+2]-=lz*(1-rt)*rinvM[ra];
