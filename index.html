@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08g</title>
+<title>Flycast — v8 one line — build 2026-08-08h</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08g</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08h</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -91,7 +91,7 @@ const P = {
   massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:0.85, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:3.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:40.0,
   guideMu:0.15, slipInertia:0.06, dragHeld:1.00, routeOn:0, handSlide:8.0, reelSlack:0.10, lineVis:0.80, flySize:1.80, haptics:1.00,
-  moveSpeed:1.60, netRadius:0.30, invertY:0,
+  moveSpeed:1.60, netRadius:0.30, invertY:0, reelHand:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
   lineTaper:1,
   waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
@@ -163,6 +163,7 @@ const MENU=[
   ['— PLAYER —',null,0,0,0,''],
   ['Move speed','moveSpeed',0.40,4.00,0.10,'Walking speed on the left stick. Deep water slows you regardless.'],
   ['Invert walk Y','invertY',0,1,1,'Flip the forward and backward walking direction.'],
+  ['Reel hand','reelHand',0,1,1,'Which side of the reel the handle is on. 0 is left-hand wind, the usual setup for a right-handed caster, and puts the handle on the side facing you. 1 is right-hand wind. Takes effect immediately.'],
   ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
   ['— RIVER —',null,0,0,0,''],
   ['Water model','waterModel',0,1,1,'0 is the analytic field: flow painted on by formula, fast but it can only do what was written into it. 1 solves shallow water on a grid — depth from the bed and obstacles, gravity down the surface slope, Manning bed friction and a pressure projection. Rocks divert flow because they ARE bed elevation, and eddies form because the solver makes them.'],
@@ -907,7 +908,15 @@ function solveGuide(g,k){
 }
 
 const gdown=new THREE.Vector3(0,-1,0);
+/* How far the line runs BELOW the blank at each guide. This is a real distance
+   and the physics depends on it, so it is unchanged. */
 const guideOff=GUIDE_S.map((s,g)=>g===NG-1?0.004:GUIDE_R[g]*0.55);
+/* The ring the line passes through, which is a completely different quantity
+   and was being drawn at the standoff value — a 42 mm stripping guide. A real
+   stripper ring is about 11 mm across and a tiptop about 4 mm. */
+const GUIDE_RING=GUIDE_S.map(s=>0.0060+(0.0020-0.0060)*s);
+/* blank radius at each guide, so the thread wraps actually sit on the blank */
+const GUIDE_BLANK=GUIDE_S.map(s=>0.0058*(1-0.80*s)+0.0010);
 const guidePos=new Float32Array(NG*3);
 function updateGuidePositions(){
   for(let g=0;g<NG;g++){
@@ -1651,9 +1660,13 @@ for(let i=0;i<TREE_N;i++)
   TREE_SEED.push({x:(Math.random()*2-1)*52,side:Math.random()<0.5?-1:1,
     off:2.2+Math.pow(Math.random(),0.55)*15.0,yaw:Math.random()*6.28,
     sc:0.70+Math.random()*1.5,conifer:Math.random()<0.62,lean:(Math.random()-0.5)*0.10});
+let assetTrees=null;   /* filled in if real models are found on disk */
 function placeTrees(){
   if(!coniferMesh) return;
   const n=Math.round(TREE_N*Math.max(0,Math.min(1,P.bankGrass)));
+  const hidden=new THREE.Matrix4();
+  {const q=new THREE.Quaternion(),s0=new THREE.Vector3(0.0001,0.0001,0.0001),
+         p0=new THREE.Vector3(0,-999,0);hidden.compose(p0,q,s0);}
   let ci=0,bi=0;
   for(let i=0;i<TREE_N;i++){
     const s=TREE_SEED[i];
@@ -1664,14 +1677,73 @@ function placeTrees(){
     _gQ.setFromEuler(_treeE.set(s.lean,s.yaw,s.lean*0.7,'YXZ'));
     _gS.setScalar(ok?s.sc:0.0001);
     _gM.compose(_gP,_gQ,_gS);
+    if(assetTrees){
+      /* every loaded mesh carries the whole placement, so a model made of a
+         trunk mesh and a leaf mesh stays assembled */
+      for(const im of assetTrees) im.setMatrixAt(i,ok?_gM:hidden);
+      continue;
+    }
     if(s.conifer){ if(ci<TREE_N) coniferMesh.setMatrixAt(ci++,_gM); }
     else         { if(bi<TREE_N) broadMesh.setMatrixAt(bi++,_gM); }
   }
-  _gS.setScalar(0.0001);_gP.set(0,-999,0);_gQ.identity();_gM.compose(_gP,_gQ,_gS);
-  for(let k=ci;k<TREE_N;k++) coniferMesh.setMatrixAt(k,_gM);
-  for(let k=bi;k<TREE_N;k++) broadMesh.setMatrixAt(k,_gM);
+  if(assetTrees){
+    for(const im of assetTrees) im.instanceMatrix.needsUpdate=true;
+    return;
+  }
+  for(let k=ci;k<TREE_N;k++) coniferMesh.setMatrixAt(k,hidden);
+  for(let k=bi;k<TREE_N;k++) broadMesh.setMatrixAt(k,hidden);
   coniferMesh.instanceMatrix.needsUpdate=true;
   broadMesh.instanceMatrix.needsUpdate=true;
+}
+
+/* ── OPTIONAL MODEL ASSETS ────────────────────────────────────────────────
+   Drop CC0 .glb trees into an assets/ folder next to index.html and they get
+   picked up on load; if they are not there, nothing happens and the procedural
+   trees stay. That ordering matters — the game must never fail to start
+   because a file is missing, and the single-file edit-and-refresh loop still
+   works for everything except the models themselves.
+
+   Each model is auto-fitted: measured, floored to y=0, and scaled so it stands
+   about 4.5 m, because no two packs agree on units or origin.
+
+   Recommended source: Quaternius "Ultimate Stylized Nature Pack" (CC0), which
+   ships GLB directly — quaternius.com/packs/ultimatestylizednature.html or
+   poly.pizza. Use the untextured/low-poly variants; a 2K leaf atlas per tree
+   is the one thing that will actually cost you frames here. */
+const TREE_ASSETS=['assets/tree1.glb','assets/tree2.glb','assets/tree3.glb'];
+async function loadTreeAssets(){
+  try{
+    const mod=await import('https://unpkg.com/three@0.169.0/examples/jsm/loaders/GLTFLoader.js');
+    const loader=new mod.GLTFLoader();
+    const built=[];
+    for(const url of TREE_ASSETS){
+      let gltf=null;
+      try{ gltf=await loader.loadAsync(url); }catch(e){ continue; }
+      if(!gltf||!gltf.scene) continue;
+      const root=gltf.scene;
+      root.updateWorldMatrix(true,true);
+      const box=new THREE.Box3().setFromObject(root);
+      const h=Math.max(0.001,box.max.y-box.min.y);
+      const fit=4.5/h;
+      root.traverse(o=>{
+        if(!o.isMesh||!o.geometry) return;
+        const geo=o.geometry.clone();
+        geo.applyMatrix4(o.matrixWorld);
+        geo.scale(fit,fit,fit);
+        geo.translate(0,-box.min.y*fit,0);   /* scale first, then floor it */
+        const mat=Array.isArray(o.material)?o.material[0]:o.material;
+        const im=new THREE.InstancedMesh(geo,mat,TREE_N);
+        im.frustumCulled=false;
+        scene.add(im);built.push(im);
+      });
+    }
+    if(built.length){
+      assetTrees=built;
+      coniferMesh.visible=false;broadMesh.visible=false;
+      placeTrees();
+      say('tree models loaded ('+built.length+' meshes)');
+    }
+  }catch(e){ /* no loader, no network, or no assets: procedural trees stay */ }
 }
 
 /* ── LOOSE ROCK ───────────────────────────────────────────────────────────
@@ -1724,7 +1796,7 @@ function placeRocks(){
   rockMesh.instanceMatrix.needsUpdate=true;
   if(rockMesh.instanceColor) rockMesh.instanceColor.needsUpdate=true;
 }
-placeTrees();placeRocks();
+placeTrees();placeRocks();loadTreeAssets();
 
 /* A tiling ripple normal map, generated rather than downloaded — it keeps the
    whole game a single file with no binary assets and no cache-busting. Four
@@ -2269,15 +2341,34 @@ const TROUT_GEO=troutGeometry();
 function finShape(pts){
   const s=new THREE.Shape();s.moveTo(pts[0][0],pts[0][1]);
   for(let i=1;i<pts.length;i++)s.lineTo(pts[i][0],pts[i][1]);
-  return new THREE.ShapeGeometry(s);
+  const g=new THREE.ShapeGeometry(s);
+  /* ShapeGeometry writes UVs straight from the shape's own coordinates, and a
+     fin is about 0.1 units across — so the texture was being sampled from one
+     tiny corner and read as flat colour. Normalise to 0..1 over the shape. */
+  const uv=g.attributes.uv;
+  let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;
+  for(let i=0;i<uv.count;i++){
+    x0=Math.min(x0,uv.getX(i));x1=Math.max(x1,uv.getX(i));
+    y0=Math.min(y0,uv.getY(i));y1=Math.max(y1,uv.getY(i));
+  }
+  const sx=1/Math.max(1e-6,x1-x0), sy=1/Math.max(1e-6,y1-y0);
+  for(let i=0;i<uv.count;i++) uv.setXY(i,(uv.getX(i)-x0)*sx,(uv.getY(i)-y0)*sy);
+  uv.needsUpdate=true;
+  return g;
 }
 function makeTrout(len){
   const g=new THREE.Group();
   const mat=makeSwimMaterial();
   g.userData.swim=mat;
   g.add(new THREE.Mesh(TROUT_GEO,mat));
+  const WHITE0=new THREE.Color(0xffffff);
   const tailPivot=new THREE.Group();tailPivot.position.x=0.485;
-  tailPivot.add(new THREE.Mesh(finShape([[0,0],[0.13,0.115],[0.085,0],[0.13,-0.115],[0,0]]),finMat));
+  /* Built through mergeGeos even though it is a single part, because finMat
+     now carries vertexColors — a geometry with no colour attribute renders
+     BLACK under that material, which is what the tail was doing. */
+  tailPivot.add(new THREE.Mesh(mergeGeos([
+    {geo:finShape([[0,0],[0.13,0.115],[0.085,0],[0.13,-0.115],[0,0]]),
+     mat:new THREE.Matrix4(),col:WHITE0}]),finMat));
   g.add(tailPivot);g.userData.tail=tailPivot;
   /* Every fin that does not animate goes into ONE geometry, and so do all four
      eye parts. Four fish at eleven meshes each was 44 draw calls, which put the
@@ -2290,31 +2381,65 @@ function makeTrout(len){
     m4.setPosition(px,py,pz);
     finParts.push({geo:shape,mat:m4,col:WHITE});
   };
-  place(finShape([[-0.05,0],[0.02,0.085],[0.07,0]]),   0.02, 0.100,0,      0,Math.PI/2,0);
-  place(finShape([[-0.02,0],[0,0.032],[0.025,0]]),     0.33, 0.072,0,      0,Math.PI/2,0);
-  place(finShape([[-0.03,0],[0.01,-0.06],[0.05,0]]),   0.24,-0.075,0,      0,Math.PI/2,0);
-  place(finShape([[-0.02,0],[0.02,-0.045],[0.06,0]]),  0.05,-0.082,0,      0,Math.PI/2,0);
+  /* ORIENTATION. Every median fin was being rotated 90 degrees about Y, which
+     laid it ACROSS the back like a sail instead of along the body. The fin
+     shapes are drawn in XY with x running along the fish, so a dorsal, adipose,
+     anal or pelvic fin needs NO rotation at all — same as the tail. Only the
+     paired fins, which genuinely stick out sideways, get rotated. */
+  place(finShape([[-0.05,0],[0.02,0.090],[0.075,0]]),  0.02, 0.098,0, 0,0,0);   /* dorsal  */
+  place(finShape([[-0.02,0],[0,0.030],[0.024,0]]),     0.33, 0.070,0, 0,0,0);   /* adipose */
+  place(finShape([[-0.03,0],[0.01,-0.062],[0.052,0]]), 0.24,-0.073,0, 0,0,0);   /* anal    */
   for(const s of [1,-1]){
-    place(finShape([[0,0],[0.07,-0.045],[0.09,0.01]]),-0.24,-0.030,0.055*s, s*0.5,0,-0.2);
-    place(finShape([[0,0],[0.045,-0.030],[0.06,0.008]]),-0.06,-0.088,0.040*s, s*0.7,0,-0.1);
+    /* pectorals: swept back and angled down and out from behind the gill plate */
+    place(finShape([[0,0],[0.075,-0.048],[0.095,0.012]]),
+          -0.235,-0.026,0.030*s, s*1.15,0,-0.28);
+    /* pelvics: smaller, lower, further aft */
+    place(finShape([[0,0],[0.050,-0.034],[0.066,0.009]]),
+          -0.020,-0.080,0.024*s, s*1.32,0,-0.16);
   }
   g.add(new THREE.Mesh(mergeGeos(finParts),finMat));
   /* The eye was at z=0.042 where the body is only 0.033 half-wide, so it hung
      9 mm clear of the skin. Take the station from the same profile the body is
      built from, and it sits in the socket at any length. */
+  /* Head detail: eye and mouth, merged into one mesh so the whole face is a
+     single draw call. A trout's eye is a dark pupil in a brassy iris under a
+     wet, almost mirror-like cornea, and the highlight is what makes it read as
+     alive rather than as a painted dot. */
   const eyeT=0.115, eyeH=0.125*prof(eyeT), eyeW=eyeH*0.52;
-  const IRIS=new THREE.Color(0xb9963f), PUPIL=new THREE.Color(0x0b1410);
-  const eyeParts=[];
+  const IRIS=new THREE.Color(0xc0a049), PUPIL=new THREE.Color(0x080f0c),
+        SPARK=new THREE.Color(0xffffff), GAPE=new THREE.Color(0x2a1417),
+        LIP=new THREE.Color(0x6d6a58);
+  const headParts=[];
   for(const s of [1,-1]){
-    const mi=new THREE.Matrix4().makeScale(1,1,0.62);
-    mi.setPosition(eyeT-0.5,eyeH*0.40,eyeW*0.80*s);
-    eyeParts.push({geo:new THREE.SphereGeometry(eyeH*0.20,8,6),mat:mi,col:IRIS});
-    const mp=new THREE.Matrix4().makeScale(1,1,0.60);
-    mp.setPosition(eyeT-0.5-0.004,eyeH*0.40,eyeW*0.90*s);
-    eyeParts.push({geo:new THREE.SphereGeometry(eyeH*0.115,7,5),mat:mp,col:PUPIL});
+    /* socket ring, so the eye sits in something rather than on the skin */
+    const ms=new THREE.Matrix4().makeScale(1,1,0.45);
+    ms.setPosition(eyeT-0.5,eyeH*0.42,eyeW*0.72*s);
+    headParts.push({geo:new THREE.SphereGeometry(eyeH*0.30,10,7),mat:ms,col:LIP});
+    const mi=new THREE.Matrix4().makeScale(1,1,0.58);
+    mi.setPosition(eyeT-0.5,eyeH*0.42,eyeW*0.84*s);
+    headParts.push({geo:new THREE.SphereGeometry(eyeH*0.235,10,8),mat:mi,col:IRIS});
+    const mp=new THREE.Matrix4().makeScale(1,1,0.52);
+    mp.setPosition(eyeT-0.5-0.0015,eyeH*0.42,eyeW*0.95*s);
+    headParts.push({geo:new THREE.SphereGeometry(eyeH*0.125,8,6),mat:mp,col:PUPIL});
+    /* catchlight, up and forward, where the sky would land on it */
+    const mh=new THREE.Matrix4().makeScale(1,1,0.5);
+    mh.setPosition(eyeT-0.5-0.0075,eyeH*0.60,eyeW*0.97*s);
+    headParts.push({geo:new THREE.SphereGeometry(eyeH*0.055,6,5),mat:mh,col:SPARK});
   }
-  g.add(new THREE.Mesh(mergeGeos(eyeParts),
-    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.14,metalness:0.30})));
+  /* MOUTH. The body is a closed sweep, so the nose was a blank bullet. A trout
+     has a long jaw hinged back under the eye — a dark gape running from the
+     snout to below the front of the eye, with a pale lower jaw beneath it. */
+  const noseT=0.030, noseH=0.125*prof(noseT), noseW=noseH*0.52;
+  const gape=new THREE.Matrix4().makeScale(1,0.24,0.92);
+  gape.multiply(new THREE.Matrix4().makeRotationZ(0.16));
+  gape.setPosition(noseT-0.5+0.028,-noseH*0.10,0);
+  headParts.push({geo:new THREE.SphereGeometry(0.052,12,8),mat:gape,col:GAPE});
+  const jaw=new THREE.Matrix4().makeScale(1,0.34,0.86);
+  jaw.multiply(new THREE.Matrix4().makeRotationZ(0.10));
+  jaw.setPosition(noseT-0.5+0.030,-noseH*0.52,0);
+  headParts.push({geo:new THREE.SphereGeometry(0.050,12,8),mat:jaw,col:LIP});
+  g.add(new THREE.Mesh(mergeGeos(headParts),
+    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.10,metalness:0.35})));
   g.rotation.order='YZX';        /* yaw, then pitch, then roll */
   g.scale.setScalar(len);return g;
 }
@@ -2535,6 +2660,7 @@ class Trout{
         if(SND.ok){ if(this.riseKind===2) sndSplash(3.6); else sndPlop(); }
       }
       if(u>=1) commitStrike(this);
+    } else if(this.state==='landed'){
       /* A landed fish floats up in front of you so it can be looked at, and can
          be taken in the left hand and turned over. Pinch to hold, release to
          let it float again. The despawn timer only runs while it is NOT held,
@@ -2724,7 +2850,13 @@ class DynTube{
     this.rad=new Float32Array(m);
     const idx=[];
     for(let i=0;i<m-1;i++)for(let j=0;j<R;j++){
-      const a=i*R+j,b=i*R+(j+1)%R,c=(i+1)*R+j,d=(i+1)*R+(j+1)%R;idx.push(a,c,b,b,c,d);}
+      /* WINDING. The frame here is (radial, angular, alongTube) and it is
+         right handed, so cross(alongTube, angular) = -radial: the old
+         (a,c,b) order pointed every face at the axis. The normal attribute is
+         written explicitly so lighting stayed correct, which is exactly why
+         this hid for so long — what you saw was the lit INSIDE of the far
+         wall through the culled near wall. */
+      const a=i*R+j,b=i*R+(j+1)%R,c=(i+1)*R+j,d=(i+1)*R+(j+1)%R;idx.push(a,b,c,b,d,c);}
     const g=new THREE.BufferGeometry();
     g.setAttribute('position',new THREE.BufferAttribute(this.p,3));
     g.setAttribute('normal',new THREE.BufferAttribute(this.nm,3));
@@ -2787,7 +2919,13 @@ class RodTube{
       for(let j=0;j<R;j++){const k=(i*R+j)*3;col[k]=c.r;col[k+1]=c.g;col[k+2]=c.b;}
     }
     for(let i=0;i<n-1;i++)for(let j=0;j<R;j++){
-      const a=i*R+j,b=i*R+(j+1)%R,c=(i+1)*R+j,d=(i+1)*R+(j+1)%R;idx.push(a,c,b,b,c,d);}
+      /* WINDING. The frame here is (radial, angular, alongTube) and it is
+         right handed, so cross(alongTube, angular) = -radial: the old
+         (a,c,b) order pointed every face at the axis. The normal attribute is
+         written explicitly so lighting stayed correct, which is exactly why
+         this hid for so long — what you saw was the lit INSIDE of the far
+         wall through the culled near wall. */
+      const a=i*R+j,b=i*R+(j+1)%R,c=(i+1)*R+j,d=(i+1)*R+(j+1)%R;idx.push(a,b,c,b,d,c);}
     const g=new THREE.BufferGeometry();
     g.setAttribute('position',new THREE.BufferAttribute(this.p,3));
     g.setAttribute('normal',new THREE.BufferAttribute(this.nm,3));
@@ -2974,27 +3112,40 @@ function recShow(i){
   ghostLine.mesh.visible=true;
 }
 
-/* Each guide is a chrome ring, its two wire feet, and the dark thread wrap
-   that holds it on — merged into one geometry so the guide stack still costs
-   eleven draw calls rather than thirty-three. */
+/* A snake guide is a ring, a post reaching UP to the blank, and two thread
+   wraps encircling the blank where the feet land. The old version had the feet
+   pointing DOWN, away from the rod, attached to nothing — the mesh origin sits
+   at the RING, which is already the standoff distance below the blank, so
+   everything structural has to travel back up. Merged, so eleven guides still
+   cost eleven draw calls rather than thirty-three. */
 const guideMeshes=[];
 const CHROME=new THREE.Color(0xc6ccc9), THREAD=new THREE.Color(0x14293a);
 for(let g=0;g<NG;g++){
-  const r=GUIDE_R[g]*0.55, wire=Math.max(0.0011,r*0.075);
-  const parts=[{geo:new THREE.TorusGeometry(r,wire,5,14),
+  const r=GUIDE_RING[g], off=guideOff[g], bl=GUIDE_BLANK[g];
+  const wire=Math.max(0.00055,r*0.16);
+  /* the ring itself. TorusGeometry lies in XY with its axis on Z, and the rod
+     runs along local Z, so the line threads it without any rotation. */
+  const parts=[{geo:new THREE.TorusGeometry(r,wire,6,16),
                 mat:new THREE.Matrix4(),col:CHROME}];
-  for(const s of [-1,1]){
-    const foot=new THREE.CylinderGeometry(wire,wire,r*1.7,4);
-    const m4=new THREE.Matrix4().makeRotationZ(s*0.42);
-    m4.setPosition(s*r*0.72,-r*0.85,0);
-    parts.push({geo:foot,mat:m4,col:CHROME});
-    const wrap=new THREE.CylinderGeometry(wire*2.6,wire*2.6,r*0.55,7);
-    const m5=new THREE.Matrix4().makeRotationZ(Math.PI/2);
-    m5.setPosition(s*r*1.30,-r*1.35,0);
-    parts.push({geo:wrap,mat:m5,col:THREAD});
+  const rise=Math.max(0.0008,off-r);
+  if(g<NG-1){
+    /* two posts from the shoulders of the ring up to the blank */
+    for(const s of [-1,1]){
+      const post=new THREE.CylinderGeometry(wire*0.85,wire*0.85,rise,5);
+      const m4=new THREE.Matrix4().makeRotationZ(-s*0.16);
+      m4.setPosition(s*r*0.62,r*0.55+rise*0.5,0);
+      parts.push({geo:post,mat:m4,col:CHROME});
+    }
+    /* thread wraps around the blank, fore and aft of the feet */
+    for(const zz of [-1,1]){
+      const wrap=new THREE.TorusGeometry(bl+0.0007,0.0009,5,12);
+      const m5=new THREE.Matrix4();
+      m5.setPosition(0,r*0.55+rise,zz*(0.008+r*0.6));
+      parts.push({geo:wrap,mat:m5,col:THREAD});
+    }
   }
   const m=new THREE.Mesh(mergeGeos(parts),
-    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.24,metalness:0.82}));
+    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.22,metalness:0.85}));
   scene.add(m);guideMeshes.push(m);
 }
 
@@ -3017,6 +3168,13 @@ flyWake.rotation.x=-Math.PI/2;flyWake.renderOrder=5;scene.add(flyWake);
 
 /* rod hand */
 const handRig=new THREE.Group();scene.add(handRig);
+let reelHandParts=null;
+function applyReelHand(){
+  if(!reelHandParts) return;
+  const hs=P.reelHand>0.5?1:-1;
+  reelHandParts[0].position.x=0.0165*hs;
+  reelHandParts[1].position.x=0.0150*hs;
+}
 const reelLip=new THREE.Object3D();reelLip.position.set(0,-0.076,0.20);
 const corkTop=new THREE.Object3D();corkTop.position.set(0,-0.016,-0.045);
 /* The face of a fly reel is almost all detail and almost no shape — ported
@@ -3114,12 +3272,16 @@ const reelFaceTex=(()=>{
   const faceB=new THREE.Mesh(new THREE.CircleGeometry(0.0435,26),faceMat);
   faceB.rotation.y=-Math.PI/2;faceB.position.set(RX-0.0104,RY,RZ);
   /* the parts that genuinely need to be geometry: drag knob and handle */
+  /* The handle was on the far face, so you were looking at the back of the
+     reel. Left-hand wind puts it on the side facing the caster. */
+  const hs=P.reelHand>0.5?1:-1;
   const knob=new THREE.Mesh(new THREE.CylinderGeometry(0.0072,0.0090,0.014,12),
     new THREE.MeshStandardMaterial({color:0x7fb23a,roughness:0.34,metalness:0.55}));
-  knob.rotation.z=Math.PI/2;knob.position.set(RX+0.0165,RY,RZ);
+  knob.rotation.z=Math.PI/2;knob.position.set(RX+0.0165*hs,RY,RZ);
   const handle=new THREE.Mesh(new THREE.CylinderGeometry(0.0052,0.0052,0.019,10),
     new THREE.MeshStandardMaterial({color:0x8fc247,roughness:0.30,metalness:0.60}));
-  handle.rotation.z=Math.PI/2;handle.position.set(RX+0.0150,RY-0.0255,RZ+0.0135);
+  handle.rotation.z=Math.PI/2;handle.position.set(RX+0.0150*hs,RY-0.0255,RZ+0.0135);
+  reelHandParts=[knob,handle];
   const foot=new THREE.Mesh(new THREE.BoxGeometry(0.011,0.030,0.046),
     new THREE.MeshStandardMaterial({color:0x7fb23a,roughness:0.32,metalness:0.62}));
   foot.position.set(RX,RY+0.029,RZ);
@@ -3681,6 +3843,7 @@ function onSettingChanged(key){
   if(key==='current')waterMat.uniforms.uQ.value=P.current;
   if(key==='grade'){waterMat.uniforms.uGrade.value=P.grade;placeTrees();placeRocks();}
   if(key==='bankGrass'){placeGrass();placeTrees();}
+  if(key==='reelHand')applyReelHand();
   if(key==='speckSize'){speckMat.uniforms.uSize.value=P.speckSize;gSpeckMat.uniforms.uSize.value=P.speckSize;}
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
   if(key==='hudScale')hud.mesh.scale.setScalar(P.hudScale);
