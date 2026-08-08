@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line</title>
+<title>Flycast — v8 one line — build 2026-08-08c</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08c</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -90,7 +90,7 @@ const P = {
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
   massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:0.85, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:3.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:40.0,
-  guideMu:0.15, slipInertia:1.00, lineVis:0.80, flySize:1.80, haptics:1.00,
+  guideMu:0.15, slipInertia:0.06, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
   lineTaper:1,
@@ -131,7 +131,7 @@ const MENU=[
   ['— FRICTION —',null,0,0,0,''],
   ['Guide friction','guideMu',0.00,0.60,0.01,'Capstan friction through the eyelets. Around 0.15 for fly line on chrome snakes. Every radian of rod bend multiplies the tension needed to make line slide.'],
   ['Static friction','statFric',0.00,0.60,0.01,'Force that must be beaten before line slides at all. Raise it if line creeps out on false casts.'],
-  ['Slip inertia','slipInertia',0.05,10.0,0.05,'Mass that has to accelerate before line will slide through the guides, as a multiple of the physically derived figure \u2014 the run from tiptop to spool lip, plus half the line outside the tip. 1.00 is that derived value. Lower is twitchier and eventually chatters; the previous build behaved as though this were about 0.006, which is why pooled line jumped. Use the range button to go below the slider minimum if you want to hear the old behaviour back to back.'],
+  ['Slip inertia','slipInertia',0.01,2.00,0.01,'Mass that has to accelerate before line will slide through the guides, as a fraction of the whole sliding column \u2014 tiptop to spool lip, plus half the line outside the tip. That full column is 1.00, and it is far too heavy: over one 2.3 ms substep a tension wave in 5wt line travels only about 7 cm, so the line that can actually resist a feed is what sits within a wave transit of the guide, not metres of it out to the reel. 0.06 is the measured value and works out to roughly half a metre of line. Above 0.6 the line creeps back down the rod and the pool grows while casting; above 1.0 it falls through the guides under its own weight if you point the rod up. Below about 0.02 the old jitter returns.'],
   ['Spool drag','spoolDrag',0.05,5.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
   ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
   ['— ROD & TACKLE —',null,0,0,0,''],
@@ -201,7 +201,7 @@ const PHYSICAL={
   leaderLen:2.74, tippetLen:0.90,
   dragMul:0.85,     /* felt value. 1.00 is the isolated-cylinder physics */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
-  guideMu:0.15, statFric:0.05, slipInertia:1.00, spoolDrag:3.00, spoolDead:0.05,
+  guideMu:0.15, statFric:0.05, slipInertia:0.06, spoolDrag:3.00, spoolDead:0.05,
   tippet:40.0,      /* raised while the fight is being tuned; 5X would be 21 */
   buoyancy:1.00, stick:1.00, nodeLen:0.08, lineTaper:1,
 };
