@@ -377,6 +377,7 @@ const nodeSpan=i=> i===0 ? leadLen : 0.5*(restOf(i-1)+restOf(i));
 
 /* the two material boundaries: where the tiptop and the spool sit along the line */
 let lineOut=8.0;          /* arc from fly to tiptop */
+let feedVel=0;            /* line speed through the guides, m/s (see flow rule) */
 let offSpool=8.0+ROD_ARC+2.2;
 let rodArc=ROD_ARC;       /* live path length through the guides */
 let handMode=0,rodPinch=false,wrapTotal=0;
@@ -1106,13 +1107,29 @@ function physics(dt){
       probeThr=Tin*cap+P.statFric;probeSp=Tsp;
       let dl=0;
       if(!rodPinch&&!reeling&&!handPinched){
+        /* The feed used to be KINEMATIC: compute a displacement from the
+           tension excess and apply all of it this substep. Line therefore went
+           from stationary to sliding at up to 21 m/s within one 2.3 ms substep,
+           and since velocity is (pos-prevPos)/h, the nodes at the guide
+           reported exactly that as a spike. Real line has mass and cannot
+           change speed instantly.
+           So integrate a feed VELOCITY instead. Tension excess is an
+           acceleration; the line speeds up into feeding and coasts to a stop
+           when tension drops, which is both smoother and more honest. */
+        let acc=0;
         if(Tout>probeThr){
           const wOut=invM[Math.max(0,probeI[0])]+invM[Math.max(0,probeI[0])+1];
-          dl=(Tout-probeThr)*h2*wOut;
+          acc=(Tout-probeThr)*wOut;
         } else if(Tin>Tout*cap+P.statFric){
           const wIn=invM[Math.max(0,probeI[1])]+invM[Math.max(0,probeI[1])+1];
-          dl=-(Tin-(Tout*cap+P.statFric))*h2*wIn;
+          acc=-(Tin-(Tout*cap+P.statFric))*wIn;
+        } else {
+          feedVel*=Math.pow(0.05,h/0.02);      /* no drive: coast down fast */
         }
+        feedVel+=acc*h;
+        feedVel*=Math.pow(0.5,h/0.06);         /* friction damping on the slide */
+        feedVel=Math.max(-14,Math.min(14,feedVel));
+        dl=feedVel*h;
         dl=Math.max(-0.05,Math.min(0.05,dl));
         if(dl>0){
           const avail=Math.max(0,(offSpool-lineOut-rodArc)-MIN_SLACK);
@@ -1982,7 +1999,10 @@ ghostHand.renderOrder=6;ghostHand.visible=false;scene.add(ghostHand);
 const _ghostRod=new Float32Array(RN*3);
 
 /* the recorded line, a slimmer copy of the live line tube */
-const GLINE_N=56;
+/* 56 points across ~13 m of line is 23 cm between samples -- fine for a ghost
+   you follow, far too coarse to show a single node misbehaving. Diagnosis
+   needs to resolve individual nodes, so sample the full chain much finer. */
+const GLINE_N=140;
 const ghostLine=new DynTube(GLINE_N,3);
 ghostLine.mesh.material=new THREE.MeshBasicMaterial({
   color:0xff3ec8,transparent:true,opacity:0.55,depthWrite:false});
@@ -2000,26 +2020,92 @@ const _reelOffW=new THREE.Vector3();
 const _ghostQ=new THREE.Quaternion();
 const _qZ90=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),Math.PI/2);
 
-/* Rod nodes, the resampled line, the line hand with its grip state, and the
-   rod hand's own orientation (for the reel). ~72 Hz; a minute is a few MB,
-   which is nothing, so REC_MAX bounds the timeline rather than memory. */
+/* Per frame: rod nodes, line hand + grip, rod-hand orientation (for the reel),
+   a block of diagnostics, and the whole line finely resampled.
+   The diagnostics are the point of the export -- a shared recording has to
+   answer "how fast, which node, and where along the line" without me having to
+   guess from a video. ~72 Hz; a minute is a few MB, which is nothing. */
 const REC_MAX=4600;
 const REC={frames:[],recording:false,play:false,head:0,inF:0,outF:0,scrub:false};
-const REC_STRIDE=RN*3+4+4+GLINE_N*3;
+const R_ROD=0, R_HAND=RN*3, R_QUAT=R_HAND+4, R_DIAG=R_QUAT+4, R_LINE=R_DIAG+8;
+const REC_STRIDE=R_LINE+GLINE_N*3;
 function recPush(){
   if(REC.frames.length>=REC_MAX){REC.recording=false;say('recording full');return;}
   const r=new Float32Array(REC_STRIDE);
   r.set(rpos.subarray(0,RN*3));
-  let o=RN*3;
-  r[o]=_lh.x;r[o+1]=_lh.y;r[o+2]=_lh.z;r[o+3]=handMode; o+=4;
-  r[o]=_q.x;r[o+1]=_q.y;r[o+2]=_q.z;r[o+3]=_q.w; o+=4;
-  /* dynPath was already resampled this frame for the live line render —
-     just take every 3rd point rather than resampling it again */
+  let o=R_HAND;
+  r[o]=_lh.x;r[o+1]=_lh.y;r[o+2]=_lh.z;r[o+3]=handMode;
+  o=R_QUAT;
+  r[o]=_q.x;r[o+1]=_q.y;r[o+2]=_q.z;r[o+3]=_q.w;
+  /* diagnostics: the geometry needed to locate tip/stripper/hand along the
+     line, plus this frame's fastest node and where it sits */
+  o=R_DIAG;
+  r[o]=lineOut; r[o+1]=offSpool; r[o+2]=rodArc; r[o+3]=nAct;
+  r[o+4]=M.lineVmax; r[o+5]=M.lineVnode;
+  r[o+6]=(handHeld&&handIdx>0)?grabArc:-1;
+  r[o+7]=simTime;
+  /* dynPath was already resampled this frame for the live line render, and it
+     spans the WHOLE chain (fly to reel), so the pool is included */
+  o=R_LINE;
   for(let j=0;j<GLINE_N;j++){
     const k=Math.min(DYN_N-1,Math.round(j*(DYN_N-1)/(GLINE_N-1)))*3;
     r[o+j*3]=dynPath[k];r[o+j*3+1]=dynPath[k+1];r[o+j*3+2]=dynPath[k+2];
   }
   REC.frames.push(r);
+}
+
+/* Build a shareable JSON of the trimmed take. Only the frames between the two
+   timeline handles are written, so a 30 s session trimmed to one bad moment
+   exports a small file. */
+function recExport(){
+  const n=REC.frames.length;
+  if(!n){say('nothing recorded');return;}
+  const a=Math.max(0,Math.min(n-1,Math.round(REC.inF)));
+  const b=Math.max(a+1,Math.min(n-1,Math.round(REC.outF)));
+  const q3=v=>Math.round(v*1000)/1000;
+  const out={
+    format:'flycast-ghost-v1',
+    recordedAt:new Date().toISOString(),
+    fps:72, rodNodes:RN, linePoints:GLINE_N,
+    frameCount:b-a+1,
+    settings:Object.fromEntries(Object.keys(P).map(k=>[k,P[k]])),
+    diagKeys:['lineOut','offSpool','rodArc','nAct','lineVmax','lineVnode','grabArc','simTime'],
+    frames:[]
+  };
+  for(let i=a;i<=b;i++){
+    const f=REC.frames[i];
+    const rod=[],hand=[],quat=[],diag=[],line=[];
+    for(let k=0;k<RN*3;k++) rod.push(q3(f[k]));
+    for(let k=0;k<4;k++) hand.push(q3(f[R_HAND+k]));
+    for(let k=0;k<4;k++) quat.push(q3(f[R_QUAT+k]));
+    for(let k=0;k<8;k++) diag.push(q3(f[R_DIAG+k]));
+    for(let k=0;k<GLINE_N*3;k++) line.push(q3(f[R_LINE+k]));
+    out.frames.push({rod,hand,quat,diag,line});
+  }
+  const txt=JSON.stringify(out);
+  try{
+    const blob=new Blob([txt],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const name='flycast-ghost-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.json';
+    /* An immersive VR session has no visible page, so a download click there
+       goes nowhere. Park a real link on the 2D overlay instead -- it is shown
+       again automatically the moment the session ends. */
+    let box=document.getElementById('dlbox');
+    if(!box){
+      box=document.createElement('div');box.id='dlbox';
+      box.style.cssText='margin:1rem 0;padding:1rem;border:1px solid #b5713f;border-radius:4px;max-width:44rem';
+      document.getElementById('overlay').insertBefore(box,document.getElementById('enter'));
+    }
+    const kb=(txt.length/1024).toFixed(0);
+    box.innerHTML='<p class="note" style="margin:0 0 .6rem"><b>Recording ready to share</b> &mdash; '+
+      (b-a+1)+' frames, '+kb+' KB</p>';
+    const link=document.createElement('a');
+    link.href=url;link.download=name;link.textContent='DOWNLOAD '+name;
+    link.style.cssText='display:inline-block;background:#b5713f;color:#140d07;font-weight:700;'+
+      'padding:.7rem 1.4rem;border-radius:2px;text-decoration:none;letter-spacing:.1em;font-size:.8rem';
+    box.appendChild(link);
+    say('export ready \u2014 take off the headset');
+  }catch(e){ say('export failed: '+e.message); }
 }
 function recShow(i){
   const n=REC.frames.length;
@@ -2030,13 +2116,14 @@ function recShow(i){
   _ghostRod.set(f.subarray(0,RN*3));
   ghostTube.update(_ghostRod);
   ghostTube.mesh.visible=true;
-  let o=RN*3;
+  let o=R_HAND;
   ghostHand.position.set(f[o],f[o+1],f[o+2]);
   ghostHand.visible=true;
   /* the line hand goes bright while it is gripping, so hauls read clearly */
   ghostHand.material.color.setHex(f[o+3]>1.5?0xffd23e:f[o+3]>0.5?0xff8fdc:0xff3ec8);
-  o+=4;
-  _ghostQ.set(f[o],f[o+1],f[o+2],f[o+3]); o+=4;
+  o=R_QUAT;
+  _ghostQ.set(f[o],f[o+1],f[o+2],f[o+3]);
+  o=R_LINE;
   ghostReel.position.set(_ghostRod[0],_ghostRod[1],_ghostRod[2])
     .add(_reelOff.clone().applyQuaternion(_ghostQ));
   ghostReel.quaternion.copy(_ghostQ).multiply(_qZ90);   /* the reel's own local twist */
@@ -2135,8 +2222,9 @@ menu.mesh.position.set(0,1.45,-1.05);menu.mesh.visible=false;player.add(menu.mes
 
 /* recorder panel */
 const RW=760, RH=330;
-const RB={rec:{x:26,y:60,w:168,h:60},play:{x:210,y:60,w:168,h:60},
-          clr:{x:394,y:60,w:168,h:60},close:{x:578,y:60,w:156,h:60}};
+const RB={rec:{x:26,y:60,w:132,h:60},play:{x:170,y:60,w:132,h:60},
+          share:{x:314,y:60,w:150,h:60},
+          clr:{x:476,y:60,w:120,h:60},close:{x:608,y:60,w:126,h:60}};
 const RTL={x:36,y:196,w:688,h:26};
 const rec=makePanel(0.76,0.33,RW,RH);
 rec.mesh.position.set(0,1.05,-0.95);rec.mesh.visible=false;player.add(rec.mesh);
@@ -2144,7 +2232,7 @@ let recOpen=false, recDrag=null;
 
 let note='',noteT=0;
 function say(s){note=s;noteT=3.6;}
-const M={bend:0,drift:0,tension:0,depth:0,fps:60};
+const M={bend:0,drift:0,tension:0,depth:0,fps:60,lineVmax:0,lineVnode:0,lineVwhere:'-'};
 const HANDTXT=['free','routing','pinched'];
 function drawHUD(){
   const c=hud.cx;c.clearRect(0,0,HW,HH);
@@ -2173,6 +2261,7 @@ function drawHUD(){
     ['SLACK',slack.toFixed(2)+' m'],
     ['OFF SPOOL',offSpool.toFixed(2)+' / '+TOTAL_LINE.toFixed(0)+' m'],
     ['GUIDE SLIP',(slipOut*100).toFixed(1)+' cm/f'],
+    ['LINE PEAK',M.lineVmax.toFixed(1)+' m/s  '+M.lineVwhere],
     ['SPOOL SLIP',(spoolOut*100).toFixed(1)+' cm/f'],
     ['LEFT HAND',HANDTXT[handMode]+(rodPinch?' / CORK':'')],
     ['GUIDE WRAP',(wrapTotal*180/Math.PI).toFixed(0)+'\u00B0'],
@@ -2426,6 +2515,7 @@ function drawRec(){
   };
   btn(RB.rec,REC.recording?'STOP':'RECORD',REC.recording,false);
   btn(RB.play,REC.play?'PAUSE':'PLAY',REC.play,!n);
+  btn(RB.share,'SHARE',false,!n);
   btn(RB.clr,'CLEAR',false,!n);
   btn(RB.close,'CLOSE',false,false);
 
@@ -2452,7 +2542,7 @@ function drawRec(){
     c.fillText('press RECORD, make a cast, press STOP',RTL.x+8,RTL.y+18);
   }
   c.font='400 12px "Space Mono",monospace';c.fillStyle='#7d8b8c';
-  c.fillText('Drag the green handles to trim. The ghost follows as you drag.',
+  c.fillText('Trim with the green handles, then SHARE to export the trimmed take.',
              26,RH-18);
   rec.tex.needsUpdate=true;
 }
@@ -2553,6 +2643,7 @@ function menuPointer(trigPressed, trigEdge){
         return true;
       }
       if(inB(RB.play)&&n){REC.play=!REC.play;if(REC.play&&(REC.head<REC.inF||REC.head>=REC.outF))REC.head=REC.inF;return true;}
+      if(inB(RB.share)&&n){recExport();return true;}
       if(inB(RB.clr)){REC.frames.length=0;REC.play=false;REC.recording=false;
         ghostTube.mesh.visible=false;ghostHand.visible=false;say('cleared');return true;}
       if(inB(RB.close)){recOpen=false;rec.mesh.visible=false;return true;}
@@ -3256,6 +3347,26 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uTime.value=simTime;
   waterMat.uniforms.uUseGrid.value=(P.waterModel>0.5&&gridTex)?1:0;
   waterMat.uniforms.uFlow.value=gridTex;
+
+  /* Fastest-moving point on the line, and which section it is in. Exists so a
+     visible jump can be reported as a number instead of a description -- and
+     so it is obvious whether a jump sits at the tiptop, the stripper, the
+     hand, or out in the belly (where fast motion is legitimate: line in a
+     rolling loop really does travel about twice rod-tip speed). */
+  {
+    let mv=0,mi=0;
+    for(let i=0;i<nAct;i++){
+      const p=i*3, v=vel[p]*vel[p]+vel[p+1]*vel[p+1]+vel[p+2]*vel[p+2];
+      if(v>mv){mv=v;mi=i;}
+    }
+    M.lineVmax=Math.sqrt(mv); M.lineVnode=mi;
+    const iT=idxAt(lineOut), iS=idxAt(lineOut+rodArc);
+    const iH=(handHeld&&handIdx>0)?idxAt(grabArc):-99;
+    M.lineVwhere = Math.abs(mi-iH)<3 ? 'HAND'
+                 : Math.abs(mi-iT)<3 ? 'TIP'
+                 : Math.abs(mi-iS)<3 ? 'STRIPPER'
+                 : mi>iS ? 'pool' : 'belly';
+  }
 
   /* recorder */
   if(REC.recording) recPush();
