@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08f</title>
+<title>Flycast — v8 one line — build 2026-08-08g</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08f</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08g</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -1365,22 +1365,77 @@ const FOGC=new THREE.Color(0xb9c8c4);
 scene.fog=new THREE.FogExp2(FOGC.getHex(),0.0070*P.fogAmt);
 
 const SKY_LO=new THREE.Color(0xc9d3cb), SKY_HI=new THREE.Color(0x4a7ba6);
-scene.add(new THREE.Mesh(new THREE.SphereGeometry(200,24,16),new THREE.ShaderMaterial({
+/* Mountains, cloud deck and sun are all fragment-shader work on the sky sphere
+   that already existed. Zero extra draw calls and zero triangles: a distant
+   ridge is a function of compass bearing, not geometry, and nothing in the
+   valley is ever going to occlude it. */
+const skyMat=new THREE.ShaderMaterial({
   side:THREE.BackSide,depthWrite:false,
   uniforms:{uLo:{value:SKY_LO},uHi:{value:SKY_HI},
-            uSun:{value:SUN_DIR},uGlint:{value:P.skyGlint}},
+            uSun:{value:SUN_DIR},uGlint:{value:P.skyGlint},uTime:{value:0},
+            uHaze:{value:FOGC}},
   vertexShader:`varying vec3 vDir;void main(){vDir=normalize(position);
     gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-  fragmentShader:`uniform vec3 uLo,uHi,uSun;uniform float uGlint;varying vec3 vDir;
+  fragmentShader:`
+    uniform vec3 uLo,uHi,uSun,uHaze;uniform float uGlint,uTime;varying vec3 vDir;
+    float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+    float vnoise(vec2 p){
+      vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+      return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),
+                 mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);
+    }
+    float fbm(vec2 p){
+      float v=0.0,a=0.5;
+      for(int i=0;i<5;i++){v+=vnoise(p)*a;p*=2.03;a*=0.5;}
+      return v;
+    }
+    /* a ridgeline is just a height as a function of bearing */
+    float ridge(float az,float seed,float sc){
+      return sin(az*2.1+seed)*0.34+sin(az*4.7+seed*1.7)*0.22
+            +sin(az*9.3+seed*2.9)*0.12+sin(az*17.0+seed*3.7)*0.06
+            +fbm(vec2(az*2.4+seed,seed))*0.55;
+    }
     void main(){
       vec3 c=mix(uLo,uHi,smoothstep(-0.10,0.70,vDir.y));
-      /* horizon warms slightly and the sun gets a soft bloom, so the surface
-         has something worth reflecting */
-      c=mix(c,vec3(0.86,0.84,0.76),smoothstep(0.14,-0.06,vDir.y)*0.55);
+      c=mix(c,vec3(0.86,0.84,0.76),smoothstep(0.16,-0.06,vDir.y)*0.55);
+
+      /* cloud deck: fbm on the direction projected onto a high plane, so it
+         converges toward the horizon the way real cloud does. Two layers
+         drifting at different speeds gives depth for one extra fbm. */
+      if(vDir.y>0.02){
+        vec2 cp=vDir.xz/(vDir.y+0.25);
+        float d1=fbm(cp*0.62+vec2(uTime*0.0045,uTime*0.0016));
+        float d2=fbm(cp*1.45-vec2(uTime*0.0080,0.0));
+        float cov=smoothstep(0.52,0.86,d1*0.72+d2*0.34);
+        cov*=smoothstep(0.02,0.30,vDir.y);
+        /* lit tops, shaded bases */
+        float lit=smoothstep(0.45,0.95,d1);
+        vec3 cloud=mix(vec3(0.62,0.65,0.69),vec3(1.0,0.99,0.96),lit);
+        c=mix(c,cloud,cov*0.90);
+      }
+
+      /* two ridgelines: a far range washed almost to haze, a nearer darker one */
+      float az=atan(vDir.z,vDir.x);
+      float far=0.055+ridge(az,0.0,1.0)*0.045;
+      float near=0.030+ridge(az,4.2,1.0)*0.030;
+      if(vDir.y<far){
+        float shade=smoothstep(far,far-0.16,vDir.y);
+        vec3 mtn=mix(vec3(0.52,0.57,0.62),vec3(0.30,0.36,0.40),shade);
+        /* snow on the tops of the far range */
+        mtn=mix(mtn,vec3(0.93,0.95,0.97),smoothstep(0.085,0.115,vDir.y)*0.8);
+        c=mix(c,mix(mtn,uHaze,0.55),smoothstep(far+0.004,far-0.004,vDir.y));
+      }
+      if(vDir.y<near){
+        float shade=smoothstep(near,near-0.10,vDir.y);
+        vec3 mtn=mix(vec3(0.34,0.40,0.35),vec3(0.19,0.25,0.21),shade);
+        c=mix(c,mix(mtn,uHaze,0.28),smoothstep(near+0.003,near-0.003,vDir.y));
+      }
+
       float s=max(dot(vDir,normalize(uSun)),0.0);
       c+=vec3(1.0,0.94,0.80)*(pow(s,220.0)*0.9+pow(s,14.0)*0.10)*uGlint;
       gl_FragColor=vec4(c,1.0);
-      #include <colorspace_fragment>}`})));
+      #include <colorspace_fragment>}`});
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(200,32,20),skyMat));
 
 const GLSL_SURF=`
 float surfY(float x){
@@ -1466,10 +1521,35 @@ function placeObstacles(){
 }
 placeObstacles();
 
+/* Concatenate a few transformed geometries into one buffer. Three ships this
+   as BufferGeometryUtils, but importing a second module would mean a second
+   CDN fetch on a headset that may be on hotel wifi — and this is twenty lines. */
+function mergeGeos(parts){
+  const outP=[],outN=[],outC=[],outU=[];
+  for(const {geo,mat,col,flat} of parts){
+    const g=geo.index?geo.toNonIndexed():geo.clone();
+    if(mat) g.applyMatrix4(mat);
+    if(flat!==false) g.computeVertexNormals();
+    const pa=g.attributes.position, na=g.attributes.normal, ua=g.attributes.uv;
+    for(let i=0;i<pa.count;i++){
+      outP.push(pa.getX(i),pa.getY(i),pa.getZ(i));
+      outN.push(na.getX(i),na.getY(i),na.getZ(i));
+      outC.push(col.r,col.g,col.b);
+      outU.push(ua?ua.getX(i):0, ua?ua.getY(i):0);
+    }
+  }
+  const out=new THREE.BufferGeometry();
+  out.setAttribute('position',new THREE.Float32BufferAttribute(outP,3));
+  out.setAttribute('normal',new THREE.Float32BufferAttribute(outN,3));
+  out.setAttribute('color',new THREE.Float32BufferAttribute(outC,3));
+  out.setAttribute('uv',new THREE.Float32BufferAttribute(outU,2));
+  return out;
+}
+
 /* Bank growth. One InstancedMesh, so the entire bank is a single draw call no
    matter how dense it is — geometry was never the constraint here, draw calls
    and CPU are. A tuft is three crossed blades; at distance that reads as scrub. */
-const GRASS_N=900;
+const GRASS_N=520;
 let grassMesh=null;
 {
   const blade=[];
@@ -1492,7 +1572,8 @@ let grassMesh=null;
   scene.add(grassMesh);
 }
 const _gM=new THREE.Matrix4(),_gQ=new THREE.Quaternion(),_gP=new THREE.Vector3(),
-      _gS=new THREE.Vector3(),_gC=new THREE.Color();
+      _gS=new THREE.Vector3(),_gC=new THREE.Color(),_gAxis=new THREE.Vector3(0,1,0),
+      _treeE=new THREE.Euler();
 const GRASS_SEED=[];
 for(let i=0;i<GRASS_N;i++)
   GRASS_SEED.push({x:(Math.random()*2-1)*44,side:Math.random()<0.5?-1:1,
@@ -1521,6 +1602,129 @@ function placeGrass(){
   if(grassMesh.instanceColor) grassMesh.instanceColor.needsUpdate=true;
 }
 placeGrass();
+
+/* ── TREES ────────────────────────────────────────────────────────────────
+   Two species, each merged down to a single geometry and drawn as one
+   InstancedMesh: a conifer of stacked cones, and a broadleaf of overlapping
+   spheres. 250 trees costs two draw calls. Placement respects the bed, keeps
+   clear of the water, and thins toward the near bank so nothing grows where
+   you are about to false-cast. */
+const TREE_N=250;
+let coniferMesh=null,broadMesh=null;
+{
+  const bark=new THREE.Color(0x4a3a2a), barkL=new THREE.Color(0x5e4a34);
+  const dark=new THREE.Color(0x24401f), mid=new THREE.Color(0x2f5227);
+  const conP=[];
+  conP.push({geo:new THREE.CylinderGeometry(0.055,0.085,1.5,6),
+    mat:new THREE.Matrix4().makeTranslation(0,0.75,0),col:bark});
+  const tiers=[[1.05,0.95,1.15],[0.78,0.80,1.85],[0.52,0.70,2.45],[0.28,0.55,2.95]];
+  for(let i=0;i<tiers.length;i++){
+    const [r,h,y]=tiers[i];
+    conP.push({geo:new THREE.ConeGeometry(r,h,8),
+      mat:new THREE.Matrix4().makeTranslation(0,y,0),
+      col:dark.clone().lerp(mid,i/3)});
+  }
+  const conGeo=mergeGeos(conP);
+
+  const brP=[];
+  brP.push({geo:new THREE.CylinderGeometry(0.06,0.10,1.35,6),
+    mat:new THREE.Matrix4().makeTranslation(0,0.68,0),col:barkL});
+  const blobs=[[0.95,0,2.05,0],[0.62,-0.62,1.75,0.2],[0.58,0.66,1.80,-0.15],
+               [0.55,0.10,2.70,0.1],[0.46,0.30,1.45,0]];
+  const leaf=new THREE.Color(0x3d6b30), leafL=new THREE.Color(0x5b8a3c);
+  for(let i=0;i<blobs.length;i++){
+    const [r,dx,y,dz]=blobs[i];
+    brP.push({geo:new THREE.SphereGeometry(r,7,5),
+      mat:new THREE.Matrix4().makeTranslation(dx,y,dz),
+      col:leaf.clone().lerp(leafL,(i%3)/2)});
+  }
+  const brGeo=mergeGeos(brP);
+
+  const tm=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.92,flatShading:true});
+  coniferMesh=new THREE.InstancedMesh(conGeo,tm,TREE_N);
+  broadMesh  =new THREE.InstancedMesh(brGeo, tm,TREE_N);
+  coniferMesh.frustumCulled=false;broadMesh.frustumCulled=false;
+  scene.add(coniferMesh);scene.add(broadMesh);
+}
+const TREE_SEED=[];
+for(let i=0;i<TREE_N;i++)
+  TREE_SEED.push({x:(Math.random()*2-1)*52,side:Math.random()<0.5?-1:1,
+    off:2.2+Math.pow(Math.random(),0.55)*15.0,yaw:Math.random()*6.28,
+    sc:0.70+Math.random()*1.5,conifer:Math.random()<0.62,lean:(Math.random()-0.5)*0.10});
+function placeTrees(){
+  if(!coniferMesh) return;
+  const n=Math.round(TREE_N*Math.max(0,Math.min(1,P.bankGrass)));
+  let ci=0,bi=0;
+  for(let i=0;i<TREE_N;i++){
+    const s=TREE_SEED[i];
+    const z=CZ+s.side*(HALFW+s.off);
+    const y=bedY(s.x,z);
+    const ok=i<n&&y>surfY(s.x)+0.06;
+    _gP.set(s.x,y-0.05,z);
+    _gQ.setFromEuler(_treeE.set(s.lean,s.yaw,s.lean*0.7,'YXZ'));
+    _gS.setScalar(ok?s.sc:0.0001);
+    _gM.compose(_gP,_gQ,_gS);
+    if(s.conifer){ if(ci<TREE_N) coniferMesh.setMatrixAt(ci++,_gM); }
+    else         { if(bi<TREE_N) broadMesh.setMatrixAt(bi++,_gM); }
+  }
+  _gS.setScalar(0.0001);_gP.set(0,-999,0);_gQ.identity();_gM.compose(_gP,_gQ,_gS);
+  for(let k=ci;k<TREE_N;k++) coniferMesh.setMatrixAt(k,_gM);
+  for(let k=bi;k<TREE_N;k++) broadMesh.setMatrixAt(k,_gM);
+  coniferMesh.instanceMatrix.needsUpdate=true;
+  broadMesh.instanceMatrix.needsUpdate=true;
+}
+
+/* ── LOOSE ROCK ───────────────────────────────────────────────────────────
+   Scatter along both banks and a handful standing in shallow water. These are
+   decoration only — they are deliberately NOT added to OBST, because OBST is
+   bed elevation fed into the shallow-water solver and adding to it would move
+   the flow field the whole calibration sits on. */
+const ROCK_N=180;
+let rockMesh=null;
+{
+  const g=new THREE.SphereGeometry(1,7,5),pa=g.attributes.position;
+  for(let i=0;i<pa.count;i++){
+    const x=pa.getX(i),y=pa.getY(i),z=pa.getZ(i);
+    const n=1+Math.sin(x*4.7)*0.16+Math.sin(y*5.9+z*3.1)*0.19+Math.sin(z*6.3)*0.11;
+    pa.setXYZ(i,x*n,y*n*0.62,z*n);
+  }
+  g.computeVertexNormals();
+  rockMesh=new THREE.InstancedMesh(g,
+    new THREE.MeshStandardMaterial({roughness:0.94,flatShading:true}),ROCK_N);
+  rockMesh.frustumCulled=false;scene.add(rockMesh);
+}
+const ROCK_SEED=[];
+for(let i=0;i<ROCK_N;i++){
+  const inRiver=i<44;
+  ROCK_SEED.push({inRiver,x:(Math.random()*2-1)*(inRiver?26:46),
+    side:Math.random()<0.5?-1:1,
+    off:inRiver?Math.random()*0.92:0.15+Math.pow(Math.random(),0.6)*7.0,
+    yaw:Math.random()*6.28,r:(inRiver?0.10:0.07)+Math.pow(Math.random(),1.7)*(inRiver?0.30:0.34),
+    tone:Math.random()});
+}
+function placeRocks(){
+  if(!rockMesh) return;
+  for(let i=0;i<ROCK_N;i++){
+    const s=ROCK_SEED[i];
+    const z=s.inRiver?CZ+s.side*HALFW*s.off:CZ+s.side*(HALFW+s.off);
+    const y=bedY(s.x,z);
+    /* in-river rock only where it will actually break or dimple the surface */
+    const sub=surfY(s.x)-y;
+    const ok=s.inRiver?(sub<s.r*1.9&&sub>-0.05):(y>surfY(s.x)-0.05);
+    _gP.set(s.x,y+s.r*0.34,z);
+    _gQ.setFromAxisAngle(_gAxis.set(0,1,0),s.yaw);
+    _gS.set(s.r,s.r*(0.62+s.tone*0.35),s.r*(0.82+s.tone*0.3));
+    if(!ok) _gS.setScalar(0.0001);
+    _gM.compose(_gP,_gQ,_gS);
+    rockMesh.setMatrixAt(i,_gM);
+    const wet=s.inRiver?0.55:0.0;
+    _gC.setHSL(0.09+s.tone*0.05,0.06+s.tone*0.05,(0.30+s.tone*0.20)*(1-wet*0.45));
+    rockMesh.setColorAt(i,_gC);
+  }
+  rockMesh.instanceMatrix.needsUpdate=true;
+  if(rockMesh.instanceColor) rockMesh.instanceColor.needsUpdate=true;
+}
+placeTrees();placeRocks();
 
 /* A tiling ripple normal map, generated rather than downloaded — it keeps the
    whole game a single file with no binary assets and no cache-busting. Four
@@ -1885,42 +2089,62 @@ const troutMaps=(()=>{
 
   /* the pink lateral stripe, brightest at the gill plate and fading to the tail */
   for(const cv of [0.25,0.75]){
-    const y=cv*H,lg=g.createLinearGradient(0,y-30,0,y+30);
-    lg.addColorStop(0,'rgba(198,86,110,0)');
-    lg.addColorStop(0.5,'rgba(212,96,120,0.78)');
-    lg.addColorStop(1,'rgba(198,86,110,0)');
+    const y=cv*H,lg=g.createLinearGradient(0,y-42,0,y+42);
+    lg.addColorStop(0,'rgba(196,80,96,0)');
+    lg.addColorStop(0.30,'rgba(206,74,84,0.52)');
+    lg.addColorStop(0.5,'rgba(222,74,80,0.88)');
+    lg.addColorStop(0.70,'rgba(206,74,84,0.52)');
+    lg.addColorStop(1,'rgba(196,80,96,0)');
     const hg=g.createLinearGradient(60,0,W,0);
     hg.addColorStop(0,'rgba(255,255,255,1)');hg.addColorStop(1,'rgba(255,255,255,0)');
-    g.save();g.fillStyle=lg;g.fillRect(60,y-30,W-60,60);g.restore();
+    g.save();g.fillStyle=lg;g.fillRect(60,y-42,W-60,84);g.restore();
     g.save();g.globalCompositeOperation='destination-out';g.restore();
   }
 
-  /* spots: dense and small along the back, sparse and haloed down the flank */
-  for(let i=0;i<2600;i++){
-    const v=Math.random(),dB=Math.abs(v-0.5);
-    if(dB<0.13)continue;
-    if(Math.random()>(dB-0.11)*3.1)continue;
-    const x=40+Math.random()*(W-60),y=v*H;
-    const r=(dB>0.34?0.9:1.6)+Math.random()*(dB>0.34?2.2:3.4);
-    g.globalAlpha=0.30+Math.random()*0.50;
-    if(dB<0.30){
-      const hl=g.createRadialGradient(x,y,r*0.5,x,y,r*2.3);
-      hl.addColorStop(0,'rgba(30,42,28,0.85)');hl.addColorStop(1,'rgba(210,214,200,0)');
-      g.fillStyle=hl;g.beginPath();g.arc(x,y,r*2.3,0,Math.PI*2);g.fill();
+  /* Spotting on a rainbow is far heavier than the old pass allowed: small and
+     crowded over the back, continuing right down over the lateral band and
+     onto the caudal peduncle, thinning only on the belly. Density also rises
+     toward the tail, which is what makes the rear third read as a trout. */
+  for(let i=0;i<7200;i++){
+    const v=Math.random(),dB=Math.abs(v-0.5),u=Math.random();
+    if(dB<0.055)continue;                             /* clean belly         */
+    const rear=0.42+0.58*u;                           /* denser aft          */
+    const vertical=Math.min(1,(dB-0.045)*4.2);
+    if(Math.random()>vertical*rear)continue;
+    const x=52+u*(W-70),y=v*H;
+    const r=(dB>0.33?0.8:1.25)+Math.random()*(dB>0.33?1.9:2.4);
+    g.globalAlpha=0.42+Math.random()*0.48;
+    if(dB<0.34){
+      const hl=g.createRadialGradient(x,y,r*0.55,x,y,r*2.1);
+      hl.addColorStop(0,'rgba(24,34,22,0.80)');hl.addColorStop(1,'rgba(206,210,196,0)');
+      g.fillStyle=hl;g.beginPath();g.arc(x,y,r*2.1,0,Math.PI*2);g.fill();
     }
-    g.fillStyle='#1d2a1b';
-    g.beginPath();g.ellipse(x,y,r,r*0.82,0,0,Math.PI*2);g.fill();
-    bump(x,y,r*1.6,-0.35);
+    g.fillStyle=dB>0.36?'#141d12':'#232f1e';
+    g.beginPath();g.ellipse(x,y,r,r*0.80,Math.random()*1.5,0,Math.PI*2);g.fill();
+    bump(x,y,r*1.5,-0.30);
   }
   g.globalAlpha=1;
 
-  /* gill plate iridescence */
+  /* The gill plate. On a coloured-up rainbow this is the loudest thing on the
+     fish — a hot red-orange cheek, brighter than the lateral band and sharply
+     bounded at the operculum. */
   for(const cv of [0.25,0.75]){
-    const gg=g.createRadialGradient(52,H*cv,3,52,H*cv,70);
-    gg.addColorStop(0,'rgba(212,110,124,0.60)');
-    gg.addColorStop(0.45,'rgba(158,176,190,0.28)');
-    gg.addColorStop(1,'rgba(203,96,110,0)');
-    g.fillStyle=gg;g.fillRect(0,0,190,H);
+    const y=H*cv;
+    const gg=g.createRadialGradient(64,y,4,64,y,104);
+    gg.addColorStop(0,'rgba(214,58,44,0.94)');
+    gg.addColorStop(0.34,'rgba(198,64,58,0.80)');
+    gg.addColorStop(0.68,'rgba(176,96,102,0.34)');
+    gg.addColorStop(1,'rgba(190,90,96,0)');
+    g.fillStyle=gg;g.beginPath();g.ellipse(64,y,104,74,0,0,Math.PI*2);g.fill();
+    /* operculum edge */
+    g.strokeStyle='rgba(70,78,74,0.42)';g.lineWidth=3;
+    g.beginPath();g.ellipse(40,y,86,70,0,-1.15,1.15);g.stroke();
+    /* silver sheen over the top of it */
+    const sh=g.createLinearGradient(0,y-60,0,y+60);
+    sh.addColorStop(0,'rgba(196,208,214,0.30)');
+    sh.addColorStop(0.5,'rgba(226,232,232,0.10)');
+    sh.addColorStop(1,'rgba(196,208,214,0.28)');
+    g.fillStyle=sh;g.fillRect(0,y-60,150,120);
   }
 
   /* scale rows: a diagonal lattice, relief only, no paint — paint at this pitch
@@ -1992,15 +2216,35 @@ function makeSwimMaterial(){
 }
 const SWIM={amp:0,spd:0};
 function swimPhase(mat,t){ return Math.sin(1.0*7.0-t*mat.userData.u.uSpd.value+mat.userData.u.uPh.value); }
-const finMat=new THREE.MeshStandardMaterial({color:0x74805f,roughness:0.7,
-  transparent:true,opacity:0.9,side:THREE.DoubleSide});
+/* Fins on a rainbow carry the same spotting the back does, and are thin enough
+   to pass light. A tiny canvas gets both for one texture. */
+const finTex=(()=>{
+  const S=128,cv=document.createElement('canvas');cv.width=S;cv.height=S;
+  const g=cv.getContext('2d');
+  const bg=g.createLinearGradient(0,0,S,S);
+  bg.addColorStop(0,'#7d8763');bg.addColorStop(0.55,'#6a7455');bg.addColorStop(1,'#4d5740');
+  g.fillStyle=bg;g.fillRect(0,0,S,S);
+  g.strokeStyle='rgba(40,48,36,0.40)';g.lineWidth=1.4;
+  for(let i=0;i<16;i++){                       /* fin rays */
+    g.beginPath();g.moveTo(S*0.5,S);g.lineTo((i/15)*S*1.4-S*0.2,0);g.stroke();}
+  g.fillStyle='#1b2417';
+  for(let i=0;i<150;i++){
+    g.globalAlpha=0.35+Math.random()*0.45;
+    const x=Math.random()*S,y=Math.random()*S,r=0.8+Math.random()*1.8;
+    g.beginPath();g.ellipse(x,y,r,r*0.85,0,0,Math.PI*2);g.fill();}
+  g.globalAlpha=1;
+  const t=new THREE.CanvasTexture(cv);t.colorSpace=THREE.SRGBColorSpace;return t;
+})();
+const finMat=new THREE.MeshStandardMaterial({map:finTex,vertexColors:true,
+  roughness:0.62,transparent:true,opacity:0.92,side:THREE.DoubleSide});
+/* body profile, shared by the mesh and by anything that has to sit ON the mesh */
+const prof=t=>{
+  const base=Math.pow(Math.sin(Math.PI*Math.min(1,t*0.99+0.01)),0.62);
+  const ped=t>0.78?1-((t-0.78)/0.22)*0.78:1;
+  return base*ped;
+};
 function troutGeometry(){
-  const NX=26,NR=12,p=[],uv=[],idx=[];
-  const prof=t=>{
-    const base=Math.pow(Math.sin(Math.PI*Math.min(1,t*0.99+0.01)),0.62);
-    const ped=t>0.78?1-((t-0.78)/0.22)*0.78:1;
-    return base*ped;
-  };
+  const NX=30,NR=14,p=[],uv=[],idx=[];
   for(let i=0;i<=NX;i++){
     const t=i/NX,h=0.125*prof(t),w=h*0.52,cx=(t-0.5)*1.0;
     for(let j=0;j<=NR;j++){
@@ -2008,8 +2252,14 @@ function troutGeometry(){
       p.push(cx,Math.cos(a)*h,Math.sin(a)*w);uv.push(t,j/NR);
     }
   }
+  /* WINDING. This was (a,c,b) / (b,c,d), which winds every face INWARD:
+     cross(alongBody, aroundBody) points at the axis, not away from it. So
+     computeVertexNormals() produced inward normals, the near wall of the body
+     was backface-culled, and what you actually saw was the inside of the FAR
+     wall — the texture apparently painted on the back of the fish, with the
+     near eye floating in clear space in front of nothing. */
   for(let i=0;i<NX;i++)for(let j=0;j<NR;j++){
-    const a=i*(NR+1)+j,b=a+1,c=a+NR+1,d=c+1;idx.push(a,c,b,b,c,d);}
+    const a=i*(NR+1)+j,b=a+1,c=a+NR+1,d=c+1;idx.push(a,b,c,b,d,c);}
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
   g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
@@ -2029,20 +2279,42 @@ function makeTrout(len){
   const tailPivot=new THREE.Group();tailPivot.position.x=0.485;
   tailPivot.add(new THREE.Mesh(finShape([[0,0],[0.13,0.115],[0.085,0],[0.13,-0.115],[0,0]]),finMat));
   g.add(tailPivot);g.userData.tail=tailPivot;
-  const dorsal=new THREE.Mesh(finShape([[-0.05,0],[0.02,0.085],[0.07,0]]),finMat);
-  dorsal.rotation.y=Math.PI/2;dorsal.position.set(0.02,0.10,0);g.add(dorsal);
-  const adipose=new THREE.Mesh(finShape([[-0.02,0],[0,0.032],[0.025,0]]),finMat);
-  adipose.rotation.y=Math.PI/2;adipose.position.set(0.33,0.072,0);g.add(adipose);
-  const anal=new THREE.Mesh(finShape([[-0.03,0],[0.01,-0.06],[0.05,0]]),finMat);
-  anal.rotation.y=Math.PI/2;anal.position.set(0.24,-0.075,0);g.add(anal);
+  /* Every fin that does not animate goes into ONE geometry, and so do all four
+     eye parts. Four fish at eleven meshes each was 44 draw calls, which put the
+     scene at the very bottom of the Quest 2 budget; this is 16. Only the tail
+     stays separate, because it is the one piece that moves on its own. */
+  const WHITE=new THREE.Color(0xffffff);
+  const finParts=[];
+  const place=(shape,px,py,pz,rx,ry,rz)=>{
+    const m4=new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx,ry,rz,'XYZ'));
+    m4.setPosition(px,py,pz);
+    finParts.push({geo:shape,mat:m4,col:WHITE});
+  };
+  place(finShape([[-0.05,0],[0.02,0.085],[0.07,0]]),   0.02, 0.100,0,      0,Math.PI/2,0);
+  place(finShape([[-0.02,0],[0,0.032],[0.025,0]]),     0.33, 0.072,0,      0,Math.PI/2,0);
+  place(finShape([[-0.03,0],[0.01,-0.06],[0.05,0]]),   0.24,-0.075,0,      0,Math.PI/2,0);
+  place(finShape([[-0.02,0],[0.02,-0.045],[0.06,0]]),  0.05,-0.082,0,      0,Math.PI/2,0);
   for(const s of [1,-1]){
-    const pec=new THREE.Mesh(finShape([[0,0],[0.07,-0.045],[0.09,0.01]]),finMat);
-    pec.position.set(-0.24,-0.03,0.055*s);pec.rotation.x=s*0.5;pec.rotation.z=-0.2;g.add(pec);
+    place(finShape([[0,0],[0.07,-0.045],[0.09,0.01]]),-0.24,-0.030,0.055*s, s*0.5,0,-0.2);
+    place(finShape([[0,0],[0.045,-0.030],[0.06,0.008]]),-0.06,-0.088,0.040*s, s*0.7,0,-0.1);
   }
-  const eyeMat=new THREE.MeshStandardMaterial({color:0x11140f,roughness:0.2});
-  const eye=new THREE.Mesh(new THREE.SphereGeometry(0.014,6,5),eyeMat);
-  eye.position.set(-0.40,0.028,0.042);g.add(eye);
-  const eye2=eye.clone();eye2.position.z=-0.042;g.add(eye2);
+  g.add(new THREE.Mesh(mergeGeos(finParts),finMat));
+  /* The eye was at z=0.042 where the body is only 0.033 half-wide, so it hung
+     9 mm clear of the skin. Take the station from the same profile the body is
+     built from, and it sits in the socket at any length. */
+  const eyeT=0.115, eyeH=0.125*prof(eyeT), eyeW=eyeH*0.52;
+  const IRIS=new THREE.Color(0xb9963f), PUPIL=new THREE.Color(0x0b1410);
+  const eyeParts=[];
+  for(const s of [1,-1]){
+    const mi=new THREE.Matrix4().makeScale(1,1,0.62);
+    mi.setPosition(eyeT-0.5,eyeH*0.40,eyeW*0.80*s);
+    eyeParts.push({geo:new THREE.SphereGeometry(eyeH*0.20,8,6),mat:mi,col:IRIS});
+    const mp=new THREE.Matrix4().makeScale(1,1,0.60);
+    mp.setPosition(eyeT-0.5-0.004,eyeH*0.40,eyeW*0.90*s);
+    eyeParts.push({geo:new THREE.SphereGeometry(eyeH*0.115,7,5),mat:mp,col:PUPIL});
+  }
+  g.add(new THREE.Mesh(mergeGeos(eyeParts),
+    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.14,metalness:0.30})));
   g.rotation.order='YZX';        /* yaw, then pitch, then roll */
   g.scale.setScalar(len);return g;
 }
@@ -2068,6 +2340,8 @@ class Trout{
     this.feedT=4+Math.random()*8;
     this.riseT=1+Math.random()*5;this.riseAnim=0;this.evaluated=false;
     this.riseKind=0;this.riseDur=1;this.riseDir=new THREE.Vector2(1,0);
+    this.strikeT=0;this.strikeDur=0.6;this.strikeFrom=new THREE.Vector3();
+    this.strikePrev=new THREE.Vector3();this.broke=false;this.strikeHead=0;
     this.risePitch=0;this.riseRoll=0;this.riseMark=0;
     this.held=false;this.inspect=new THREE.Quaternion();
     this.run=new THREE.Vector3(-1,0,0);this.runT=0;
@@ -2139,6 +2413,25 @@ class Trout{
             roll:Math.sin(u*4.5)*0.40,
             marks:[{u:0.34,r:1.35,splash:3.4},{u:0.72,r:0.95,splash:2.2}]};
   }
+  /* A take is a MOVE, not a teleport. The fish leaves its lie, swims to where
+     the fly actually is, and takes it there — so the hookup happens at the fly
+     rather than the fly snapping back to a fish that never went anywhere.
+     Nothing is hooked until contact, or the line would load while the fish is
+     still three feet away. */
+  beginStrike(){
+    this.state='striking';
+    this.strikeT=0;this.broke=false;this.riseMark=0;
+    this.strikeFrom.copy(this.p);this.strikePrev.copy(this.p);
+    const d=Math.hypot(pos[0]-this.p.x,pos[2]-this.p.z);
+    const a=Math.max(0,Math.min(1,P.riseAggro))*(0.75+0.55*Math.min(1,this.len/0.42));
+    const r=Math.random();
+    this.riseKind=r<Math.max(0,0.92-a*1.25)?0:(r<Math.max(0,0.99-a*0.62)?1:2);
+    /* a sip is a slow deliberate drift up; a slash is a charge */
+    const spd=this.riseKind===0?0.75:this.riseKind===1?1.45:3.10;
+    this.strikeDur=Math.max(0.20,Math.min(1.8,d/spd+0.14));
+    say(this.riseKind===0?'he\u2019s coming up\u2026':
+        this.riseKind===1?'head and tail\u2026':'he\u2019s charging it');
+  }
   bodyMass(){ return 0.30*Math.pow(this.len/0.30,3); }
   /* A hooked fish is its own rigid body, NOT a heavy node on the line.
      Hanging 0.7 kg off a 1.5 microgram tippet node is a 60,000:1 mass ratio and
@@ -2208,7 +2501,40 @@ class Trout{
       const deep=surfY(this.p.x)-0.95;
       this.p.y+=(deep-this.p.y)*Math.min(1,dt*1.5);
       if(this.timer<=0)this.reseat();
-    } else if(this.state==='landed'){
+    } else if(this.state==='striking'){
+      /* if the fly is picked up mid-move he does not follow it into the air */
+      if(pos[1]>filmY(pos[0],pos[2],t)+0.22){
+        this.state='holding';this.evaluated=true;
+        this.risePitch=0;this.riseRoll=0;say('he came for it and missed');
+      }
+      this.strikeT+=dt;
+      const u=Math.max(0,Math.min(1,this.strikeT/this.strikeDur));
+      /* a sip eases in and out, a slash accelerates the whole way */
+      const e=this.riseKind===2?u*u*(2.0-u):(u*u*(3-2*u));
+      const fx=pos[0],fy=pos[1],fz=pos[2];
+      this.strikePrev.copy(this.p);
+      this.p.x=this.strikeFrom.x+(fx-this.strikeFrom.x)*e;
+      this.p.z=this.strikeFrom.z+(fz-this.strikeFrom.z)*e;
+      /* rise more slowly than it closes horizontally, so it comes up UNDER the
+         fly and arrives from below the way a trout does */
+      this.p.y=this.strikeFrom.y+(fy-this.strikeFrom.y)*Math.pow(e,0.66);
+      /* pitch straight off the path it is actually taking */
+      const vx=this.p.x-this.strikePrev.x, vy=this.p.y-this.strikePrev.y,
+            vz=this.p.z-this.strikePrev.z;
+      const hz=Math.hypot(vx,vz);
+      if(hz+Math.abs(vy)>1e-5){
+        const want=Math.atan2(vy,Math.max(hz,1e-4))*0.80;
+        this.risePitch+=(want-this.risePitch)*Math.min(1,dt*16);
+        this.strikeHead=Math.atan2(vz,-vx);
+      }
+      this.riseRoll+=((this.riseKind===2?Math.sin(u*7)*0.30:0)-this.riseRoll)*Math.min(1,dt*10);
+      /* break the film once, on the way through */
+      if(!this.broke&&this.p.y>filmY(this.p.x,this.p.z,t)-0.012){
+        this.broke=true;
+        spawnRing(this.p.x,this.p.z,this.riseKind===2?1.4:this.riseKind===1?1.0:0.6);
+        if(SND.ok){ if(this.riseKind===2) sndSplash(3.6); else sndPlop(); }
+      }
+      if(u>=1) commitStrike(this);
       /* A landed fish floats up in front of you so it can be looked at, and can
          be taken in the left hand and turned over. Pinch to hold, release to
          let it float again. The despawn timer only runs while it is NOT held,
@@ -2283,7 +2609,8 @@ class Trout{
     }
     /* nose is local -X. Holding, a trout points into the current, which runs
        toward +X, so upstream is a heading of zero. */
-    const hd=this.state==='hooked'?Math.atan2(this.v.z,-this.v.x):0;
+    const hd=this.state==='hooked'?Math.atan2(this.v.z,-this.v.x):
+             this.state==='striking'?(this.strikeHead||0):0;
     m.rotation.y+=((hd-m.rotation.y+Math.PI*3)%(Math.PI*2)-Math.PI)*Math.min(1,dt*3);
     /* nose leads the velocity vector. The nose is local -X, so a positive Z
        rotation swings it DOWN — hence the minus. */
@@ -2294,9 +2621,15 @@ class Trout{
     }
     const roll=this.state==='hooked'?Math.sin(t*9)*0.12:Math.sin(t*1.6+this.lie.x)*0.04;
     /* a rise supplies its own pitch, taken from the path tangent in update() */
-    const zTarget=this.riseAnim>0?(-this.risePitch+roll):(-pitch+roll);
-    m.rotation.z+=(zTarget-m.rotation.z)*Math.min(1,dt*(this.riseAnim>0?16:8));
-    m.rotation.x+=((this.riseAnim>0?this.riseRoll:0)-m.rotation.x)*Math.min(1,dt*10);
+    const striking=this.state==='striking';
+    const zTarget=(this.riseAnim>0||striking)?(-this.risePitch+roll):(-pitch+roll);
+    m.rotation.z+=(zTarget-m.rotation.z)*Math.min(1,dt*((this.riseAnim>0||striking)?16:8));
+    m.rotation.x+=(((this.riseAnim>0||striking)?this.riseRoll:0)-m.rotation.x)*Math.min(1,dt*10);
+    if(striking){
+      /* swimming hard: beat faster and wider than a holding fish */
+      const uu=m.userData.swim.userData.u;
+      uu.uSpd.value=this.riseKind===2?11.0:7.0;
+    }
     /* a wet fish clearing the water is close to a mirror, and goes dull again
        within a second of going back under. This is most of what sells a jump. */
     {
@@ -2357,6 +2690,17 @@ function spawnRing(x,z,scale){
   for(const r of ringPool) if(r.t>best.t) best=r;
   best.t=0;best.s=scale||1;best.m.position.set(x,surfY(x)+0.03,z);
 }
+/* Contact. Everything the old take block did at the instant of decision now
+   happens here instead, when the fish has actually reached the fly. */
+function commitStrike(f){
+  f.state='hooked';f.stamina=1;f.runT=0;f.risePitch=0;f.riseRoll=0;hooked=f;
+  f.v.set(0,0,0);f.p.set(pos[0],pos[1],pos[2]);invM[0]=0;
+  const T=(RN-1)*3;
+  lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.6);
+  say('EAT \u2014 he\u2019s on');pulse(1.0);spawnRing(pos[0],pos[2],1.2);
+  if(SND.ok) sndSplash(f.riseKind===2?4.0:2.0);
+}
+
 const zoneGrp=new THREE.Group();scene.add(zoneGrp);
 const zoneRings=[],zoneLanes=[];
 for(let i=0;i<LIES.length;i++){
@@ -2433,7 +2777,13 @@ class RodTube{
     for(let i=0;i<n;i++){
       const t=i/(n-1);
       this.rad[i]=0.0058*(1-0.80*t)+0.0010;
-      const c=new THREE.Color().setHSL(0.09,0.10,0.13+0.05*t);
+      /* deep anodised blue blank, brightening a shade toward the tip, with a
+         pale label section just above the grip the way a real rod carries its
+         model name, and dark thread wraps at the ferrules */
+      const c=new THREE.Color().setHSL(0.565,0.62,0.17+0.10*t);
+      if(t>0.045&&t<0.135) c.setHSL(0.55,0.10,0.72);          /* label wrap  */
+      if(Math.abs(t-0.33)<0.016||Math.abs(t-0.63)<0.016)
+        c.setHSL(0.56,0.35,0.09);                              /* ferrules    */
       for(let j=0;j<R;j++){const k=(i*R+j)*3;col[k]=c.r;col[k+1]=c.g;col[k+2]=c.b;}
     }
     for(let i=0;i<n-1;i++)for(let j=0;j<R;j++){
@@ -2443,7 +2793,8 @@ class RodTube{
     g.setAttribute('normal',new THREE.BufferAttribute(this.nm,3));
     g.setAttribute('color',new THREE.BufferAttribute(col,3));
     g.setIndex(idx);this.geo=g;
-    this.mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.45}));
+    this.mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
+      vertexColors:true,roughness:0.22,metalness:0.30}));
     this.mesh.frustumCulled=false;
   }
   update(src){
@@ -2470,7 +2821,7 @@ class RodTube{
     this.geo.attributes.normal.needsUpdate=true;
   }
 }
-const rodTube=new RodTube(RN,6);scene.add(rodTube.mesh);
+const rodTube=new RodTube(RN,9);scene.add(rodTube.mesh);
 
 /* ── GHOST ROD ─────────────────────────────────────────────────────────────
    Replays a recording of your own rod. Storing the whole rod rather than just
@@ -2623,10 +2974,27 @@ function recShow(i){
   ghostLine.mesh.visible=true;
 }
 
+/* Each guide is a chrome ring, its two wire feet, and the dark thread wrap
+   that holds it on — merged into one geometry so the guide stack still costs
+   eleven draw calls rather than thirty-three. */
 const guideMeshes=[];
+const CHROME=new THREE.Color(0xc6ccc9), THREAD=new THREE.Color(0x14293a);
 for(let g=0;g<NG;g++){
-  const m=new THREE.Mesh(new THREE.TorusGeometry(GUIDE_R[g]*0.55,0.0016,4,10),
-    new THREE.MeshStandardMaterial({color:0x9aa3a0,roughness:0.35,metalness:0.75}));
+  const r=GUIDE_R[g]*0.55, wire=Math.max(0.0011,r*0.075);
+  const parts=[{geo:new THREE.TorusGeometry(r,wire,5,14),
+                mat:new THREE.Matrix4(),col:CHROME}];
+  for(const s of [-1,1]){
+    const foot=new THREE.CylinderGeometry(wire,wire,r*1.7,4);
+    const m4=new THREE.Matrix4().makeRotationZ(s*0.42);
+    m4.setPosition(s*r*0.72,-r*0.85,0);
+    parts.push({geo:foot,mat:m4,col:CHROME});
+    const wrap=new THREE.CylinderGeometry(wire*2.6,wire*2.6,r*0.55,7);
+    const m5=new THREE.Matrix4().makeRotationZ(Math.PI/2);
+    m5.setPosition(s*r*1.30,-r*1.35,0);
+    parts.push({geo:wrap,mat:m5,col:THREAD});
+  }
+  const m=new THREE.Mesh(mergeGeos(parts),
+    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.24,metalness:0.82}));
   scene.add(m);guideMeshes.push(m);
 }
 
@@ -2651,23 +3019,111 @@ flyWake.rotation.x=-Math.PI/2;flyWake.renderOrder=5;scene.add(flyWake);
 const handRig=new THREE.Group();scene.add(handRig);
 const reelLip=new THREE.Object3D();reelLip.position.set(0,-0.076,0.20);
 const corkTop=new THREE.Object3D();corkTop.position.set(0,-0.016,-0.045);
+/* The face of a fly reel is almost all detail and almost no shape — ported
+   frame, spokes, backing showing through, line on the spool. Painting that on
+   a canvas and mapping it to two discs gets the whole thing for two draw calls
+   and no geometry, which is the same trade the trout texture makes. */
+const reelFaceTex=(()=>{
+  const S=512,cv=document.createElement('canvas');cv.width=S;cv.height=S;
+  const g=cv.getContext('2d'),C=S/2;
+  g.clearRect(0,0,S,S);
+  /* machined aluminium frame */
+  const rim=g.createRadialGradient(C*0.7,C*0.7,C*0.1,C,C,C);
+  rim.addColorStop(0,'#e8ecee');rim.addColorStop(0.55,'#aeb6ba');
+  rim.addColorStop(0.86,'#d7dcde');rim.addColorStop(1,'#7d8589');
+  g.fillStyle=rim;g.beginPath();g.arc(C,C,C*0.99,0,7);g.fill();
+  /* turned concentric rings */
+  g.strokeStyle='rgba(255,255,255,0.16)';
+  for(let r=C*0.30;r<C*0.97;r+=C*0.035){
+    g.lineWidth=1.2;g.beginPath();g.arc(C,C,r,0,7);g.stroke();}
+  /* orange backing, then a band of pale green fly line over it */
+  g.fillStyle='#c2521c';g.beginPath();g.arc(C,C,C*0.66,0,7);g.fill();
+  g.strokeStyle='rgba(0,0,0,0.22)';g.lineWidth=2;
+  for(let r=C*0.40;r<C*0.66;r+=4){g.beginPath();g.arc(C,C,r,0,7);g.stroke();}
+  g.fillStyle='#b9cf86';g.beginPath();g.arc(C,C,C*0.52,0,7);g.fill();
+  g.strokeStyle='rgba(255,255,255,0.20)';
+  for(let r=C*0.36;r<C*0.52;r+=3.5){g.beginPath();g.arc(C,C,r,0,7);g.stroke();}
+  /* the ring of ports, cut through to the backing */
+  for(let i=0;i<11;i++){
+    const a=i/11*Math.PI*2, rr=C*0.80;
+    const x=C+Math.cos(a)*rr, y=C+Math.sin(a)*rr;
+    const pg=g.createRadialGradient(x-3,y-3,1,x,y,C*0.115);
+    pg.addColorStop(0,'#3a3f42');pg.addColorStop(0.75,'#1d2225');pg.addColorStop(1,'#6f777b');
+    g.fillStyle=pg;g.beginPath();g.arc(x,y,C*0.115,0,7);g.fill();
+  }
+  /* anodised green spool hub and spokes */
+  g.fillStyle='#2f3a36';g.beginPath();g.arc(C,C,C*0.34,0,7);g.fill();
+  g.strokeStyle='#7fb23a';g.lineWidth=C*0.055;
+  for(let i=0;i<6;i++){
+    const a=i/6*Math.PI*2;
+    g.beginPath();g.moveTo(C+Math.cos(a)*C*0.13,C+Math.sin(a)*C*0.13);
+    g.lineTo(C+Math.cos(a)*C*0.31,C+Math.sin(a)*C*0.31);g.stroke();}
+  const hub=g.createRadialGradient(C-6,C-6,2,C,C,C*0.16);
+  hub.addColorStop(0,'#a8dc5c');hub.addColorStop(0.7,'#6ea22f');hub.addColorStop(1,'#3d6118');
+  g.fillStyle=hub;g.beginPath();g.arc(C,C,C*0.16,0,7);g.fill();
+  /* knurling on the hub */
+  g.strokeStyle='rgba(0,0,0,0.35)';g.lineWidth=1.4;
+  for(let i=0;i<44;i++){
+    const a=i/44*Math.PI*2;
+    g.beginPath();g.moveTo(C+Math.cos(a)*C*0.115,C+Math.sin(a)*C*0.115);
+    g.lineTo(C+Math.cos(a)*C*0.155,C+Math.sin(a)*C*0.155);g.stroke();}
+  const t=new THREE.CanvasTexture(cv);t.colorSpace=THREE.SRGBColorSpace;return t;
+})();
 {
-  const grip=new THREE.Mesh(new THREE.CylinderGeometry(0.017,0.013,0.20,10),
-    new THREE.MeshStandardMaterial({color:0xc4a173,roughness:0.95}));
-  grip.rotation.x=Math.PI/2;grip.position.z=0.05;
-  const seat=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.014,0.07,10),
-    new THREE.MeshStandardMaterial({color:0x6d5330,roughness:0.4,metalness:0.7}));
-  seat.rotation.x=Math.PI/2;seat.position.z=0.175;
-  const reelMesh=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.043,0.022,18),
-    new THREE.MeshStandardMaterial({color:0x3c4a44,roughness:0.35,metalness:0.6}));
-  reelMesh.rotation.z=Math.PI/2;reelMesh.position.set(0,-0.055,0.20);
-  const spool=new THREE.Mesh(new THREE.CylinderGeometry(0.026,0.026,0.026,14),
-    new THREE.MeshStandardMaterial({color:0x22302c,roughness:0.5,metalness:0.4}));
-  spool.rotation.z=Math.PI/2;spool.position.set(0,-0.055,0.20);
-  const foot=new THREE.Mesh(new THREE.BoxGeometry(0.014,0.030,0.05),
-    new THREE.MeshStandardMaterial({color:0x3c4a44,roughness:0.4,metalness:0.6}));
-  foot.position.set(0,-0.026,0.20);
-  handRig.add(grip,seat,reelMesh,spool,foot,reelLip,corkTop);
+  /* cork: a stack of rings with per-ring tone variation reads far more like
+     real cork than one smooth cylinder, and the dark winding check near the
+     top is what your eye actually uses to find the grip */
+  const corkParts=[];
+  const corkA=new THREE.Color(0xd8b98a), corkB=new THREE.Color(0xa8845a);
+  for(let i=0;i<11;i++){
+    const t=i/10, y=-0.045+t*0.20;
+    const rr=0.0155+Math.sin(t*Math.PI)*0.0042-Math.pow(Math.max(0,t-0.8)*3,2)*0.004;
+    const c=corkA.clone().lerp(corkB,0.25+0.55*((i*7)%5)/4);
+    corkParts.push({geo:new THREE.CylinderGeometry(rr,rr,0.0195,12),
+      mat:new THREE.Matrix4().makeTranslation(0,y,0),col:c});
+  }
+  const corkGeo=mergeGeos(corkParts);
+  corkGeo.rotateX(Math.PI/2);
+  const grip=new THREE.Mesh(corkGeo,
+    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.93}));
+
+  /* reel seat: anodised barrel, two knurled lock rings, a butt cap */
+  const seatParts=[];
+  const alu=new THREE.Color(0xb9c0c3), aluD=new THREE.Color(0x5a6165);
+  seatParts.push({geo:new THREE.CylinderGeometry(0.0146,0.0146,0.072,12),
+    mat:new THREE.Matrix4().makeTranslation(0,0,0),col:aluD});
+  for(const zz of [-0.026,0.030]){
+    seatParts.push({geo:new THREE.CylinderGeometry(0.0163,0.0163,0.011,16),
+      mat:new THREE.Matrix4().makeTranslation(0,zz,0),col:alu});
+  }
+  seatParts.push({geo:new THREE.CylinderGeometry(0.0170,0.0150,0.012,12),
+    mat:new THREE.Matrix4().makeTranslation(0,0.044,0),col:corkB});
+  const seatGeo=mergeGeos(seatParts);seatGeo.rotateX(Math.PI/2);
+  const seat=new THREE.Mesh(seatGeo,
+    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.30,metalness:0.72}));
+  seat.position.z=0.175;
+
+  const RX=0,RY=-0.055,RZ=0.20;
+  const cage=new THREE.Mesh(new THREE.CylinderGeometry(0.0435,0.0435,0.020,26),
+    new THREE.MeshStandardMaterial({color:0xb4bcc0,roughness:0.26,metalness:0.85}));
+  cage.rotation.z=Math.PI/2;cage.position.set(RX,RY,RZ);
+  const faceMat=new THREE.MeshStandardMaterial({map:reelFaceTex,roughness:0.30,
+    metalness:0.60,transparent:true});
+  const faceA=new THREE.Mesh(new THREE.CircleGeometry(0.0435,26),faceMat);
+  faceA.rotation.y=Math.PI/2;faceA.position.set(RX+0.0104,RY,RZ);
+  const faceB=new THREE.Mesh(new THREE.CircleGeometry(0.0435,26),faceMat);
+  faceB.rotation.y=-Math.PI/2;faceB.position.set(RX-0.0104,RY,RZ);
+  /* the parts that genuinely need to be geometry: drag knob and handle */
+  const knob=new THREE.Mesh(new THREE.CylinderGeometry(0.0072,0.0090,0.014,12),
+    new THREE.MeshStandardMaterial({color:0x7fb23a,roughness:0.34,metalness:0.55}));
+  knob.rotation.z=Math.PI/2;knob.position.set(RX+0.0165,RY,RZ);
+  const handle=new THREE.Mesh(new THREE.CylinderGeometry(0.0052,0.0052,0.019,10),
+    new THREE.MeshStandardMaterial({color:0x8fc247,roughness:0.30,metalness:0.60}));
+  handle.rotation.z=Math.PI/2;handle.position.set(RX+0.0150,RY-0.0255,RZ+0.0135);
+  const foot=new THREE.Mesh(new THREE.BoxGeometry(0.011,0.030,0.046),
+    new THREE.MeshStandardMaterial({color:0x7fb23a,roughness:0.32,metalness:0.62}));
+  foot.position.set(RX,RY+0.029,RZ);
+  handRig.add(grip,seat,cage,faceA,faceB,knob,handle,foot,reelLip,corkTop);
 }
 const leftHand=new THREE.Mesh(new THREE.SphereGeometry(0.035,10,8),
   new THREE.MeshStandardMaterial({color:0xc9a882,roughness:0.9}));
@@ -3223,7 +3679,8 @@ function onSettingChanged(key){
   if(key==='lineWt'||key==='tippetLen'||key==='massMul')rebuildMasses();
   if(key==='rodE'||key==='rodMass'||key==='tipSoft'||key==='rodTaper'){lastTipSoft=P.tipSoft;lastTaper=P.rodTaper;rebuildRod();}
   if(key==='current')waterMat.uniforms.uQ.value=P.current;
-  if(key==='grade')waterMat.uniforms.uGrade.value=P.grade;
+  if(key==='grade'){waterMat.uniforms.uGrade.value=P.grade;placeTrees();placeRocks();}
+  if(key==='bankGrass'){placeGrass();placeTrees();}
   if(key==='speckSize'){speckMat.uniforms.uSize.value=P.speckSize;gSpeckMat.uniforms.uSize.value=P.speckSize;}
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
   if(key==='hudScale')hud.mesh.scale.setScalar(P.hudScale);
@@ -3398,6 +3855,7 @@ function resetCast(){
     pos[p+2]=tipz-(lineOut-s);
   }
   handIdx=-1;corkIdx=-1;feedVel=0;
+  for(const f of fishes) if(f.state==='striking') f.reseat();
   if(hooked){hooked.reseat();hooked=null;}
   rebuildMasses();
 }
@@ -3698,11 +4156,7 @@ renderer.setAnimationLoop(()=>{
       const clean=avgSlip<P.maxSlip&&slip<P.maxSlip*0.9;
       const chance=(f.feeding?1:P.nonFeedMult)*(clean?1:0.06);
       if(Math.random()<chance){
-        f.state='hooked';f.stamina=1;f.runT=0;hooked=f;
-        f.v.set(0,0,0);f.p.set(pos[0],pos[1],pos[2]);invM[0]=0;
-        {const T=(RN-1)*3;
-         lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.6);}
-        say('EAT \u2014 he\u2019s on');pulse(1.0);spawnRing(fx,fz,1.2);
+        f.beginStrike();pulse(0.35);
       } else say(!clean?'drag \u2014 refused':(f.feeding?'he looked and passed':'that one isn\u2019t feeding'));
     }
   }
@@ -3886,6 +4340,8 @@ renderer.setAnimationLoop(()=>{
     flyWake.material.opacity=0.35;
   }
   waterMat.uniforms.uTime.value=simTime;
+  skyMat.uniforms.uTime.value=simTime;
+  skyMat.uniforms.uGlint.value=P.skyGlint;
   waterMat.uniforms.uDetail.value=P.waterDetail;
   waterMat.uniforms.uFoamK.value=P.foam;
   waterMat.uniforms.uGlint.value=P.skyGlint;
