@@ -93,7 +93,7 @@ const P = {
   guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
-  lineTaper:1,
+  lineTaper:1, pinLimit:1, guideSlop:1.00, handRadius:0.040,
   waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
   current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:0.60, obstHeight:0.80,
   showZones:1, showMarkers:1,
@@ -127,6 +127,9 @@ const MENU=[
   ['Tippet length','tippetLen',0.20,2.50,0.05,'Level tippet at the fly end, cut from the leader total. Longer tippet drifts more freely but turns over less crisply.'],
   ['Line weight','lineWt',3.00,8.00,0.50,'AFFTA line rating. Sets real mass per metre: a 5wt head is 140 grains over 30 ft, which is 0.99 g/m. Heavier line loads the rod harder and carries further.'],
   ['Line air drag','dragMul',0.10,1.50,0.05,'Multiplier on the physical drag coefficient. 1.00 is a real cylinder in crossflow at this diameter. Drag force is LINEAR in diameter and inverse in mass, so this knob and Line mass mult move the same underlying ratio — change this one if the line moves wrong through the air but the rod loads right.'],
+  ['Guide slop','guideSlop',0.00,4.00,0.10,'Scales how much clearance the line has inside each guide ring before the ring pushes back. The rod\u2019s real ring radii are used as the base \u2014 3.8 cm at the stripping guide down to 1.0 cm at the tiptop. 0 makes every guide a hard point again, which is what it used to be; 1 is the true ring size. Larger values let the line float further off the guide before it is corrected, which is smoother but looser.'],
+  ['Hand radius m','handRadius',0.00,0.15,0.005,'How big a surface your line hand presents. The line routes around this rather than being held at one exact point, so small hand movements no longer flick slack line about. 0 restores the old single-point behaviour.'],
+  ['Pin rate limit','pinLimit',0,1,1,'1 caps how far any one guide, the reel or your hand may drag the line within a single solver substep, scaled by how fast that anchor is itself moving. It exists to stop a nearly stationary hand flinging slack line at 40 m/s. Set it to 0 if the line ever drifts away from the reel or skips the top guides and will not recover \u2014 that would mean the cap is also blocking the constraint from correcting real error.'],
   ['Line taper','lineTaper',0,1,1,'0 is a level line: uniform mass and diameter for all 27 m. 1 is a real weight-forward profile — front taper, belly, rear taper, running line — normalised so the first 30 ft still weighs the AFFTA head weight. The front taper is what makes a loop unroll, so a level line needs far more air drag to look right.'],
   ['— FRICTION —',null,0,0,0,''],
   ['Guide friction','guideMu',0.00,0.60,0.01,'Capstan friction through the eyelets. Around 0.15 for fly line on chrome snakes. Every radian of rod bend multiplies the tension needed to make line slide.'],
@@ -786,9 +789,31 @@ const MAX_PIN_CORR=0.016;
    that guide, not faster. A rod tip at 27 m/s mid-cast gets a large budget and
    is unaffected; a hand creeping at 0.07 m/s gets a tiny one, which is exactly
    the case that produced 41 m/s on slack line in a recorded clip. */
+/* Guides and the hand are RINGS and FINGERS, not points. A point pin is an
+   equality constraint -- infinitely stiff and active on every iteration even
+   when the line is essentially in place, which is what manufactures corrections
+   out of nothing and turns them into velocity. A ring only pushes once the line
+   reaches its edge: an inequality, silent while satisfied.
+   deadZone() converts an error vector into "only the part that exceeds the
+   radius", which is that inequality. The rod already carries real ring radii in
+   GUIDE_R -- 3.8 cm at the stripper down to 1.0 cm at the tiptop. */
+function deadZone(ex,ey,ez,r){
+  if(r<=0) return [ex,ey,ez,true];
+  const d=Math.hypot(ex,ey,ez);
+  if(d<=r) return [0,0,0,false];        /* inside the ring: nothing to do */
+  const s=(d-r)/d;
+  return [ex*s,ey*s,ez*s,true];
+}
 const corrUsed=new Float32Array(MAXNODE);
 let pinBudget=1e9;
-function setPinBudget(anchorSpeed,h){ pinBudget=Math.max(0.004,anchorSpeed*h*2.0+0.004); }
+function setPinBudget(anchorSpeed,h){
+  /* pinLimit 0 disables the budget entirely, restoring the pre-budget
+     behaviour. Kept as a switch because the budget throttles a constraint's
+     ability to correct ACCUMULATED ERROR as well as its ability to track
+     motion -- if the line ever drifts away from the reel or skips a guide and
+     cannot recover, this is the first thing to rule out. */
+  pinBudget = P.pinLimit<0.5 ? 1e9 : Math.max(0.004,anchorSpeed*h*2.0+0.004);
+}
 /* Early-out: when the anchor is moving fast the budget is large enough that it
    can never bind, and that is the common case (any cast). Skipping the maths
    there keeps this off the hot path -- measured 47% solver slowdown without
@@ -815,7 +840,7 @@ function clampCorr(lx,ly,lz,maxFactor){
   if(mag>cap){const s=cap/mag;return [lx*s,ly*s,lz*s];}
   return [lx,ly,lz];
 }
-function pinLinePerp(sVal,x,y,z,k){
+function pinLinePerp(sVal,x,y,z,k,radius){
   const f=idxAt(sVal), a=Math.floor(f);
   if(a<1||a+2>=nAct) return;
   const t=f-a,b=a+1,A=a*3,B=b*3;
@@ -825,6 +850,7 @@ function pinLinePerp(sVal,x,y,z,k){
   let ex=x-px, ey=y-py, ez=z-pz;
   const et=ex*tx+ey*ty+ez*tz;
   ex-=et*tx; ey-=et*ty; ez-=et*tz;
+  {const [dx2,dy2,dz2,act]=deadZone(ex,ey,ez,radius||0); if(!act) return; ex=dx2;ey=dy2;ez=dz2;}
   const wa=(1-t)*(1-t)*invM[a], wb=t*t*invM[b], w=wa+wb;
   if(w<=0) return;
   let [lx,ly,lz]=clampCorr(ex*k/w, ey*k/w, ez*k/w, Math.max((1-t)*invM[a],t*invM[b]));
@@ -848,7 +874,7 @@ function pinLinePerp(sVal,x,y,z,k){
 }
 
 /* pin an interpolated point on the line to a fixed world point */
-function pinLine(sVal,x,y,z,k){
+function pinLine(sVal,x,y,z,k,radius){
   const f=idxAt(sVal);
   const a=Math.floor(f);
   if(a<0||a+1>=nAct) return;
@@ -856,7 +882,9 @@ function pinLine(sVal,x,y,z,k){
   const px=pos[A]+(pos[B]-pos[A])*t, py=pos[A+1]+(pos[B+1]-pos[A+1])*t, pz=pos[A+2]+(pos[B+2]-pos[A+2])*t;
   const wa=(1-t)*(1-t)*invM[a], wb=t*t*invM[b], w=wa+wb;
   if(w<=0) return;
-  let [lx,ly,lz]=clampCorr((x-px)*k/w, (y-py)*k/w, (z-pz)*k/w, Math.max((1-t)*invM[a],t*invM[b]));
+  const [ex,ey,ez,act]=deadZone(x-px,y-py,z-pz,radius||0);
+  if(!act) return;
+  let [lx,ly,lz]=clampCorr(ex*k/w, ey*k/w, ez*k/w, Math.max((1-t)*invM[a],t*invM[b]));
   {
     /* squared-magnitude test first: the budget binds only rarely, and this
        keeps a sqrt off the hot path when it does not */
@@ -885,6 +913,7 @@ function pinLine(sVal,x,y,z,k){
    too: g=NG-1 is the last guide, so the tip gets the same protection. */
 const _gd=new THREE.Vector3();
 function solveGuide(g,k){
+  const _ringR=GUIDE_R[g]*P.guideSlop;
   const sVal=lineOut+GUIDE_ARC[g];
   const f=idxAt(sVal), a=Math.floor(f);
   if(a<0||a+1>=nAct) return;
@@ -898,8 +927,11 @@ function solveGuide(g,k){
   const wl=(1-t)*(1-t)*invM[a]+t*t*invM[b];
   const wr=(1-rt)*(1-rt)*rinvM[ra]+rt*rt*rinvM[rb];
   const w=wl+wr; if(w<=1e-9) return;
+  /* only the part of the error beyond the ring's own radius */
+  const [gx,gy,gz,act]=deadZone(rx-px,ry-py,rz-pz,_ringR);
+  if(!act) return;
   const maxF=Math.max((1-t)*invM[a],t*invM[b],(1-rt)*rinvM[ra],rt*rinvM[rb]);
-  let [lx,ly,lz]=clampCorr((rx-px)*k/w, (ry-py)*k/w, (rz-pz)*k/w, maxF);
+  let [lx,ly,lz]=clampCorr(gx*k/w, gy*k/w, gz*k/w, maxF);
   {
     const gv2=rvel[RA]*rvel[RA]+rvel[RA+1]*rvel[RA+1]+rvel[RA+2]*rvel[RA+2];
     setPinBudget(Math.sqrt(gv2),_hSub);
@@ -1160,8 +1192,10 @@ function physics(dt){
            the offset it already had from your hand. Nothing travels to meet your
            fist. Routing pins perpendicular only, so the line still slides along
            itself; a pinch pins all three axes and it cannot. */
-        if(handMode===2) pinLine(grabArc,_grabW.x,_grabW.y,_grabW.z,0.9);
-        else             pinLinePerp(grabArc,_grabW.x,_grabW.y,_grabW.z,0.30);
+        /* your fingers are a surface, not a point -- the line only gets pushed
+           once it strays past the edge of your grip */
+        if(handMode===2) pinLine(grabArc,_grabW.x,_grabW.y,_grabW.z,0.9,P.handRadius*0.5);
+        else             pinLinePerp(grabArc,_grabW.x,_grabW.y,_grabW.z,0.30,P.handRadius);
       }
       if(corkHeld&&corkIdx>0) pinLine(sArc(corkIdx),_corkW.x,_corkW.y,_corkW.z,0.9);
     }
