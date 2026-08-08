@@ -1128,8 +1128,17 @@ function physics(dt){
       probeOut=Tout;probeIn=Tin;
       const cap=Math.exp(P.guideMu*wrapTotal);
       probeThr=Tin*cap+P.statFric;probeSp=Tsp;
+      /* MIN_SLACK is a fixed 0.25 m, but the stripping guide sits further from
+         the reel than that on any real rod, so the clamp was pinning the belly
+         at a length that physically cannot span the gap. The line pulled dead
+         straight, a visible gap opened at the reel because the soft reel pin
+         could not close it, and since the same clamp also pushes lineOut back
+         it deadlocked: nothing more could leave the tiptop either. Floor the
+         belly at the distance it actually has to cover. */
+      const spanSR=Math.hypot(guidePos[0]-_reelW.x,guidePos[1]-_reelW.y,guidePos[2]-_reelW.z);
+      const slackFloor=Math.max(MIN_SLACK,spanSR+0.10);
       let dl=0;
-      if(rodPinch||reeling||handPinched){
+      if(rodPinch||reeling){
         feedVel=0;
       } else {
         /* Feeding is a VELOCITY with inertia. The previous version had the
@@ -1150,7 +1159,11 @@ function physics(dt){
         if(Fout>0)     feedVel+=(Fout/mSlip)*h;
         else if(Fin>0) feedVel-=(Fin /mSlip)*h;
         else{
-          const hold=P.statFric+Math.min(Tin,Tout)*(cap-1);
+          /* Friction available to arrest a slide is T_high - T_low, which is
+             T_high*(1 - 1/cap). Taking the MIN collapsed it to statFric alone
+             in the commonest case of a loaded tip against a slack belly —
+             exactly when the line most needed holding. */
+          const hold=P.statFric+Math.max(Tin,Tout)*(1-1/cap);
           const dv=(hold/mSlip)*h;
           feedVel=Math.abs(feedVel)<=dv?0:feedVel-Math.sign(feedVel)*dv;
         }
@@ -1163,8 +1176,15 @@ function physics(dt){
         if(dl> 0.05){dl= 0.05;feedVel=dl/h;}
         if(dl<-0.05){dl=-0.05;feedVel=dl/h;}
         if(dl>0){
-          const avail=Math.max(0,(offSpool-lineOut-rodArc)-MIN_SLACK);
-          if(dl>avail){dl=avail;feedVel=0;}   /* belly exhausted: stop, don't wind up */
+          /* A pinch holds the line at your fingers. That stops line being drawn
+             from the REEL side, but the pool between the stripping guide and
+             your hand is still free to go out through the guides — that is what
+             a pinch does, and blocking all feed meant that pool could never
+             leave. Draw from whichever reservoir is actually available. */
+          const avail=handPinched
+            ? Math.max(0,grabArc-(lineOut+rodArc)-0.05)
+            : Math.max(0,(offSpool-lineOut-rodArc)-slackFloor);
+          if(dl>avail){dl=avail;feedVel=0;}   /* reservoir empty: stop, don't wind up */
         }
         const floorOut=hooked?0.7:MIN_OUT;
         if(lineOut+dl<floorOut){dl=floorOut-lineOut;feedVel=0;}
@@ -1207,9 +1227,15 @@ function physics(dt){
          are actively reeling, which is what makes the reel able to win */
       if(Tsp>thr&&offSpool<TOTAL_LINE&&!reeling){
         let give=0;
-        if(handHeld&&handIdx>0){
-          const Lr=offSpool-(handMode===2?grabArc:handArc);
-          const Dr=Math.hypot((handMode===2?_grabW.x:_handW.x)-_reelW.x,(handMode===2?_grabW.y:_handW.y)-_reelW.y,(handMode===2?_grabW.z:_handW.z)-_reelW.z);
+        /* Only a PINCH grips the line, so only a pinch makes the hand-to-reel
+           span a real inextensibility statement. Under routing the line slides
+           through the fingers freely, yet this branch still ran: Lr grew every
+           time offSpool grew, until Dr - Lr - deadband could never be positive
+           again and the reel stopped giving line for good after a few pulls.
+           Routing now falls through to the tension test, same as an empty hand. */
+        if(handPinched){
+          const Lr=offSpool-grabArc;
+          const Dr=Math.hypot(_grabW.x-_reelW.x,_grabW.y-_reelW.y,_grabW.z-_reelW.z);
           give=Dr-Lr-P.spoolDead;
         } else {
           const wS=invM[Math.max(0,probeI[2])]+invM[Math.max(0,probeI[2])+1];
@@ -1221,8 +1247,8 @@ function physics(dt){
           spoolOut+=give;clickAcc+=give;
         }
       }
-      if(offSpool-lineOut-rodArc<MIN_SLACK){
-        lineOut=Math.max(hooked?0.7:MIN_OUT,offSpool-rodArc-MIN_SLACK);
+      if(offSpool-lineOut-rodArc<slackFloor){
+        lineOut=Math.max(hooked?0.7:MIN_OUT,offSpool-rodArc-slackFloor);
         feedVel=0;
       }
       nAct=setActive(Math.floor(idxAt(offSpool))+2);
@@ -3079,9 +3105,24 @@ renderer.setAnimationLoop(()=>{
          at several metres a second and is what threw the pool around. Real
          fingers cannot pass line that fast, so cap the rate. */
       const Dg=Math.hypot(_lh.x-guidePos[0],_lh.y-guidePos[1],_lh.z-guidePos[2]);
-      const want=Math.min(offSpool-0.15,(lineOut+rodArc)+Dg+0.14);
+      /* Rate-limit the arc RELATIVE to the stripping guide, not the absolute
+         material coordinate. When line feeds out, grabArc has to move with
+         lineOut one for one and NO line slides through your fingers at all —
+         that is bookkeeping, not sliding. The old form limited the total, so
+         any feed faster than 1.2 m/s (0.017 m per frame, which is ordinary:
+         the recordings show a mean of 0.020 and peaks of 0.236) left grabArc
+         permanently lagging where the geometry said it was. The stripper-to-
+         hand span then carried the wrong material length every frame and the
+         solver spent the frame fighting it — measured lag ran 0.53 to 1.61 m
+         against a target that should have sat still at 0.68. Limiting only the
+         relative slide makes feed transparent and caps just what the fingers
+         actually pass. */
+      const base=lineOut+rodArc;
+      const wantRel=Math.min(offSpool-0.15-base,Dg+0.14);
       const maxSlide=1.2*dt;                       /* metres of line per second */
-      grabArc+=Math.max(-maxSlide,Math.min(maxSlide,want-grabArc));
+      let rel=grabArc-base;
+      rel+=Math.max(-maxSlide,Math.min(maxSlide,wantRel-rel));
+      grabArc=base+Math.max(0.02,rel);
       if(Dg>1.4) handIdx=-1;
     }
     handArc=grabArc;
