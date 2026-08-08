@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08e</title>
+<title>Flycast — v8 one line — build 2026-08-08f</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08e</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08f</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -96,6 +96,8 @@ const P = {
   lineTaper:1,
   waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
   current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:0.60, obstHeight:0.80,
+  waterDetail:1.00, foam:1.00, fogAmt:1.00, bankGrass:1.00, skyGlint:1.00,
+  riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
   splashV:4.50, lineRad:0.50, spookT:5.00, fatigue:1.00,
@@ -179,6 +181,14 @@ const MENU=[
   ['Speck spread','speckSpread',0.00,1.00,0.05,'Share of specks respawning on a grid around you rather than drifting from upstream. Raise it to see flow in dead water.'],
   ['Obstacle height','obstHeight',0.00,1.60,0.05,'Scales how far the rocks and log rise off the bed. On the grid model this is what decides how hard the water is pushed around them: an obstacle well under the surface is flowed straight over, one that breaks it splits the current and throws a wake.'],
   ['Eddy strength','vortex',0.00,2.50,0.10,'Strength of vortices shed off the rocks and log. Zero gives smooth steady flow.'],
+  ['— LOOKS —',null,0,0,0,''],
+  ['Surface detail','waterDetail',0.00,3.00,0.05,'Strength of the ripple normals on the water. The pattern scrolls ALONG the local flow vector taken from the solved grid, so it travels with the water rather than past it, and it scales with local speed — slack water stays glassy while a riffle textures up on its own.'],
+  ['Foam','foam',0.00,3.00,0.05,'How much white water appears. Foam is driven by the divergence and shear of the solved flow field, so it forms where the water genuinely tears itself apart — seams, rock shoulders, the lee of the log — instead of being painted on by hand. Zero for a glassy river.'],
+  ['Sun glint','skyGlint',0.00,3.00,0.05,'Specular sun highlight and sky reflection on the surface, through a Fresnel term. Strong glint reads as bright midday; low reads as overcast and makes the bed far easier to see.'],
+  ['Haze','fogAmt',0.00,3.00,0.05,'Distance haze. Costs nothing and does most of the work of making the reach feel long. Zero is perfectly clear air, which looks flat and makes the far bank feel like a wall.'],
+  ['Bank growth','bankGrass',0.00,1.00,0.05,'Density of grass and scrub along the banks. Drawn as a single instanced mesh, so the whole bank is one draw call regardless of this setting.'],
+  ['Fish detail','fishDetail',0.00,2.00,0.05,'Strength of the scale and spot relief on the trout. This is a generated normal map, not extra geometry, so it costs nothing per fish.'],
+  ['Wet shine','wetShine',0.00,3.00,0.05,'How much glossier a trout goes the instant it clears the water. A wet fish out of the river is close to a mirror; this is what sells a jump and a landed fish in the hand.'],
   ['— FISH —',null,0,0,0,''],
   ['Show zones','showZones',0,1,1,'Draw the take radius ring and feeding lane for each fish.'],
   ['Show markers','showMarkers',0,1,1,'Draw the post above each fish. Green means feeding.'],
@@ -190,6 +200,7 @@ const MENU=[
   ['Lining radius','lineRad',0.10,2.00,0.05,'How close fly line may land to a fish before he is lined and put down.'],
   ['Spook seconds','spookT',1.00,20.0,0.50,'How long a spooked fish sulks before returning to his lie.'],
   ['Stamina drain','fatigue',0.20,3.00,0.05,'How fast a hooked fish tires under tension. Affects how hard he is to steer, not whether he can be netted.'],
+  ['Rise style','riseAggro',0.00,1.00,0.05,'Blends what a rise looks like. At 0 every fish sips: a slow tilt up, the nose just breaking, a single soft ring. Toward 1 you get head-and-tail rises where nose, dorsal and tail break in sequence, and finally explosive slashes that charge across the surface and throw a real splash. Bigger fish lean toward head-and-tail on their own.'],
   ['Rise interest','riseRate',0.05,2.00,0.05,'How often a feeding fish noses the surface for naturals.'],
   ['Feeding chance','feedChance',0.00,1.00,0.05,'Odds a fish is actively feeding when he re-evaluates. Feeding fish are the catchable ones.'],
   ['Non-feeder mult','nonFeedMult',0.00,1.00,0.05,'Take chance multiplier for a fish that is not feeding.'],
@@ -688,7 +699,20 @@ function gridTexUpdate(){
     gridTexData[p]  =Math.max(0,Math.min(255,Math.round((gu[k]/GRID_VSCALE+0.5)*255)));
     gridTexData[p+1]=Math.max(0,Math.min(255,Math.round((gv[k]/GRID_VSCALE+0.5)*255)));
     gridTexData[p+2]=Math.max(0,Math.min(255,Math.round(gh[k]*80)));
-    gridTexData[p+3]=255;
+    /* Alpha was unused. Fill it with |divergence| + |shear| of the solved
+       field: foam then forms where the water genuinely tears itself apart —
+       rock shoulders, the seam off the log, the lip of each drop — instead of
+       being painted along hand-placed lines. Free, because the grid is already
+       being walked to build this texture. */
+    const gi=k%GNX, gj=(k-gi)/GNX;
+    let turb=0;
+    if(gi>0&&gi<GNX-1&&gj>0&&gj<GNZ-1&&!gsolid[k]){
+      const inv=1/(2*gdx);
+      const dudx=(gu[k+1]-gu[k-1])*inv, dvdz=(gv[k+GNX]-gv[k-GNX])*inv;
+      const dudz=(gu[k+GNX]-gu[k-GNX])*inv, dvdx=(gv[k+1]-gv[k-1])*inv;
+      turb=Math.abs(dudx+dvdz)+Math.abs(dvdx-dudz)*0.75;
+    }
+    gridTexData[p+3]=Math.max(0,Math.min(255,Math.round(turb*26)));
   }
   gridTex.needsUpdate=true;
 }
@@ -1326,16 +1350,37 @@ const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.03,400);
 camera.position.set(0,1.55,0.6);
 const player=new THREE.Group();player.add(camera);scene.add(player);
 
-scene.add(new THREE.HemisphereLight(0xe2ece9,0x33443a,2.0));
-const sun=new THREE.DirectionalLight(0xfff1d8,2.0);sun.position.set(-16,20,-4);scene.add(sun);
+/* Three lights, not one. A single directional sun flattens everything facing
+   away from it; a cool fill from the opposite side keeps shaded rock and the
+   far bank readable without lifting the whole scene into mush. */
+scene.add(new THREE.HemisphereLight(0xdfeae8,0x3a4a3c,1.55));
+const sun=new THREE.DirectionalLight(0xfff1d8,2.05);sun.position.set(-16,20,-4);scene.add(sun);
+const fill=new THREE.DirectionalLight(0x9fc4d6,0.55);fill.position.set(14,7,12);scene.add(fill);
+const SUN_DIR=new THREE.Vector3(-16,20,-4).normalize();
+
+/* Distance haze. Costs nothing, and does more for the sense of a long reach
+   than any amount of geometry. Standard materials pick it up automatically;
+   the water shader blends it by hand because it is a raw ShaderMaterial. */
+const FOGC=new THREE.Color(0xb9c8c4);
+scene.fog=new THREE.FogExp2(FOGC.getHex(),0.0070*P.fogAmt);
+
+const SKY_LO=new THREE.Color(0xc9d3cb), SKY_HI=new THREE.Color(0x4a7ba6);
 scene.add(new THREE.Mesh(new THREE.SphereGeometry(200,24,16),new THREE.ShaderMaterial({
   side:THREE.BackSide,depthWrite:false,
-  uniforms:{uLo:{value:new THREE.Color(0xc3cec2)},uHi:{value:new THREE.Color(0x4a7ba6)}},
-  vertexShader:`varying float vY;void main(){vY=normalize(position).y;
+  uniforms:{uLo:{value:SKY_LO},uHi:{value:SKY_HI},
+            uSun:{value:SUN_DIR},uGlint:{value:P.skyGlint}},
+  vertexShader:`varying vec3 vDir;void main(){vDir=normalize(position);
     gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-  fragmentShader:`uniform vec3 uLo,uHi;varying float vY;
-    void main(){gl_FragColor=vec4(mix(uLo,uHi,smoothstep(-0.1,0.7,vY)),1.0);
-    #include <colorspace_fragment>}`})));
+  fragmentShader:`uniform vec3 uLo,uHi,uSun;uniform float uGlint;varying vec3 vDir;
+    void main(){
+      vec3 c=mix(uLo,uHi,smoothstep(-0.10,0.70,vDir.y));
+      /* horizon warms slightly and the sun gets a soft bloom, so the surface
+         has something worth reflecting */
+      c=mix(c,vec3(0.86,0.84,0.76),smoothstep(0.14,-0.06,vDir.y)*0.55);
+      float s=max(dot(vDir,normalize(uSun)),0.0);
+      c+=vec3(1.0,0.94,0.80)*(pow(s,220.0)*0.9+pow(s,14.0)*0.10)*uGlint;
+      gl_FragColor=vec4(c,1.0);
+      #include <colorspace_fragment>}`})));
 
 const GLSL_SURF=`
 float surfY(float x){
@@ -1349,27 +1394,40 @@ let bedGeo,bedPosAttr;
   bedGeo=new THREE.PlaneGeometry(170,64,180,74);
   bedGeo.rotateX(-Math.PI/2);bedGeo.translate(0,0,CZ);
   const pa=bedGeo.attributes.position,col=[];
-  const gravel=new THREE.Color(0x8a8071),grass=new THREE.Color(0x53663f),silt=new THREE.Color(0x46402f);
-  for(let i=0;i<pa.count;i++){
-    const x=pa.getX(i),z=pa.getZ(i),u=(z-CZ)/HALFW,d=bedDepth(x,z);
-    pa.setY(i,bedY(x,z)+Math.sin(x*2.3+z*1.7)*0.025+Math.sin(x*0.6-z*1.1)*0.045);
-    const c=Math.abs(u)<1?gravel.clone().lerp(silt,Math.min(1,d/1.4))
-                         :gravel.clone().lerp(grass,Math.min(1,(Math.abs(u)-1)*1.6));
-    col.push(c.r,c.g,c.b);
-  }
+  for(let i=0;i<pa.count;i++) col.push(1,1,1);
   bedGeo.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
-  bedGeo.computeVertexNormals();bedPosAttr=pa;
+  bedPosAttr=pa;
   const bed=new THREE.Mesh(bedGeo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1}));
   bed.renderOrder=-1;scene.add(bed);
 }
+const _bedGravel=new THREE.Color(0x8a8071),_bedGrass=new THREE.Color(0x53663f),
+      _bedSilt=new THREE.Color(0x46402f),_bedC=new THREE.Color();
+/* Ambient occlusion computed from the same bed function that generates the
+   geometry, rather than baked into a lightmap. A lightmap cannot survive the
+   River grade slider — that rebuilds the bed live — and there is no authored
+   UV set to bake into anyway. This costs one pass at build time and adapts. */
 function rebuildBed(){
-  const pa=bedPosAttr;
+  const pa=bedPosAttr,ca=bedGeo.attributes.color;
   for(let i=0;i<pa.count;i++){
-    const x=pa.getX(i),z=pa.getZ(i);
+    const x=pa.getX(i),z=pa.getZ(i),u=(z-CZ)/HALFW,d=bedDepth(x,z);
     pa.setY(i,bedY(x,z)+Math.sin(x*2.3+z*1.7)*0.025+Math.sin(x*0.6-z*1.1)*0.045);
+    if(Math.abs(u)<1) _bedC.copy(_bedGravel).lerp(_bedSilt,Math.min(1,d/1.4));
+    else              _bedC.copy(_bedGravel).lerp(_bedGrass,Math.min(1,(Math.abs(u)-1)*1.6));
+    /* occlusion: contact darkening under every rock and the log, plus depth
+       extinction down the channel, plus a little crease at the toe of the bank */
+    let ao=1;
+    for(let k=0;k<OBST.length;k++){
+      const o=OBST[k],dd=Math.hypot(x-o.x,z-o.z),reach=o.r*2.3;
+      if(dd<reach) ao*=0.42+0.58*Math.min(1,Math.max(0,dd-o.r*0.55)/(reach-o.r*0.55));
+    }
+    ao*=1-0.30*Math.min(1,d/1.5);
+    ao*=0.86+0.14*Math.min(1,Math.abs(Math.abs(u)-1.0)*2.2);
+    _bedC.multiplyScalar(ao);
+    ca.setXYZ(i,_bedC.r,_bedC.g,_bedC.b);
   }
-  pa.needsUpdate=true;bedGeo.computeVertexNormals();
+  pa.needsUpdate=true;ca.needsUpdate=true;bedGeo.computeVertexNormals();
 }
+rebuildBed();
 const obstMeshes=[];
 for(const o of OBST){
   let m;
@@ -1381,10 +1439,23 @@ for(const o of OBST){
       pa.setXYZ(i,x*n,y*n*0.72,z*n);
     }
     g.computeVertexNormals();
-    m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x6d6a5f,roughness:0.95}));
+    /* moss on the crown, wet stone at the waterline, dry grey below the top.
+       Vertex colours cost nothing and break up what were four identical blobs. */
+    const rc=[],stone=new THREE.Color(0x6d6a5f),moss=new THREE.Color(0x556b3e),
+          wet=new THREE.Color(0x3f4640),cc=new THREE.Color();
+    for(let i=0;i<pa.count;i++){
+      const yy=pa.getY(i)/Math.max(0.01,o.r),xx=pa.getX(i),zz=pa.getZ(i);
+      const grime=0.5+0.5*Math.sin(xx*7.3+zz*5.1);
+      cc.copy(stone).lerp(wet,Math.max(0,Math.min(1,(-yy+0.15)*1.3)));
+      cc.lerp(moss,Math.max(0,Math.min(1,(yy-0.30)*1.5))*(0.35+0.65*grime));
+      cc.multiplyScalar(0.82+0.18*grime);
+      rc.push(cc.r,cc.g,cc.b);
+    }
+    g.setAttribute('color',new THREE.Float32BufferAttribute(rc,3));
+    m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.93}));
   } else {
-    m=new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.19,o.r*2.2,8),
-      new THREE.MeshStandardMaterial({color:0x4e4231,roughness:1}));
+    m=new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.19,o.r*2.2,10),
+      new THREE.MeshStandardMaterial({color:0x4e4231,roughness:1,flatShading:true}));
     m.rotation.z=Math.PI/2;m.rotation.y=0.35;
   }
   scene.add(m);obstMeshes.push(m);
@@ -1395,12 +1466,111 @@ function placeObstacles(){
 }
 placeObstacles();
 
+/* Bank growth. One InstancedMesh, so the entire bank is a single draw call no
+   matter how dense it is — geometry was never the constraint here, draw calls
+   and CPU are. A tuft is three crossed blades; at distance that reads as scrub. */
+const GRASS_N=900;
+let grassMesh=null;
+{
+  const blade=[];
+  for(let k=0;k<3;k++){
+    const a=k*2.09,cs=Math.cos(a),sn=Math.sin(a);
+    const w=0.030,hgt=0.20,lean=0.055;
+    const q=[[-w,0,0],[w,0,0],[w*0.35+lean,hgt,0],[-w*0.35+lean,hgt,0]];
+    const rot=v=>[v[0]*cs-v[2]*sn,v[1],v[0]*sn+v[2]*cs];
+    const [A,B,C,D]=q.map(rot);
+    blade.push(...A,...B,...C, ...A,...C,...D);
+  }
+  const gg=new THREE.BufferGeometry();
+  gg.setAttribute('position',new THREE.Float32BufferAttribute(blade,3));
+  gg.computeVertexNormals();
+  const gm=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,
+    side:THREE.DoubleSide});
+  grassMesh=new THREE.InstancedMesh(gg,gm,GRASS_N);
+  grassMesh.frustumCulled=false;
+  grassMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(grassMesh);
+}
+const _gM=new THREE.Matrix4(),_gQ=new THREE.Quaternion(),_gP=new THREE.Vector3(),
+      _gS=new THREE.Vector3(),_gC=new THREE.Color();
+const GRASS_SEED=[];
+for(let i=0;i<GRASS_N;i++)
+  GRASS_SEED.push({x:(Math.random()*2-1)*44,side:Math.random()<0.5?-1:1,
+    off:0.10+Math.pow(Math.random(),0.7)*5.4,yaw:Math.random()*6.28,
+    sc:0.55+Math.random()*1.15,hue:Math.random()});
+function placeGrass(){
+  if(!grassMesh) return;
+  const n=Math.round(GRASS_N*Math.max(0,Math.min(1,P.bankGrass)));
+  for(let i=0;i<GRASS_N;i++){
+    const s=GRASS_SEED[i];
+    if(i>=n){_gS.setScalar(0.0001);_gP.set(0,-999,0);_gQ.identity();
+      _gM.compose(_gP,_gQ,_gS);grassMesh.setMatrixAt(i,_gM);continue;}
+    const z=CZ+s.side*(HALFW+s.off);
+    const y=bedY(s.x,z);
+    /* keep it out of the water: anything the river would be standing in is bare */
+    const dry=y>surfY(s.x)+0.01;
+    _gP.set(s.x,y-0.02,z);
+    _gQ.setFromAxisAngle(new THREE.Vector3(0,1,0),s.yaw);
+    _gS.setScalar(dry?s.sc:0.0001);
+    _gM.compose(_gP,_gQ,_gS);
+    grassMesh.setMatrixAt(i,_gM);
+    _gC.setHSL(0.22+s.hue*0.08,0.30+s.hue*0.22,0.20+s.hue*0.16);
+    grassMesh.setColorAt(i,_gC);
+  }
+  grassMesh.instanceMatrix.needsUpdate=true;
+  if(grassMesh.instanceColor) grassMesh.instanceColor.needsUpdate=true;
+}
+placeGrass();
+
+/* A tiling ripple normal map, generated rather than downloaded — it keeps the
+   whole game a single file with no binary assets and no cache-busting. Four
+   octaves of periodic value noise, differenced into a normal. 256px is plenty
+   because it is sampled at two very different scales and never seen flat on. */
+const waterNormalTex=(()=>{
+  const N=256,h=new Float32Array(N*N);
+  const hash=(x,y,s)=>{const n=Math.sin(x*127.1+y*311.7+s*74.7)*43758.5453;return n-Math.floor(n);};
+  const fade=t=>t*t*(3-2*t), lerp=(a,b,t)=>a+(b-a)*t;
+  const octave=(freq,amp,seed)=>{
+    const wrap=v=>((v%freq)+freq)%freq;
+    for(let j=0;j<N;j++)for(let i=0;i<N;i++){
+      const fx=i/N*freq, fz=j/N*freq;
+      const x0=Math.floor(fx),z0=Math.floor(fz),tx=fade(fx-x0),tz=fade(fz-z0);
+      const a=hash(wrap(x0),wrap(z0),seed),      b=hash(wrap(x0+1),wrap(z0),seed);
+      const c=hash(wrap(x0),wrap(z0+1),seed),    d=hash(wrap(x0+1),wrap(z0+1),seed);
+      h[i+j*N]+=lerp(lerp(a,b,tx),lerp(c,d,tx),tz)*amp;
+    }
+  };
+  octave(4,0.50,1);octave(8,0.27,2);octave(16,0.14,3);octave(32,0.07,4);
+  const cv=document.createElement('canvas');cv.width=N;cv.height=N;
+  const cx=cv.getContext('2d'),img=cx.createImageData(N,N);
+  const at=(i,j)=>h[(((i%N)+N)%N)+(((j%N)+N)%N)*N];
+  for(let j=0;j<N;j++)for(let i=0;i<N;i++){
+    const dx=(at(i+1,j)-at(i-1,j))*2.6, dz=(at(i,j+1)-at(i,j-1))*2.6;
+    let nx=-dx,ny=1,nz=-dz;
+    const l=Math.hypot(nx,ny,nz)||1;nx/=l;ny/=l;nz/=l;
+    const q=(i+j*N)*4;
+    img.data[q]  =(nx*0.5+0.5)*255;
+    img.data[q+1]=(nz*0.5+0.5)*255;
+    img.data[q+2]=(ny*0.5+0.5)*255;
+    img.data[q+3]=255;
+  }
+  cx.putImageData(img,0,0);
+  const t=new THREE.CanvasTexture(cv);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping;
+  return t;
+})();
+
 const waterMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,
   uniforms:{uTime:{value:0},uQ:{value:P.current},uGrade:{value:P.grade},
     uDeep:{value:new THREE.Color(0x1d3f43)},uShal:{value:new THREE.Color(0x53897a)},
     uFast:{value:new THREE.Color(0x9ab9b0)},
     uUseGrid:{value:0},uFlow:{value:null},
+    uNorm:{value:waterNormalTex},
+    uDetail:{value:P.waterDetail},uFoamK:{value:P.foam},uGlint:{value:P.skyGlint},
+    uFoamC:{value:new THREE.Color(0xeef4f1)},
+    uSkyLo:{value:SKY_LO},uSkyHi:{value:SKY_HI},uSun:{value:SUN_DIR},
+    uFogC:{value:FOGC},uFogD:{value:0.0070*P.fogAmt},
     uGMin:{value:new THREE.Vector2(GX0,GZ0)},
     uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)}},
   vertexShader:`
@@ -1421,27 +1591,67 @@ const waterMat=new THREE.ShaderMaterial({
       gl_Position=projectionMatrix*viewMatrix*wp;
     }`,
   fragmentShader:`
-    uniform vec3 uDeep,uShal,uFast; uniform float uUseGrid;
-    uniform vec2 uGMin,uGSize; uniform sampler2D uFlow;
+    uniform vec3 uDeep,uShal,uFast,uFoamC,uSkyLo,uSkyHi,uSun,uFogC;
+    uniform float uUseGrid,uTime,uDetail,uFoamK,uGlint,uFogD;
+    uniform vec2 uGMin,uGSize; uniform sampler2D uFlow; uniform sampler2D uNorm;
     varying float vD,vS; varying vec3 vW;
     void main(){
-      float d=vD, sp=vS;
+      float d=vD, sp=vS, turb=0.0;
+      vec2 fdir=vec2(1.0,0.0);
       if(uUseGrid>0.5){
         vec2 tc=vec2((vW.x-uGMin.x)/uGSize.x,(vW.z-uGMin.y)/uGSize.y);
         if(tc.x>0.004&&tc.x<0.996&&tc.y>0.004&&tc.y<0.996){
           vec4 t=texture2D(uFlow,tc);
-          sp=length((t.rg-0.5)*${GRID_VSCALE.toFixed(1)});
-          d=t.b*255.0/80.0;
+          vec2 fv=(t.rg-0.5)*${GRID_VSCALE.toFixed(1)};
+          sp=length(fv); d=t.b*255.0/80.0; turb=t.a;
+          if(sp>0.001) fdir=fv/sp;
         }
       }
       if(d<0.02) discard;
+
+      /* Ripple normals scrolled ALONG the local flow, at two scales and two
+         rates. One texture sampled twice beats two textures on a tile GPU, and
+         because the direction comes from the solved field the surface travels
+         with the water instead of sliding past it. */
+      float adv=uTime*max(sp,0.06);
+      vec2 uvA=vW.xz*0.42-fdir*adv*0.55;
+      vec2 uvB=vW.xz*1.55+fdir*adv*0.19;
+      vec2 nA=texture2D(uNorm,uvA).xy*2.0-1.0;
+      vec2 nB=texture2D(uNorm,uvB).xy*2.0-1.0;
+      /* chop grows with speed: slack water stays glassy on its own */
+      vec2 nxz=(nA+nB*0.55)*uDetail*(0.16+sp*0.42);
+      vec3 N=normalize(vec3(nxz.x,1.0,nxz.y));
+
+      vec3 V=normalize(cameraPosition-vW);
+      float fres=pow(1.0-clamp(dot(N,V),0.0,1.0),4.0);
+      vec3 R=reflect(-V,N);
+      vec3 sky=mix(uSkyLo,uSkyHi,smoothstep(-0.10,0.70,R.y));
+      float glint=pow(max(dot(R,normalize(uSun)),0.0),120.0);
+
       vec3 c=mix(uShal,uDeep,clamp(d/1.5,0.0,1.0));
-      c=mix(c,uFast,smoothstep(0.4,1.7,sp)*0.55);
-      gl_FragColor=vec4(c,clamp(0.34+d*0.30,0.0,0.76));
+      c=mix(c,uFast,smoothstep(0.4,1.7,sp)*0.42);
+      c=mix(c,sky,clamp(fres*0.90,0.0,0.72)*(0.35+0.65*uGlint));
+      c+=vec3(1.0,0.96,0.86)*glint*0.85*uGlint;
+
+      /* foam from the divergence and shear packed into alpha upstream, plus a
+         little standing white in genuinely fast water */
+      float foam=clamp(turb*2.4*uFoamK+smoothstep(1.30,2.05,sp)*0.30*uFoamK,0.0,1.0);
+      foam*=smoothstep(0.02,0.13,d);
+      c=mix(c,uFoamC,foam*0.80);
+
+      /* depth fade: thin water goes transparent so the bed reads through it,
+         and a glancing view goes opaque because that is when reflection wins */
+      float a=clamp(0.20+d*0.36+fres*0.34+foam*0.55,0.0,0.94);
+
+      /* haze by hand — a raw ShaderMaterial gets none of three's fog chunks */
+      float fd=length(cameraPosition-vW)*uFogD;
+      c=mix(c,uFogC,1.0-exp(-fd*fd));
+
+      gl_FragColor=vec4(c,a);
       #include <colorspace_fragment>
     }`});
 {
-  const g=new THREE.PlaneGeometry(170,20,200,64);
+  const g=new THREE.PlaneGeometry(170,20,220,80);
   g.rotateX(-Math.PI/2);g.translate(0,0,CZ);
   const w=new THREE.Mesh(g,waterMat);w.renderOrder=0;w.frustumCulled=false;scene.add(w);
 }
@@ -1628,45 +1838,140 @@ gSpecks.frustumCulled=false;gSpecks.renderOrder=2;gSpecks.visible=false;scene.ad
 /* ════════════════════════════════════════════════════════════
    5. TROUT
    ════════════════════════════════════════════════════════════ */
-const troutTex=(()=>{
-  const W=512,H=256,c=document.createElement('canvas');c.width=W;c.height=H;
+/* The trout stays procedural. A 3,500 tri GLB would be 14k triangles against a
+   350k budget — geometry was never the constraint, and going binary would end
+   the edit-in-the-browser-and-refresh loop that makes this project quick to
+   work on. The gap was texture fidelity, and a canvas is nearly free. Both maps
+   are generated here: base colour, and a normal map differenced from a height
+   field carrying scale rows, spot relief and the lateral crease. */
+const TROUT_W=1024, TROUT_H=512;
+const troutMaps=(()=>{
+  const W=TROUT_W,H=TROUT_H;
+  const c=document.createElement('canvas');c.width=W;c.height=H;
   const g=c.getContext('2d');
+  /* height field accumulates alongside the paint, so relief and markings agree */
+  const hf=new Float32Array(W*H);
+  const bump=(cx,cy,r,amp)=>{
+    const x0=Math.max(0,(cx-r)|0),x1=Math.min(W-1,(cx+r)|0);
+    const y0=Math.max(0,(cy-r)|0),y1=Math.min(H-1,(cy+r)|0);
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const dx=(x-cx)/r,dy=(y-cy)/r,d2=dx*dx+dy*dy;
+      if(d2<1) hf[x+y*W]+=amp*(1-d2)*(1-d2);
+    }
+  };
+
+  /* dorsal-to-belly gradient, countershaded the way a real fish is */
   for(let y=0;y<H;y++){
     const v=y/H,dB=Math.abs(v-0.5);
     let col;
-    if(dB>0.40)col='#3d5340';else if(dB>0.32)col='#5c7355';
-    else if(dB>0.22)col='#93a191';else if(dB>0.13)col='#c9cfc4';else col='#eae5da';
+    if(dB>0.44)      col='#33452f';
+    else if(dB>0.38) col='#3d5340';
+    else if(dB>0.31) col='#5c7355';
+    else if(dB>0.24) col='#8b9a89';
+    else if(dB>0.16) col='#b3bcb0';
+    else if(dB>0.08) col='#d6d8cd';
+    else             col='#efe9dc';
     g.fillStyle=col;g.fillRect(0,y,W,1);
   }
-  for(const cv of [0.25,0.75]){
-    const y=cv*H,lg=g.createLinearGradient(0,y-16,0,y+16);
-    lg.addColorStop(0,'rgba(198,86,110,0)');
-    lg.addColorStop(0.5,'rgba(206,92,116,0.72)');
-    lg.addColorStop(1,'rgba(198,86,110,0)');
-    g.fillStyle=lg;g.fillRect(40,y-16,W-40,32);
-  }
-  g.fillStyle='#22301f';
-  for(let i=0;i<620;i++){
+  /* olive vermiculation over the back only */
+  g.globalAlpha=0.18;g.fillStyle='#2b3a26';
+  for(let i=0;i<520;i++){
     const v=Math.random(),dB=Math.abs(v-0.5);
-    if(dB<0.16)continue;
-    if(Math.random()>(dB-0.14)*3.6)continue;
-    const x=30+Math.random()*(W-40),y=v*H,r=0.9+Math.random()*2.4;
-    g.globalAlpha=0.45+Math.random()*0.45;
-    g.beginPath();g.ellipse(x,y,r,r*0.8,0,0,Math.PI*2);g.fill();
+    if(dB<0.30)continue;
+    const x=Math.random()*W,y=v*H,w=8+Math.random()*40,hh=2+Math.random()*5;
+    g.beginPath();g.ellipse(x,y,w,hh,Math.random()*0.6-0.3,0,Math.PI*2);g.fill();
   }
   g.globalAlpha=1;
+
+  /* the pink lateral stripe, brightest at the gill plate and fading to the tail */
   for(const cv of [0.25,0.75]){
-    const gg=g.createRadialGradient(46,H*cv,2,46,H*cv,34);
-    gg.addColorStop(0,'rgba(203,96,110,0.55)');gg.addColorStop(1,'rgba(203,96,110,0)');
-    g.fillStyle=gg;g.fillRect(0,0,120,H);
+    const y=cv*H,lg=g.createLinearGradient(0,y-30,0,y+30);
+    lg.addColorStop(0,'rgba(198,86,110,0)');
+    lg.addColorStop(0.5,'rgba(212,96,120,0.78)');
+    lg.addColorStop(1,'rgba(198,86,110,0)');
+    const hg=g.createLinearGradient(60,0,W,0);
+    hg.addColorStop(0,'rgba(255,255,255,1)');hg.addColorStop(1,'rgba(255,255,255,0)');
+    g.save();g.fillStyle=lg;g.fillRect(60,y-30,W-60,60);g.restore();
+    g.save();g.globalCompositeOperation='destination-out';g.restore();
   }
-  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;
+
+  /* spots: dense and small along the back, sparse and haloed down the flank */
+  for(let i=0;i<2600;i++){
+    const v=Math.random(),dB=Math.abs(v-0.5);
+    if(dB<0.13)continue;
+    if(Math.random()>(dB-0.11)*3.1)continue;
+    const x=40+Math.random()*(W-60),y=v*H;
+    const r=(dB>0.34?0.9:1.6)+Math.random()*(dB>0.34?2.2:3.4);
+    g.globalAlpha=0.30+Math.random()*0.50;
+    if(dB<0.30){
+      const hl=g.createRadialGradient(x,y,r*0.5,x,y,r*2.3);
+      hl.addColorStop(0,'rgba(30,42,28,0.85)');hl.addColorStop(1,'rgba(210,214,200,0)');
+      g.fillStyle=hl;g.beginPath();g.arc(x,y,r*2.3,0,Math.PI*2);g.fill();
+    }
+    g.fillStyle='#1d2a1b';
+    g.beginPath();g.ellipse(x,y,r,r*0.82,0,0,Math.PI*2);g.fill();
+    bump(x,y,r*1.6,-0.35);
+  }
+  g.globalAlpha=1;
+
+  /* gill plate iridescence */
+  for(const cv of [0.25,0.75]){
+    const gg=g.createRadialGradient(52,H*cv,3,52,H*cv,70);
+    gg.addColorStop(0,'rgba(212,110,124,0.60)');
+    gg.addColorStop(0.45,'rgba(158,176,190,0.28)');
+    gg.addColorStop(1,'rgba(203,96,110,0)');
+    g.fillStyle=gg;g.fillRect(0,0,190,H);
+  }
+
+  /* scale rows: a diagonal lattice, relief only, no paint — paint at this pitch
+     just turns to mush at distance while relief still catches the light */
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const sx=(x*0.115+y*0.052), sy=(y*0.125-x*0.030);
+    const s=Math.sin(sx*Math.PI*2)*Math.sin(sy*Math.PI*2);
+    const dB=Math.abs(y/H-0.5);
+    hf[x+y*W]+=s*0.30*(dB>0.06?1:0.3);
+  }
+  /* lateral line crease */
+  for(const cv of [0.25,0.75]){
+    const y0=cv*H;
+    for(let x=0;x<W;x++){
+      const yy=Math.round(y0+Math.sin(x*0.012)*3);
+      for(let k=-2;k<=2;k++){
+        const y=yy+k;if(y<0||y>=H)continue;
+        hf[x+y*W]-=0.55*(1-Math.abs(k)/3);
+      }
+    }
+  }
+
+  const base=new THREE.CanvasTexture(c);
+  base.colorSpace=THREE.SRGBColorSpace;
+
+  /* difference the height field into a tangent-space normal map */
+  const nc=document.createElement('canvas');nc.width=W;nc.height=H;
+  const nx2=nc.getContext('2d'),nimg=nx2.createImageData(W,H);
+  const at=(x,y)=>hf[Math.max(0,Math.min(W-1,x))+Math.max(0,Math.min(H-1,y))*W];
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const dx=(at(x+1,y)-at(x-1,y))*1.7, dy=(at(x,y+1)-at(x,y-1))*1.7;
+    let ax=-dx,ay=-dy,az=1;
+    const l=Math.hypot(ax,ay,az)||1;ax/=l;ay/=l;az/=l;
+    const q=(x+y*W)*4;
+    nimg.data[q]=(ax*0.5+0.5)*255;nimg.data[q+1]=(ay*0.5+0.5)*255;
+    nimg.data[q+2]=(az*0.5+0.5)*255;nimg.data[q+3]=255;
+  }
+  nx2.putImageData(nimg,0,0);
+  const nrm=new THREE.CanvasTexture(nc);
+  return {base,nrm};
 })();
-const troutBodyMat=new THREE.MeshStandardMaterial({map:troutTex,roughness:0.34,metalness:0.18});
+const troutTex=troutMaps.base, troutNrm=troutMaps.nrm;
+const troutBodyMat=new THREE.MeshStandardMaterial({map:troutTex,normalMap:troutNrm,
+  normalScale:new THREE.Vector2(P.fishDetail,P.fishDetail),
+  roughness:0.34,metalness:0.20});
 /* a real trout holds by undulating, not by sitting rigid. Each fish gets its
    own material so it can carry its own phase, amplitude and beat rate. */
 function makeSwimMaterial(){
   const m=troutBodyMat.clone();
+  m.normalScale=new THREE.Vector2(P.fishDetail,P.fishDetail);
+  m.userData.wet=0;
   m.userData.u={uT:{value:Math.random()*10},uAmp:{value:1},uSpd:{value:3},uPh:{value:Math.random()*6.28}};
   m.onBeforeCompile=sh=>{
     sh.uniforms.uT=m.userData.u.uT;
@@ -1762,6 +2067,9 @@ class Trout{
     this.state='holding';this.stamina=1;this.timer=0;
     this.feedT=4+Math.random()*8;
     this.riseT=1+Math.random()*5;this.riseAnim=0;this.evaluated=false;
+    this.riseKind=0;this.riseDur=1;this.riseDir=new THREE.Vector2(1,0);
+    this.risePitch=0;this.riseRoll=0;this.riseMark=0;
+    this.held=false;this.inspect=new THREE.Quaternion();
     this.run=new THREE.Vector3(-1,0,0);this.runT=0;
     this.beh='cruise';this.behT=0;this.effort=0.5;this.v=new THREE.Vector3();
     this.mesh=makeTrout(l.len);scene.add(this.mesh);
@@ -1792,6 +2100,44 @@ class Trout{
     else if(r<0.80){ this.beh='cruise'; this.behT=1.0+Math.random()*1.6; this.newRunDir(); }
     else { this.beh='easy'; this.behT=1.0+Math.random()*1.6; }
     say('fish: '+this.beh);
+  }
+  /* Three rises, blended by the Rise style setting. A big fish leans toward
+     head-and-tail on its own, because a big fish does. */
+  startRise(){
+    const a=Math.max(0,Math.min(1,P.riseAggro))*(0.75+0.55*Math.min(1,this.len/0.42));
+    const r=Math.random();
+    this.riseKind = r<Math.max(0,0.92-a*1.25) ? 0 : (r<Math.max(0,0.99-a*0.62) ? 1 : 2);
+    this.riseDur  = this.riseKind===0?1.05:this.riseKind===1?0.90:0.42;
+    this.riseAnim = 1.0; this.riseMark=0;
+    /* a slash charges across and slightly downstream; the others drift with it */
+    computeFlow(this.p.x,this.p.z);
+    const fl=Math.hypot(flowX,flowZ)||1;
+    const across=(Math.random()<0.5?-1:1)*(this.riseKind===2?0.85:0.15);
+    this.riseDir.set(flowX/fl+ -flowZ/fl*across, flowZ/fl+ flowX/fl*across).normalize();
+  }
+  /* y: 0..1 blend from the lie to the crest. crest: metres above the film at
+     the top. f: distance travelled along riseDir. lead: how hard the nose
+     follows the path tangent. marks: surface events with ring size. */
+  riseProfile(u){
+    const s=Math.sin(u*Math.PI);
+    if(this.riseKind===0){
+      /* SIP. Slow tilt up, nose just breaks, tail flips, one soft ring. */
+      return {y:Math.pow(s,0.85), crest:-0.004, f:u*0.10, lead:0.36, roll:Math.sin(u*6.0)*0.05,
+              marks:[{u:0.50,r:0.55}]};
+    }
+    if(this.riseKind===1){
+      /* HEAD AND TAIL. A long arc: the fish comes up, rolls over the top with
+         the dorsal out, and goes down head first. Nose, dorsal and tail cross
+         the film in sequence because the arc carries it forward as it turns. */
+      return {y:Math.pow(s,0.60), crest:0.014, f:u*0.62, lead:0.55,
+              roll:Math.sin(u*Math.PI)*0.22,
+              marks:[{u:0.30,r:0.55},{u:0.62,r:1.00},{u:0.88,r:0.75}]};
+    }
+    /* SLASH. Charges the fly, mostly lateral, breaks the surface hard and
+       throws a real splash. Short and violent. */
+    return {y:Math.pow(s,1.45), crest:0.055, f:u*1.35, lead:0.75,
+            roll:Math.sin(u*4.5)*0.40,
+            marks:[{u:0.34,r:1.35,splash:3.4},{u:0.72,r:0.95,splash:2.2}]};
   }
   bodyMass(){ return 0.30*Math.pow(this.len/0.30,3); }
   /* A hooked fish is its own rigid body, NOT a heavy node on the line.
@@ -1863,7 +2209,19 @@ class Trout{
       this.p.y+=(deep-this.p.y)*Math.min(1,dt*1.5);
       if(this.timer<=0)this.reseat();
     } else if(this.state==='landed'){
-      this.timer-=dt;if(this.timer<=0)this.reseat();
+      /* A landed fish floats up in front of you so it can be looked at, and can
+         be taken in the left hand and turned over. Pinch to hold, release to
+         let it float again. The despawn timer only runs while it is NOT held,
+         so a fish never vanishes out of your hand mid-look. */
+      if(this.held){
+        this.p.copy(_inspP);
+        this.timer=Math.max(this.timer,2.0);
+      } else {
+        _inspP.set(0,-0.16,-0.46).applyQuaternion(_camQW).add(_camW);
+        this.p.lerp(_inspP,Math.min(1,dt*2.6));
+        this.timer-=dt;
+        if(this.timer<=0)this.reseat();
+      }
     } else {
       this.feedT-=dt;
       if(this.feedT<=0){this.feeding=Math.random()<P.feedChance;this.feedT=8+Math.random()*14;}
@@ -1872,22 +2230,57 @@ class Trout{
       let ty=this.restY();
       if(this.feeding){
         this.riseT-=dt*P.riseRate*2;
-        if(this.riseT<=0&&this.riseAnim<=0){this.riseAnim=1.0;this.riseT=2.5+Math.random()*5;}
+        if(this.riseT<=0&&this.riseAnim<=0){this.startRise();this.riseT=2.5+Math.random()*5;}
       }
       if(this.riseAnim>0){
-        this.riseAnim-=dt*1.5;
-        const u=Math.sin(Math.max(0,this.riseAnim)*Math.PI);
-        ty=ty*(1-u)+(surfY(this.p.x)-0.012)*u;
-        if(this.riseAnim>0.48&&this.riseAnim<0.54){
-          spawnRing(this.p.x-0.05,this.p.z,0.9);
-          if(SND.ok) sndPlop();
+        this.riseAnim-=dt/this.riseDur;
+        /* u runs 0 -> 1 through the rise. Everything below is a function of u,
+           including the pitch, which is taken from the ACTUAL path derivative
+           rather than keyframed — so nose, dorsal and tail break the film in
+           the right order for free, because that is what the arc does. */
+        const u=Math.max(0,Math.min(1,1-this.riseAnim));
+        const sy=surfY(this.p.x);
+        const prof=this.riseProfile(u), prev=this.riseProfile(Math.max(0,u-0.03));
+        const rest=this.restY();
+        ty=rest+(sy+prof.crest-rest)*prof.y;
+        this.p.x+=this.riseDir.x*(prof.f-prev.f);
+        this.p.z+=this.riseDir.y*(prof.f-prev.f);
+        /* lead the velocity vector: pitch = atan2(rise rate, forward rate) */
+        const dy=(prof.y-prev.y)*(sy+prof.crest-rest);
+        const df=(prof.f-prev.f);
+        const want=Math.atan2(dy,Math.max(df,0.004))*prof.lead;
+        this.risePitch+=(want-this.risePitch)*Math.min(1,dt*14);
+        this.riseRoll +=(prof.roll-this.riseRoll)*Math.min(1,dt*10);
+        /* surface events, fired once each as u passes them */
+        while(this.riseMark<prof.marks.length&&u>=prof.marks[this.riseMark].u){
+          const mk=prof.marks[this.riseMark];
+          spawnRing(this.p.x-0.04,this.p.z,mk.r);
+          if(SND.ok){ if(mk.splash) sndSplash(mk.splash); else sndPlop(); }
+          this.riseMark++;
         }
+        if(this.riseAnim<=0){this.risePitch=0;this.riseRoll=0;}
+        this.p.y+=(ty-this.p.y)*Math.min(1,dt*12);
+      } else {
+        this.risePitch+=(0-this.risePitch)*Math.min(1,dt*6);
+        this.riseRoll +=(0-this.riseRoll )*Math.min(1,dt*6);
+        this.p.y+=(ty-this.p.y)*Math.min(1,dt*3);
       }
-      this.p.y+=(ty-this.p.y)*Math.min(1,dt*3);
     }
     const m=this.mesh;
     m.visible=this.state!=='spooked';
     m.position.copy(this.p);
+    if(this.state==='landed'){
+      /* held: the fish takes the hand's orientation through the offset captured
+         at the grab, so it turns in your hand rather than snapping to it.
+         floating: a slow turn so both flanks come round on their own. */
+      if(this.held) m.quaternion.copy(_inspQ).multiply(this.inspect);
+      else{
+        _fishQA.setFromEuler(_fishE.set(Math.sin(t*0.7)*0.12,t*0.55,Math.sin(t*0.9)*0.20,'YZX'));
+        m.quaternion.slerp(_fishQA,Math.min(1,dt*1.6));
+      }
+      this.marker.visible=false;
+      return;
+    }
     /* nose is local -X. Holding, a trout points into the current, which runs
        toward +X, so upstream is a heading of zero. */
     const hd=this.state==='hooked'?Math.atan2(this.v.z,-this.v.x):0;
@@ -1900,8 +2293,21 @@ class Trout{
       if(sp>0.25) pitch=Math.asin(Math.max(-1,Math.min(1,this.v.y/sp)));
     }
     const roll=this.state==='hooked'?Math.sin(t*9)*0.12:Math.sin(t*1.6+this.lie.x)*0.04;
-    m.rotation.z+=((-pitch+roll)-m.rotation.z)*Math.min(1,dt*8);
-    m.rotation.x=this.riseAnim>0?-0.35*Math.sin(Math.max(0,this.riseAnim)*Math.PI):0;
+    /* a rise supplies its own pitch, taken from the path tangent in update() */
+    const zTarget=this.riseAnim>0?(-this.risePitch+roll):(-pitch+roll);
+    m.rotation.z+=(zTarget-m.rotation.z)*Math.min(1,dt*(this.riseAnim>0?16:8));
+    m.rotation.x+=((this.riseAnim>0?this.riseRoll:0)-m.rotation.x)*Math.min(1,dt*10);
+    /* a wet fish clearing the water is close to a mirror, and goes dull again
+       within a second of going back under. This is most of what sells a jump. */
+    {
+      const mat=m.userData.swim;
+      const air=Math.max(0,Math.min(1,(this.p.y-(filmY(this.p.x,this.p.z,t)-0.02))*7));
+      mat.userData.wet+=(air-mat.userData.wet)*Math.min(1,dt*(air>mat.userData.wet?14:1.6));
+      const w=mat.userData.wet*Math.max(0,P.wetShine);
+      mat.roughness=0.34-0.26*Math.min(1,w);
+      mat.metalness=0.20+0.30*Math.min(1,w);
+      if(mat.normalScale) mat.normalScale.set(P.fishDetail,P.fishDetail);
+    }
     /* body wave: faster and wider when hooked, lazy while holding */
     const u=m.userData.swim.userData.u;
     u.uT.value=t;
@@ -1932,6 +2338,12 @@ class Trout{
   }
 }
 for(const l of LIES) fishes.push(new Trout(l));
+
+/* scratch for the landed-fish inspection, filled by the controller pass */
+const _inspP=new THREE.Vector3(),_inspQ=new THREE.Quaternion(),
+      _camQW=new THREE.Quaternion(),_fishQA=new THREE.Quaternion(),
+      _fishE=new THREE.Euler();
+let fishHeld=null;
 
 const ringPool=[];
 for(let i=0;i<10;i++){
@@ -3095,7 +3507,32 @@ renderer.setAnimationLoop(()=>{
     if(netOn){netGrp.position.copy(_lh);offGrip.getWorldQuaternion(_camQ);netGrp.quaternion.copy(_camQ);}
   } else {leftHand.visible=false;netGrp.visible=false;}
 
-  const handActive=handMode>0&&haveLeft&&!netOn;
+  /* Take hold of a landed fish. The left pinch already means "close your hand
+     on something", so it is reused rather than adding an input — and while a
+     fish is landed you are not casting, so nothing competes for it. Capturing
+     the offset at the moment of the grab means the fish turns in your hand
+     instead of snapping to some canonical pose. */
+  if(haveLeft&&!netOn){
+    offGrip.getWorldQuaternion(_inspQ);
+    camera.getWorldQuaternion(_camQW);
+    if(fishHeld&&(handMode!==2||fishHeld.state!=='landed')){
+      fishHeld.held=false;fishHeld=null;
+    }
+    if(!fishHeld&&handMode===2){
+      for(const f of fishes){
+        if(f.state!=='landed') continue;
+        if(_lh.distanceTo(f.p)>0.34) continue;
+        fishHeld=f;f.held=true;
+        /* offset = hand^-1 * fish, so the current relative pose is preserved */
+        f.inspect.copy(_inspQ).invert().multiply(f.mesh.quaternion);
+        pulse(0.35);say('got him \u2014 turn him over');
+        break;
+      }
+    }
+    if(fishHeld) _inspP.copy(_lh);
+  } else if(fishHeld){ fishHeld.held=false;fishHeld=null; }
+
+  const handActive=handMode>0&&haveLeft&&!netOn&&!fishHeld;
   /* Latch on the FIRST frame the hand becomes active, whatever the grip
      strength. The trigger is analogue, so a pinch is always preceded by a few
      frames of routing — and routing used to pin toward the hand itself, which
@@ -3449,6 +3886,11 @@ renderer.setAnimationLoop(()=>{
     flyWake.material.opacity=0.35;
   }
   waterMat.uniforms.uTime.value=simTime;
+  waterMat.uniforms.uDetail.value=P.waterDetail;
+  waterMat.uniforms.uFoamK.value=P.foam;
+  waterMat.uniforms.uGlint.value=P.skyGlint;
+  waterMat.uniforms.uFogD.value=0.0070*P.fogAmt;
+  if(scene.fog) scene.fog.density=0.0070*P.fogAmt;
   waterMat.uniforms.uUseGrid.value=(P.waterModel>0.5&&gridTex)?1:0;
   waterMat.uniforms.uFlow.value=gridTex;
 
