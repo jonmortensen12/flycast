@@ -778,6 +778,27 @@ function lineBend(a,b,c,k){
    and the tip all chase a material-arc-length target that can jump between
    node pairs in a single substep — see the note above solveGuide below. */
 const MAX_PIN_CORR=0.016;
+/* A per-CALL cap bounds nothing: with 31 iterations x 6 substeps the pins run
+   186 times a frame, so a 1.6 cm cap still permits half a metre per substep
+   (~214 m/s). What needs bounding is each node's TOTAL displacement within one
+   substep. The budget is set from how fast the constraint's own anchor moves,
+   which is the physically meaningful limit -- line at a guide should move with
+   that guide, not faster. A rod tip at 27 m/s mid-cast gets a large budget and
+   is unaffected; a hand creeping at 0.07 m/s gets a tiny one, which is exactly
+   the case that produced 41 m/s on slack line in a recorded clip. */
+const corrUsed=new Float32Array(MAXNODE);
+let pinBudget=1e9;
+function setPinBudget(anchorSpeed,h){ pinBudget=Math.max(0.004,anchorSpeed*h*2.0+0.004); }
+/* Early-out: when the anchor is moving fast the budget is large enough that it
+   can never bind, and that is the common case (any cast). Skipping the maths
+   there keeps this off the hot path -- measured 47% solver slowdown without
+   it, which a Quest cannot spare. */
+function budgetScale(a,b,dA,dB){
+  let s=1;
+  if(dA>1e-12){const rem=corrUsed[a]<pinBudget?pinBudget-corrUsed[a]:0; if(dA>rem) s=Math.min(s,rem/dA);}
+  if(dB>1e-12){const rem=corrUsed[b]<pinBudget?pinBudget-corrUsed[b]:0; if(dB>rem) s=Math.min(s,rem/dB);}
+  return s;
+}
 /* Caps what a node actually MOVES, not the shared pre-distribution vector.
    (lx,ly,lz) gets divided by w (a sum of invM) here and multiplied back by
    each node's own invM at the point of application -- for a backing node at
@@ -806,7 +827,22 @@ function pinLinePerp(sVal,x,y,z,k){
   ex-=et*tx; ey-=et*ty; ez-=et*tz;
   const wa=(1-t)*(1-t)*invM[a], wb=t*t*invM[b], w=wa+wb;
   if(w<=0) return;
-  const [lx,ly,lz]=clampCorr(ex*k/w, ey*k/w, ez*k/w, Math.max((1-t)*invM[a],t*invM[b]));
+  let [lx,ly,lz]=clampCorr(ex*k/w, ey*k/w, ez*k/w, Math.max((1-t)*invM[a],t*invM[b]));
+  {
+    /* squared-magnitude test first: the budget binds only rarely, and this
+       keeps a sqrt off the hot path when it does not */
+    const m2=lx*lx+ly*ly+lz*lz;
+    const fA=(1-t)*invM[a], fB=t*invM[b];
+    const remA=corrUsed[a]<pinBudget?pinBudget-corrUsed[a]:0;
+    const remB=corrUsed[b]<pinBudget?pinBudget-corrUsed[b]:0;
+    if(m2*fA*fA>remA*remA||m2*fB*fB>remB*remB){
+      const mag=Math.sqrt(m2), dA=mag*fA, dB=mag*fB;
+      const sc=budgetScale(a,b,dA,dB);
+      lx*=sc;ly*=sc;lz*=sc; corrUsed[a]+=dA*sc; corrUsed[b]+=dB*sc;
+    } else {
+      const mag=Math.sqrt(m2); corrUsed[a]+=mag*fA; corrUsed[b]+=mag*fB;
+    }
+  }
   pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
   pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
 }
@@ -820,7 +856,22 @@ function pinLine(sVal,x,y,z,k){
   const px=pos[A]+(pos[B]-pos[A])*t, py=pos[A+1]+(pos[B+1]-pos[A+1])*t, pz=pos[A+2]+(pos[B+2]-pos[A+2])*t;
   const wa=(1-t)*(1-t)*invM[a], wb=t*t*invM[b], w=wa+wb;
   if(w<=0) return;
-  const [lx,ly,lz]=clampCorr((x-px)*k/w, (y-py)*k/w, (z-pz)*k/w, Math.max((1-t)*invM[a],t*invM[b]));
+  let [lx,ly,lz]=clampCorr((x-px)*k/w, (y-py)*k/w, (z-pz)*k/w, Math.max((1-t)*invM[a],t*invM[b]));
+  {
+    /* squared-magnitude test first: the budget binds only rarely, and this
+       keeps a sqrt off the hot path when it does not */
+    const m2=lx*lx+ly*ly+lz*lz;
+    const fA=(1-t)*invM[a], fB=t*invM[b];
+    const remA=corrUsed[a]<pinBudget?pinBudget-corrUsed[a]:0;
+    const remB=corrUsed[b]<pinBudget?pinBudget-corrUsed[b]:0;
+    if(m2*fA*fA>remA*remA||m2*fB*fB>remB*remB){
+      const mag=Math.sqrt(m2), dA=mag*fA, dB=mag*fB;
+      const sc=budgetScale(a,b,dA,dB);
+      lx*=sc;ly*=sc;lz*=sc; corrUsed[a]+=dA*sc; corrUsed[b]+=dB*sc;
+    } else {
+      const mag=Math.sqrt(m2); corrUsed[a]+=mag*fA; corrUsed[b]+=mag*fB;
+    }
+  }
   pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
   pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
 }
@@ -848,7 +899,22 @@ function solveGuide(g,k){
   const wr=(1-rt)*(1-rt)*rinvM[ra]+rt*rt*rinvM[rb];
   const w=wl+wr; if(w<=1e-9) return;
   const maxF=Math.max((1-t)*invM[a],t*invM[b],(1-rt)*rinvM[ra],rt*rinvM[rb]);
-  const [lx,ly,lz]=clampCorr((rx-px)*k/w, (ry-py)*k/w, (rz-pz)*k/w, maxF);
+  let [lx,ly,lz]=clampCorr((rx-px)*k/w, (ry-py)*k/w, (rz-pz)*k/w, maxF);
+  {
+    const gv2=rvel[RA]*rvel[RA]+rvel[RA+1]*rvel[RA+1]+rvel[RA+2]*rvel[RA+2];
+    setPinBudget(Math.sqrt(gv2),_hSub);
+    const m2=lx*lx+ly*ly+lz*lz;
+    const fA=(1-t)*invM[a], fB=t*invM[b];
+    const remA=corrUsed[a]<pinBudget?pinBudget-corrUsed[a]:0;
+    const remB=corrUsed[b]<pinBudget?pinBudget-corrUsed[b]:0;
+    if(m2*fA*fA>remA*remA||m2*fB*fB>remB*remB){
+      const mag=Math.sqrt(m2), dA=mag*fA, dB=mag*fB;
+      const sc=budgetScale(a,b,dA,dB);
+      lx*=sc;ly*=sc;lz*=sc; corrUsed[a]+=dA*sc; corrUsed[b]+=dB*sc;
+    } else {
+      const mag=Math.sqrt(m2); corrUsed[a]+=mag*fA; corrUsed[b]+=mag*fB;
+    }
+  }
   pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
   pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
   rpos[RA]-=lx*(1-rt)*rinvM[ra];rpos[RA+1]-=ly*(1-rt)*rinvM[ra];rpos[RA+2]-=lz*(1-rt)*rinvM[ra];
@@ -987,6 +1053,8 @@ function pushOutObstacles(){
 
 const _k0=new THREE.Vector3(),_k1=new THREE.Vector3(),_p0=new THREE.Vector3(),_p1=new THREE.Vector3();
 const SUB=6;
+let _hSub=1/432;                 /* current substep length, for pin budgeting */
+let _lhSpeed=0,_reelSpeed=0;     /* anchor speeds, metres/second */
 /* Iterations are no longer fixed. Gauss-Seidel propagates tension roughly one
    node per sweep, so a fixed count means a fixed physical reach — and halving
    node length halves how far the solve carries in a frame. Measured in the
@@ -1067,6 +1135,7 @@ function physics(dt){
     probeLam[0]=probeLam[1]=probeLam[2]=0;
 
     rodLam.fill(0);lineLam.fill(0);
+    _hSub=h; corrUsed.fill(0);
     ITER=iterFor(nAct);
     for(let it=0;it<ITER;it++){
       for(let i=0;i<RN-1;i++) rodDist(i,i+1,ROD_SEG);
@@ -1083,8 +1152,10 @@ function physics(dt){
       /* Full stiffness here drove huge velocities into the backing, which is
          the lightest line in the system, every time the solver corrected it.
          The reel does not need to be rigid — it just needs to hold. */
+      setPinBudget(_reelSpeed,h);
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,0.5);
       if(handHeld&&handIdx>0){
+        setPinBudget(_lhSpeed,h);
         /* Same target for both: the point on the line you took hold of, held at
            the offset it already had from your hand. Nothing travels to meet your
            fist. Routing pins perpendicular only, so the line still slides along
@@ -2923,6 +2994,7 @@ let sndAcc=0,crankAcc=0,gridAccum=0,gridMs=0,started=false,hudT=0,hapT=0,flyAir=
 let prevTrigR=false,prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=0,prevRodPinch=false;
 let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft,
     lastTaper=P.rodTaper, lastCell=P.gridCell, lastObst=P.obstHeight;
+const _lhPrev=new THREE.Vector3(),_reelPrev=new THREE.Vector3();
 const _lh=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_netP=new THREE.Vector3();
 
 function pulse(s){
@@ -3044,8 +3116,16 @@ renderer.setAnimationLoop(()=>{
          fingers cannot pass line that fast, so cap the rate. */
       const Dg=Math.hypot(_lh.x-guidePos[0],_lh.y-guidePos[1],_lh.z-guidePos[2]);
       const want=Math.min(offSpool-0.15,(lineOut+rodArc)+Dg+0.14);
-      const maxSlide=1.2*dt;                       /* metres of line per second */
-      grabArc+=Math.max(-maxSlide,Math.min(maxSlide,want-grabArc));
+      /* Rate-limited BOTH ways this lagged badly whenever the target fell fast
+         (lineOut dropped 4.8 m across one recorded clip), leaving up to a metre
+         of surplus material bunched at the fingers -- slack line with a pin on
+         it, which is what flailed. Shed surplus quickly, limit only the
+         direction that matters for feel, and hard-bound the error so lag can
+         never accumulate into a bight. */
+      const maxOut=1.2*dt, maxIn=6.0*dt;
+      const err=want-grabArc;
+      grabArc+=err>0?Math.min(maxOut,err):Math.max(-maxIn,err);
+      grabArc=Math.max(want-0.05,Math.min(want+0.30,grabArc));
       if(Dg>1.4) handIdx=-1;
     }
     handArc=grabArc;
@@ -3057,6 +3137,12 @@ renderer.setAnimationLoop(()=>{
   handHeld=handActive&&handIdx>0;
   handPinched=handMode===2&&handIdx>0;
   grabEase=1;
+  {
+    const d=Math.hypot(_lh.x-_lhPrev.x,_lh.y-_lhPrev.y,_lh.z-_lhPrev.z);
+    _lhSpeed=dt>1e-6?d/dt:0; _lhPrev.copy(_lh);
+    const dr=Math.hypot(_reelW.x-_reelPrev.x,_reelW.y-_reelPrev.y,_reelW.z-_reelPrev.z);
+    _reelSpeed=dt>1e-6?dr/dt:0; _reelPrev.copy(_reelW);
+  }
   _handW.copy(_lh);
   /* the grabbed material point rides at a constant offset from the hand */
   _grabW.copy(_lh).add(_grabOff);
