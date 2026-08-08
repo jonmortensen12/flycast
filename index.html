@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08d</title>
+<title>Flycast — v8 one line — build 2026-08-08e</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08d</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08e</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -90,7 +90,7 @@ const P = {
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
   massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:0.85, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:3.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:40.0,
-  guideMu:0.15, slipInertia:0.06, dragHeld:1.00, routeOn:1, handSlide:8.0, lineVis:0.80, flySize:1.80, haptics:1.00,
+  guideMu:0.15, slipInertia:0.06, dragHeld:1.00, routeOn:0, handSlide:8.0, reelSlack:0.10, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
   lineTaper:1,
@@ -135,7 +135,8 @@ const MENU=[
   ['Spool drag','spoolDrag',0.05,5.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
   ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
   ['Drag when held','dragHeld',0.05,5.00,0.05,'Reel drag used while you have hold of the line, either in the left hand or clamped at the cork. Pulling line off the spool by hand should not be fighting a drag set for a running fish, and at a 3.0 setting the spool simply would not give. Only ever lowers the drag \u2014 if the main Spool drag is already below this, nothing changes. Returns to the main setting the moment you let go.'],
-  ['Routing enabled','routeOn',0,1,1,'Whether a light squeeze on the left trigger routes line through your fingers at all. Off means the left trigger does nothing until it passes 85% and becomes a full pinch, so line is either held or free with nothing in between. Turn this off if routing still throws the pool around.'],
+  ['Routing enabled','routeOn',0,1,1,'Whether a light squeeze on the left trigger routes line through your fingers at all. Off, the default, means the left trigger does nothing until it passes 85% and becomes a full pinch, so line is either held or free with nothing in between. Routing still throws the pool around under fast feed and is off until that is solved \u2014 see LINEFLOW.md.'],
+  ['Reel slack m','reelSlack',0.00,0.60,0.02,'Slack held between the reel and the stripping guide ON TOP OF the straight distance between them. That straight run always holds line \u2014 it is real material spanning a real gap and can never be shot \u2014 so a small residual pool after a cast is correct, not a bug. This is only the margin beyond it. At 0.00 the line pulls dead straight and the soft reel pin can no longer close the gap, which shows as the line visibly not reaching the spool.'],
   ['Hand slide rate','handSlide',1.00,30.0,0.50,'How quickly line accelerates through your routing fingers, in radians per second of a critically damped response. The slide used to jump to its full 1.2 m/s cap or sit still, which is the same bang-bang the guide feed had. Lower is a heavier, more reluctant hand; higher approaches the old instant behaviour.'],
   ['— ROD & TACKLE —',null,0,0,0,''],
   ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 1.43 puts the first bending mode at 4.0 Hz, which is what a real 9 ft 5wt measures. Calibrating on frequency rather than static sag is what stopped it feeling like a noodle.'],
@@ -204,7 +205,7 @@ const PHYSICAL={
   leaderLen:2.74, tippetLen:0.90,
   dragMul:0.85,     /* felt value. 1.00 is the isolated-cylinder physics */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
-  guideMu:0.15, statFric:0.05, slipInertia:0.06, dragHeld:1.00, spoolDrag:3.00, spoolDead:0.05,
+  guideMu:0.15, statFric:0.05, slipInertia:0.06, dragHeld:1.00, reelSlack:0.10, spoolDrag:3.00, spoolDead:0.05,
   tippet:40.0,      /* raised while the fight is being tuned; 5X would be 21 */
   buoyancy:1.00, stick:1.00, nodeLen:0.08, lineTaper:1,
 };
@@ -1140,7 +1141,7 @@ function physics(dt){
          it deadlocked: nothing more could leave the tiptop either. Floor the
          belly at the distance it actually has to cover. */
       const spanSR=Math.hypot(guidePos[0]-_reelW.x,guidePos[1]-_reelW.y,guidePos[2]-_reelW.z);
-      const slackFloor=Math.max(MIN_SLACK,spanSR+0.10);
+      const slackFloor=Math.max(MIN_SLACK,spanSR+P.reelSlack);
       let dl=0;
       if(reeling){
         feedVel=0;
