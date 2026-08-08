@@ -94,6 +94,7 @@ const P = {
   moveSpeed:1.60, netRadius:0.30, invertY:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
   lineTaper:1, pinLimit:1, guideSlop:1.00, handRadius:0.040,
+  coneHeight:0.06, coneWidth:0.030, showCones:0,
   waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
   current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:0.60, obstHeight:0.80,
   showZones:1, showMarkers:1,
@@ -127,6 +128,9 @@ const MENU=[
   ['Tippet length','tippetLen',0.20,2.50,0.05,'Level tippet at the fly end, cut from the leader total. Longer tippet drifts more freely but turns over less crisply.'],
   ['Line weight','lineWt',3.00,8.00,0.50,'AFFTA line rating. Sets real mass per metre: a 5wt head is 140 grains over 30 ft, which is 0.99 g/m. Heavier line loads the rod harder and carries further.'],
   ['Line air drag','dragMul',0.10,1.50,0.05,'Multiplier on the physical drag coefficient. 1.00 is a real cylinder in crossflow at this diameter. Drag force is LINEAR in diameter and inverse in mass, so this knob and Line mass mult move the same underlying ratio — change this one if the line moves wrong through the air but the rod loads right.'],
+  ['Cone height m','coneHeight',0.00,0.40,0.01,'How far each guide\u2019s contact surface reaches back toward your hand. The ring end stays the real ring size; the surface widens along this distance so line coming from the reel side is funnelled in rather than snapped to a point. 0 turns the cone off, leaving a bare ring.'],
+  ['Cone width m','coneWidth',0.00,0.20,0.005,'How wide the contact surface has opened out at the far end of the cone. Larger means the line can wander further off the guide before anything pushes it, which is smoother but looser.'],
+  ['Show contact surfaces','showCones',0,1,1,'Draws each guide\u2019s contact cone as a translucent shell so you can see exactly what the solver treats as free space. Rebuilt live from the rod, so it follows the blank as it bends.'],
   ['Guide slop','guideSlop',0.00,4.00,0.10,'Scales how much clearance the line has inside each guide ring before the ring pushes back. The rod\u2019s real ring radii are used as the base \u2014 3.8 cm at the stripping guide down to 1.0 cm at the tiptop. 0 makes every guide a hard point again, which is what it used to be; 1 is the true ring size. Larger values let the line float further off the guide before it is corrected, which is smoother but looser.'],
   ['Hand radius m','handRadius',0.00,0.15,0.005,'How big a surface your line hand presents. The line routes around this rather than being held at one exact point, so small hand movements no longer flick slack line about. 0 restores the old single-point behaviour.'],
   ['Pin rate limit','pinLimit',0,1,1,'1 caps how far any one guide, the reel or your hand may drag the line within a single solver substep, scaled by how fast that anchor is itself moving. It exists to stop a nearly stationary hand flinging slack line at 40 m/s. Set it to 0 if the line ever drifts away from the reel or skips the top guides and will not recover \u2014 that would mean the cap is also blocking the constraint from correcting real error.'],
@@ -230,6 +234,16 @@ const RN=12, ROD_LEN=2.743, ROD_SEG=ROD_LEN/(RN-1);
 const GUIDE_S=[0.2500,0.3621,0.4660,0.5617,0.6492,0.7284,0.7994,0.8621,0.9167,0.9630,1.0000];
 const GUIDE_R=[0.038,0.030,0.024,0.020,0.017,0.015,0.014,0.013,0.012,0.011,0.010];
 const NG=GUIDE_S.length;
+/* Physics ring radii, in metres. GUIDE_R above drives the rendered rings and
+   their offsets and is left alone; these are the real inner radii the line is
+   actually free to move within. A 5wt stripping guide is about a 12 mm ring,
+   so 6 mm radius; snakes taper down from roughly 4 mm ID; a tiptop is 2-3 mm
+   ID. The old values treated the stripper as 38 mm radius -- about six times
+   too big, which is why widening the clearance felt like it was helping. */
+const RING_R=GUIDE_S.map((_,g)=>{
+  const u=g/(GUIDE_S.length-1);
+  return 0.0060+(0.0013-0.0060)*Math.pow(u,0.75);
+});
 /* arc distance from the tiptop down to each guide, along the blank */
 const GUIDE_ARC=GUIDE_S.map(s=>ROD_LEN*(1-s));
 const ROD_ARC=GUIDE_ARC[0];
@@ -804,15 +818,46 @@ function deadZone(ex,ey,ez,r){
   const s=(d-r)/d;
   return [ex*s,ey*s,ez*s,true];
 }
+/* Cone version. The ring itself is tiny, but line approaching from the reel
+   side should be funnelled rather than snapped, so the free region widens as it
+   extends back toward the hand. Displacement TOWARD THE BUTT within coneHeight
+   earns extra clearance, up to coneWidth; anything on the tip side gets the
+   bare ring. Only the perpendicular excess is corrected -- the along-rod
+   direction is the sliding direction and must stay free. */
+function coneZone(ex,ey,ez,ax,ay,az,ringR,coneH,coneW){
+  const along=ex*ax+ey*ay+ez*az;                 /* + = toward the butt */
+  const p2=ex*ex+ey*ey+ez*ez-along*along;
+  const perp=p2>0?Math.sqrt(p2):0;
+  let r=ringR;
+  if(along>0&&coneH>1e-6){
+    const u=Math.min(1,along/coneH);
+    r=ringR+(Math.max(coneW,ringR)-ringR)*u;
+  }
+  /* Correct the FULL excess, not just the perpendicular part. Returning only
+     the perpendicular component left the along-rod direction completely free,
+     so the material point could slide anywhere along the blank and the guide
+     stopped guiding: 107 m/s spikes and the rod folded to 176 degrees. The
+     cone shapes HOW MUCH freedom there is, it does not remove an axis. */
+  const d=Math.hypot(ex,ey,ez);
+  if(d<=r) return [0,0,0,false];
+  const s=(d-r)/d;
+  return [ex*s,ey*s,ez*s,true];
+}
 const corrUsed=new Float32Array(MAXNODE);
 let pinBudget=1e9;
-function setPinBudget(anchorSpeed,h){
+function setPinBudget(anchorSpeed,h,err){
   /* pinLimit 0 disables the budget entirely, restoring the pre-budget
      behaviour. Kept as a switch because the budget throttles a constraint's
      ability to correct ACCUMULATED ERROR as well as its ability to track
      motion -- if the line ever drifts away from the reel or skips a guide and
      cannot recover, this is the first thing to rule out. */
-  pinBudget = P.pinLimit<0.5 ? 1e9 : Math.max(0.004,anchorSpeed*h*2.0+0.004);
+  /* The floor proportional to current error is what keeps this a rate limit
+     rather than a cage: however slow the anchor, a constraint may always take
+     a fixed bite out of the error it has, so error still decays geometrically
+     and the line can always find its way back. */
+  if(P.pinLimit<0.5){ pinBudget=1e9; return; }
+  const base=Math.max(0.004,anchorSpeed*h*2.0+0.004);
+  pinBudget = err>0 ? Math.max(base,err*0.25) : base;
 }
 /* Early-out: when the anchor is moving fast the budget is large enough that it
    can never bind, and that is the common case (any cast). Skipping the maths
@@ -913,7 +958,7 @@ function pinLine(sVal,x,y,z,k,radius){
    too: g=NG-1 is the last guide, so the tip gets the same protection. */
 const _gd=new THREE.Vector3();
 function solveGuide(g,k){
-  const _ringR=GUIDE_R[g]*P.guideSlop;
+  const _ringR=RING_R[g]*P.guideSlop;
   const sVal=lineOut+GUIDE_ARC[g];
   const f=idxAt(sVal), a=Math.floor(f);
   if(a<0||a+1>=nAct) return;
@@ -927,14 +972,17 @@ function solveGuide(g,k){
   const wl=(1-t)*(1-t)*invM[a]+t*t*invM[b];
   const wr=(1-rt)*(1-rt)*rinvM[ra]+rt*rt*rinvM[rb];
   const w=wl+wr; if(w<=1e-9) return;
-  /* only the part of the error beyond the ring's own radius */
-  const [gx,gy,gz,act]=deadZone(rx-px,ry-py,rz-pz,_ringR);
+  /* rod axis at this guide, pointing toward the butt */
+  let axx=rpos[RA]-rpos[RB], axy=rpos[RA+1]-rpos[RB+1], axz=rpos[RA+2]-rpos[RB+2];
+  const axl=Math.hypot(axx,axy,axz)||1; axx/=axl;axy/=axl;axz/=axl;
+  const [gx,gy,gz,act]=coneZone(rx-px,ry-py,rz-pz,axx,axy,axz,
+                                _ringR,P.coneHeight,P.coneWidth);
   if(!act) return;
   const maxF=Math.max((1-t)*invM[a],t*invM[b],(1-rt)*rinvM[ra],rt*rinvM[rb]);
   let [lx,ly,lz]=clampCorr(gx*k/w, gy*k/w, gz*k/w, maxF);
   {
     const gv2=rvel[RA]*rvel[RA]+rvel[RA+1]*rvel[RA+1]+rvel[RA+2]*rvel[RA+2];
-    setPinBudget(Math.sqrt(gv2),_hSub);
+    setPinBudget(Math.sqrt(gv2),_hSub,Math.hypot(gx,gy,gz));
     const m2=lx*lx+ly*ly+lz*lz;
     const fA=(1-t)*invM[a], fB=t*invM[b];
     const remA=corrUsed[a]<pinBudget?pinBudget-corrUsed[a]:0;
@@ -1184,7 +1232,13 @@ function physics(dt){
       /* Full stiffness here drove huge velocities into the backing, which is
          the lightest line in the system, every time the solver corrected it.
          The reel does not need to be rigid — it just needs to hold. */
-      setPinBudget(_reelSpeed,h);
+      /* NO budget on the reel. It is a fixed anchor, so scaling its allowance
+         by its own (near zero) speed throttled it to 4 mm per substep -- it
+         could not pull the line taut, tension never built at the spool probe,
+         and the drag rule then never released any line. That is both the
+         "big gap to the reel" and the "cannot pull line out once a lot is
+         already out" report: same cause. */
+      pinBudget=1e9;
       pinLine(offSpool,_reelW.x,_reelW.y,_reelW.z,0.5);
       if(handHeld&&handIdx>0){
         setPinBudget(_lhSpeed,h);
@@ -2240,6 +2294,44 @@ function recShow(i){
   ghostLine.mesh.visible=true;
 }
 
+/* Transparent view of the contact surfaces: a frustum per guide, narrow ring
+   end at the guide and widening back toward the butt, exactly the region
+   coneZone() treats as free. Rebuilt each frame from the live rod so it always
+   shows what the solver is actually using. */
+const coneMeshes=[];
+const _coneUp=new THREE.Vector3(0,1,0), _coneAx=new THREE.Vector3();
+{
+  for(let g=0;g<NG;g++){
+    const m=new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,14,1,true),
+      new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true,opacity:0.18,
+        side:THREE.DoubleSide,depthWrite:false}));
+    m.renderOrder=7;m.visible=false;scene.add(m);coneMeshes.push(m);
+  }
+}
+function updateCones(){
+  const on=P.showCones>0.5;
+  for(let g=0;g<NG;g++){
+    const m=coneMeshes[g];
+    m.visible=on;
+    if(!on) continue;
+    const rf=GUIDE_S[g]*(RN-1), a=Math.min(RN-2,Math.floor(rf)), t=rf-a, b=a+1;
+    const A=a*3,B=b*3;
+    const gx=guidePos[g*3], gy=guidePos[g*3+1], gz=guidePos[g*3+2];
+    _coneAx.set(rpos[A]-rpos[B],rpos[A+1]-rpos[B+1],rpos[A+2]-rpos[B+2]).normalize();
+    const H=Math.max(0.001,P.coneHeight);
+    const rTop=RING_R[g]*P.guideSlop, rBot=Math.max(P.coneWidth,rTop);
+    /* +Y end carries radiusTop, so aim +Y at the guide and the body runs back
+       toward the butt */
+    m.quaternion.setFromUnitVectors(_coneUp,_coneAx.clone().negate());
+    m.position.set(gx+_coneAx.x*H*0.5, gy+_coneAx.y*H*0.5, gz+_coneAx.z*H*0.5);
+    m.scale.set(1,H,1);
+    const p=m.geometry.parameters;
+    if(p.radiusTop!==rTop||p.radiusBottom!==rBot){
+      m.geometry.dispose();
+      m.geometry=new THREE.CylinderGeometry(rTop,rBot,1,14,1,true);
+    }
+  }
+}
 const guideMeshes=[];
 for(let g=0;g<NG;g++){
   const m=new THREE.Mesh(new THREE.TorusGeometry(GUIDE_R[g]*0.55,0.0016,4,10),
@@ -3454,6 +3546,7 @@ renderer.setAnimationLoop(()=>{
     guideMeshes[g].position.set(guidePos[k],guidePos[k+1],guidePos[k+2]);
     guideMeshes[g].quaternion.copy(_q);
   }
+  updateCones();
 
   flyGrp.position.set(fx,fy,fz);
   flyGrp.scale.setScalar(P.flySize);
