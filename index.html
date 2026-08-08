@@ -90,7 +90,7 @@ const P = {
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
   massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:0.85, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:3.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:40.0,
-  guideMu:0.15, lineVis:0.80, flySize:1.80, haptics:1.00,
+  guideMu:0.15, slipInertia:1.00, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
   lineTaper:1,
@@ -131,6 +131,7 @@ const MENU=[
   ['— FRICTION —',null,0,0,0,''],
   ['Guide friction','guideMu',0.00,0.60,0.01,'Capstan friction through the eyelets. Around 0.15 for fly line on chrome snakes. Every radian of rod bend multiplies the tension needed to make line slide.'],
   ['Static friction','statFric',0.00,0.60,0.01,'Force that must be beaten before line slides at all. Raise it if line creeps out on false casts.'],
+  ['Slip inertia','slipInertia',0.05,10.0,0.05,'Mass that has to accelerate before line will slide through the guides, as a multiple of the physically derived figure \u2014 the run from tiptop to spool lip, plus half the line outside the tip. 1.00 is that derived value. Lower is twitchier and eventually chatters; the previous build behaved as though this were about 0.006, which is why pooled line jumped. Use the range button to go below the slider minimum if you want to hear the old behaviour back to back.'],
   ['Spool drag','spoolDrag',0.05,5.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
   ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
   ['— ROD & TACKLE —',null,0,0,0,''],
@@ -200,7 +201,7 @@ const PHYSICAL={
   leaderLen:2.74, tippetLen:0.90,
   dragMul:0.85,     /* felt value. 1.00 is the isolated-cylinder physics */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
-  guideMu:0.15, statFric:0.05, spoolDrag:3.00, spoolDead:0.05,
+  guideMu:0.15, statFric:0.05, slipInertia:1.00, spoolDrag:3.00, spoolDead:0.05,
   tippet:40.0,      /* raised while the fight is being tuned; 5X would be 21 */
   buoyancy:1.00, stick:1.00, nodeLen:0.08, lineTaper:1,
 };
@@ -359,6 +360,9 @@ rebuildRod();
 /* line — node i sits at a fixed arc length sArc(i) from the fly, forever */
 const pos=new Float32Array(MAXNODE*3),prd=new Float32Array(MAXNODE*3),vel=new Float32Array(MAXNODE*3);
 const invM=new Float32Array(MAXNODE),dragK=new Float32Array(MAXNODE);
+/* real per-node mass, kept alongside invM because invM[0] is zeroed while a fish
+   is on and the sliding column still needs the true figure */
+const lineM=new Float32Array(MAXNODE);
 const lineEI=new Float64Array(MAXNODE), lineLam=new Float64Array(MAXNODE);
 let nodeLen=P.nodeLen, nAct=0;
 /* The line is discretised in two zones. Node i sits at a fixed arc length
@@ -428,6 +432,7 @@ function rebuildMasses(){
     const pr=lineProfile(s);
     let m=Math.max(pr[0]*span*P.massMul,1.5e-6);
     if(i===0) m+=2.0e-5;                       /* a size 14 dry fly, 20 mg */
+    lineM[i]=m;
     invM[i]=1/m;
     /* drag/mass is independent of nodeLen, so changing resolution does not
        change how the line behaves — only how finely it is resolved.
@@ -438,6 +443,23 @@ function rebuildMasses(){
   if(hooked&&hooked.state==='hooked') invM[0]=0;   /* fish drives the fly node */
 }
 rebuildMasses();
+
+/* The mass that actually has to accelerate for line to slide through the guides.
+   Everything from the tiptop back to the spool lip is forced to move at the feed
+   speed; line outside the tip is dragged along too but progressively less so
+   toward the fly, hence the half weighting. The flow rule used to take this from
+   ONE node's inverse mass, understating it by roughly two orders of magnitude,
+   which is what let the feed saturate its own clamp every time it moved. */
+let mSlip=1e-3;
+function updateSlipMass(){
+  if(nAct<2){mSlip=1e-3;return;}
+  const i0=Math.max(0,Math.min(nAct-1,Math.floor(idxAt(lineOut))));
+  const i1=Math.max(0,Math.min(nAct-1,Math.ceil(idxAt(offSpool))));
+  let m=0;
+  for(let i=i0;i<=i1;i++) m+=lineM[i];
+  for(let i=0;i<i0;i++)   m+=0.5*lineM[i];
+  mSlip=Math.max(1e-4,m*Math.max(0.001,P.slipInertia));
+}
 
 /* Nodes past nAct are not simulated, so their stored positions are stale —
    left over from the last time that index was active, or from resetCast. When
@@ -1025,6 +1047,7 @@ function sanity(){
 function physics(dt){
   const h=dt/SUB, h2=h*h;
   slipOut=0;spoolOut=0;
+  updateSlipMass();
   for(let s=1;s<=SUB;s++){
     simTime+=h;
     const a=s/SUB;
@@ -1106,36 +1129,46 @@ function physics(dt){
       const cap=Math.exp(P.guideMu*wrapTotal);
       probeThr=Tin*cap+P.statFric;probeSp=Tsp;
       let dl=0;
-      if(!rodPinch&&!reeling&&!handPinched){
-        /* The feed used to be KINEMATIC: compute a displacement from the
-           tension excess and apply all of it this substep. Line therefore went
-           from stationary to sliding at up to 21 m/s within one 2.3 ms substep,
-           and since velocity is (pos-prevPos)/h, the nodes at the guide
-           reported exactly that as a spike. Real line has mass and cannot
-           change speed instantly.
-           So integrate a feed VELOCITY instead. Tension excess is an
-           acceleration; the line speeds up into feeding and coasts to a stop
-           when tension drops, which is both smoother and more honest. */
-        let acc=0;
-        if(Tout>probeThr){
-          const wOut=invM[Math.max(0,probeI[0])]+invM[Math.max(0,probeI[0])+1];
-          acc=(Tout-probeThr)*wOut;
-        } else if(Tin>Tout*cap+P.statFric){
-          const wIn=invM[Math.max(0,probeI[1])]+invM[Math.max(0,probeI[1])+1];
-          acc=-(Tin-(Tout*cap+P.statFric))*wIn;
-        } else {
-          feedVel*=Math.pow(0.05,h/0.02);      /* no drive: coast down fast */
+      if(rodPinch||reeling||handPinched){
+        feedVel=0;
+      } else {
+        /* Feeding is a VELOCITY with inertia. The previous version had the
+           right structure but the wrong mass: acc came from invM of a SINGLE
+           NODE, about 7.9e-5 kg at this spacing, when what actually has to
+           accelerate is the whole sliding column — tiptop to spool lip, plus
+           the line outside the tip being dragged with it. That is ~150x larger.
+           With one node's mass a 0.24 N imbalance reached the 14 m/s clamp
+           inside a single substep, so the rule was still bang-bang; it had just
+           moved from saturating the position clamp to saturating the velocity
+           clamp, and the two exponential decays were there to paper over it.
+           Now: tension excess accelerates the column against its real mass, and
+           inside the friction cone Coulomb friction arrests it, never past zero.
+           Slip inertia scales the mass, because how much of the outside line is
+           really dragged along is a modelling choice, not a measured quantity. */
+        const Fout=Tout-(Tin*cap+P.statFric);
+        const Fin =Tin -(Tout*cap+P.statFric);
+        if(Fout>0)     feedVel+=(Fout/mSlip)*h;
+        else if(Fin>0) feedVel-=(Fin /mSlip)*h;
+        else{
+          const hold=P.statFric+Math.min(Tin,Tout)*(cap-1);
+          const dv=(hold/mSlip)*h;
+          feedVel=Math.abs(feedVel)<=dv?0:feedVel-Math.sign(feedVel)*dv;
         }
-        feedVel+=acc*h;
-        feedVel*=Math.pow(0.5,h/0.06);         /* friction damping on the slide */
+        if(!Number.isFinite(feedVel)) feedVel=0;
         feedVel=Math.max(-14,Math.min(14,feedVel));
         dl=feedVel*h;
-        dl=Math.max(-0.05,Math.min(0.05,dl));
+        /* safety net only, about 21 m/s. If this is engaging during ordinary
+           casting then Slip inertia is set too low and you are back in the
+           old saturating regime — that is the tell to watch for. */
+        if(dl> 0.05){dl= 0.05;feedVel=dl/h;}
+        if(dl<-0.05){dl=-0.05;feedVel=dl/h;}
         if(dl>0){
           const avail=Math.max(0,(offSpool-lineOut-rodArc)-MIN_SLACK);
-          dl=Math.min(dl,avail);
+          if(dl>avail){dl=avail;feedVel=0;}   /* belly exhausted: stop, don't wind up */
         }
-        lineOut=Math.max(hooked?0.7:MIN_OUT,lineOut+dl);
+        const floorOut=hooked?0.7:MIN_OUT;
+        if(lineOut+dl<floorOut){dl=floorOut-lineOut;feedVel=0;}
+        lineOut+=dl;
         slipOut+=dl;
       }
       /* Stripping. Material length from stripping guide to your pinched hand
@@ -1188,8 +1221,10 @@ function physics(dt){
           spoolOut+=give;clickAcc+=give;
         }
       }
-      if(offSpool-lineOut-rodArc<MIN_SLACK)
+      if(offSpool-lineOut-rodArc<MIN_SLACK){
         lineOut=Math.max(hooked?0.7:MIN_OUT,offSpool-rodArc-MIN_SLACK);
+        feedVel=0;
+      }
       nAct=setActive(Math.floor(idxAt(offSpool))+2);
     }
 
@@ -2027,7 +2062,7 @@ const _qZ90=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),Mat
    guess from a video. ~72 Hz; a minute is a few MB, which is nothing. */
 const REC_MAX=4600;
 const REC={frames:[],recording:false,play:false,head:0,inF:0,outF:0,scrub:false};
-const R_ROD=0, R_HAND=RN*3, R_QUAT=R_HAND+4, R_DIAG=R_QUAT+4, R_LINE=R_DIAG+8;
+const R_ROD=0, R_HAND=RN*3, R_QUAT=R_HAND+4, R_DIAG=R_QUAT+4, R_LINE=R_DIAG+10;
 const REC_STRIDE=R_LINE+GLINE_N*3;
 function recPush(){
   if(REC.frames.length>=REC_MAX){REC.recording=false;say('recording full');return;}
@@ -2044,6 +2079,7 @@ function recPush(){
   r[o+4]=M.lineVmax; r[o+5]=M.lineVnode;
   r[o+6]=(handHeld&&handIdx>0)?grabArc:-1;
   r[o+7]=simTime;
+  r[o+8]=feedVel; r[o+9]=mSlip;
   /* dynPath was already resampled this frame for the live line render, and it
      spans the WHOLE chain (fly to reel), so the pool is included */
   o=R_LINE;
@@ -2069,7 +2105,7 @@ function recExport(){
     fps:72, rodNodes:RN, linePoints:GLINE_N,
     frameCount:b-a+1,
     settings:Object.fromEntries(Object.keys(P).map(k=>[k,P[k]])),
-    diagKeys:['lineOut','offSpool','rodArc','nAct','lineVmax','lineVnode','grabArc','simTime'],
+    diagKeys:['lineOut','offSpool','rodArc','nAct','lineVmax','lineVnode','grabArc','simTime','feedVel','mSlip'],
     frames:[]
   };
   for(let i=a;i<=b;i++){
@@ -2078,7 +2114,7 @@ function recExport(){
     for(let k=0;k<RN*3;k++) rod.push(q3(f[k]));
     for(let k=0;k<4;k++) hand.push(q3(f[R_HAND+k]));
     for(let k=0;k<4;k++) quat.push(q3(f[R_QUAT+k]));
-    for(let k=0;k<8;k++) diag.push(q3(f[R_DIAG+k]));
+    for(let k=0;k<10;k++) diag.push(q3(f[R_DIAG+k]));
     for(let k=0;k<GLINE_N*3;k++) line.push(q3(f[R_LINE+k]));
     out.frames.push({rod,hand,quat,diag,line});
   }
@@ -2909,7 +2945,7 @@ function resetCast(){
     pos[p+1]=surfY(tipx)+0.03;
     pos[p+2]=tipz-(lineOut-s);
   }
-  handIdx=-1;corkIdx=-1;
+  handIdx=-1;corkIdx=-1;feedVel=0;
   if(hooked){hooked.reseat();hooked=null;}
   rebuildMasses();
 }
