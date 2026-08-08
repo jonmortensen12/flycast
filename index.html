@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08c</title>
+<title>Flycast — v8 one line — build 2026-08-08d</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -41,7 +41,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08c</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08d</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -90,7 +90,7 @@ const P = {
   stiffMul:1.434, rodDamp:14.0, tipSoft:0.60, rodTaper:1,
   massMul:1.00, lineBend:1.00, lineSmooth:0.15, menuScale:1.00, hudScale:1.00, dragMul:0.85, lineWt:5.0, statFric:0.05,
   reelSpeed:2.60, reelPower:60.0, lineStretch:60.0, spoolDrag:3.00, spoolDead:0.05, buoyancy:1.00, stick:1.00, tippet:40.0,
-  guideMu:0.15, slipInertia:0.06, lineVis:0.80, flySize:1.80, haptics:1.00,
+  guideMu:0.15, slipInertia:0.06, dragHeld:1.00, routeOn:1, handSlide:8.0, lineVis:0.80, flySize:1.80, haptics:1.00,
   moveSpeed:1.60, netRadius:0.30, invertY:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
   lineTaper:1,
@@ -134,6 +134,9 @@ const MENU=[
   ['Slip inertia','slipInertia',0.01,2.00,0.01,'Mass that has to accelerate before line will slide through the guides, as a fraction of the whole sliding column \u2014 tiptop to spool lip, plus half the line outside the tip. That full column is 1.00, and it is far too heavy: over one 2.3 ms substep a tension wave in 5wt line travels only about 7 cm, so the line that can actually resist a feed is what sits within a wave transit of the guide, not metres of it out to the reel. 0.06 is the measured value and works out to roughly half a metre of line. Above 0.6 the line creeps back down the rod and the pool grows while casting; above 1.0 it falls through the guides under its own weight if you point the rod up. Below about 0.02 the old jitter returns.'],
   ['Spool drag','spoolDrag',0.05,5.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
   ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
+  ['Drag when held','dragHeld',0.05,5.00,0.05,'Reel drag used while you have hold of the line, either in the left hand or clamped at the cork. Pulling line off the spool by hand should not be fighting a drag set for a running fish, and at a 3.0 setting the spool simply would not give. Only ever lowers the drag \u2014 if the main Spool drag is already below this, nothing changes. Returns to the main setting the moment you let go.'],
+  ['Routing enabled','routeOn',0,1,1,'Whether a light squeeze on the left trigger routes line through your fingers at all. Off means the left trigger does nothing until it passes 85% and becomes a full pinch, so line is either held or free with nothing in between. Turn this off if routing still throws the pool around.'],
+  ['Hand slide rate','handSlide',1.00,30.0,0.50,'How quickly line accelerates through your routing fingers, in radians per second of a critically damped response. The slide used to jump to its full 1.2 m/s cap or sit still, which is the same bang-bang the guide feed had. Lower is a heavier, more reluctant hand; higher approaches the old instant behaviour.'],
   ['— ROD & TACKLE —',null,0,0,0,''],
   ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 1.43 puts the first bending mode at 4.0 Hz, which is what a real 9 ft 5wt measures. Calibrating on frequency rather than static sag is what stopped it feeling like a noodle.'],
   ['Rod damping','rodDamp',0.00,60.0,1.00,'Internal damping of the blank, per second. Damps how fast the rod deforms, not how it swings. Around 14 kills tip ring in about half a second, which is what a good graphite rod does. Zero rings for three seconds.'],
@@ -201,7 +204,7 @@ const PHYSICAL={
   leaderLen:2.74, tippetLen:0.90,
   dragMul:0.85,     /* felt value. 1.00 is the isolated-cylinder physics */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
-  guideMu:0.15, statFric:0.05, slipInertia:0.06, spoolDrag:3.00, spoolDead:0.05,
+  guideMu:0.15, statFric:0.05, slipInertia:0.06, dragHeld:1.00, spoolDrag:3.00, spoolDead:0.05,
   tippet:40.0,      /* raised while the fight is being tuned; 5X would be 21 */
   buoyancy:1.00, stick:1.00, nodeLen:0.08, lineTaper:1,
 };
@@ -527,6 +530,7 @@ function redistribute(oldIdxAt){
   if(corkIdx>0) corkIdx=Math.min(nAct-2,Math.max(1,Math.round(idxAt(corkArc))));
 }
 let handArc=0, corkArc=0;
+let slideVel=0;           /* m/s of line accelerating through routing fingers */
 
 
 /* ════════════════════════════════════════════════════════════
@@ -1138,7 +1142,7 @@ function physics(dt){
       const spanSR=Math.hypot(guidePos[0]-_reelW.x,guidePos[1]-_reelW.y,guidePos[2]-_reelW.z);
       const slackFloor=Math.max(MIN_SLACK,spanSR+0.10);
       let dl=0;
-      if(rodPinch||reeling){
+      if(reeling){
         feedVel=0;
       } else {
         /* Feeding is a VELOCITY with inertia. The previous version had the
@@ -1176,14 +1180,17 @@ function physics(dt){
         if(dl> 0.05){dl= 0.05;feedVel=dl/h;}
         if(dl<-0.05){dl=-0.05;feedVel=dl/h;}
         if(dl>0){
-          /* A pinch holds the line at your fingers. That stops line being drawn
-             from the REEL side, but the pool between the stripping guide and
-             your hand is still free to go out through the guides — that is what
-             a pinch does, and blocking all feed meant that pool could never
-             leave. Draw from whichever reservoir is actually available. */
-          const avail=handPinched
-            ? Math.max(0,grabArc-(lineOut+rodArc)-0.05)
-            : Math.max(0,(offSpool-lineOut-rodArc)-slackFloor);
+          /* Any grip on the line stops it being drawn from the REEL side, but
+             the pool between the stripping guide and that grip is still free to
+             go out through the guides — that is what a grip does. Blocking all
+             feed meant the pool could never leave. The nearest grip to the
+             stripping guide governs, so take the smallest reservoir on offer;
+             this covers a cork clamp, a left-hand pinch, or both at once. */
+          let avail=Math.max(0,(offSpool-lineOut-rodArc)-slackFloor);
+          if(handPinched)
+            avail=Math.min(avail,Math.max(0,grabArc-(lineOut+rodArc)-0.05));
+          if(corkHeld&&corkIdx>0)
+            avail=Math.min(avail,Math.max(0,sArc(corkIdx)-(lineOut+rodArc)-0.05));
           if(dl>avail){dl=avail;feedVel=0;}   /* reservoir empty: stop, don't wind up */
         }
         const floorOut=hooked?0.7:MIN_OUT;
@@ -1211,6 +1218,12 @@ function physics(dt){
         }
       }
       const thr=P.spoolDrag*1.15+P.statFric;
+      /* Drag while you have hold of the line. A drag set for a running fish is
+         not what you pull against when stripping line off the spool by hand,
+         and at 3.0 the threshold sat at 3.5 N, which the belly could never
+         transmit — the spool simply stopped giving. Only ever lowers it. */
+      const dragHeld=(handHeld||corkHeld)?Math.min(P.spoolDrag,P.dragHeld):P.spoolDrag;
+      const thrHand=dragHeld*1.15+P.statFric;
       /* A hooked fish pulls against the drag, not against the belly, so the
          spool has to give directly. Release exactly the length that relieves
          the excess over the drag setting — that is what the drag does, and
@@ -1225,7 +1238,7 @@ function physics(dt){
       }
       /* a hand on the crank holds the spool: a fish cannot take line while you
          are actively reeling, which is what makes the reel able to win */
-      if(Tsp>thr&&offSpool<TOTAL_LINE&&!reeling){
+      if(Tsp>thrHand&&offSpool<TOTAL_LINE&&!reeling){
         let give=0;
         /* Only a PINCH grips the line, so only a pinch makes the hand-to-reel
            span a real inextensibility statement. Under routing the line slides
@@ -3069,6 +3082,9 @@ renderer.setAnimationLoop(()=>{
 
   /* ---- left hand ---- */
   handMode=(trigL>0.85?2:(trigL>0.15?1:0));
+  /* With routing off the trigger has no middle: line is pinched or it is free.
+     Nothing else needs to know, because every routing path keys off handMode 1. */
+  if(P.routeOn<0.5&&handMode===1) handMode=0;
   const haveLeft=!!offGrip;
   if(haveLeft){
     offGrip.getWorldPosition(_lh);
@@ -3089,6 +3105,7 @@ renderer.setAnimationLoop(()=>{
     if(n.i>0&&n.d<0.40){
       grabArc=sArc(n.i)+(sArc(n.i+1)-sArc(n.i))*n.t;
       handArc=grabArc;
+      slideVel=0;
       handIdx=Math.max(1,Math.round(idxAt(grabArc)));
       const a=n.i*3,b=a+3;
       _grabOff.set(pos[a]+(pos[b]-pos[a])*n.t-_lh.x,
@@ -3119,17 +3136,26 @@ renderer.setAnimationLoop(()=>{
          actually pass. */
       const base=lineOut+rodArc;
       const wantRel=Math.min(offSpool-0.15-base,Dg+0.14);
-      const maxSlide=1.2*dt;                       /* metres of line per second */
       let rel=grabArc-base;
-      rel+=Math.max(-maxSlide,Math.min(maxSlide,wantRel-rel));
-      grabArc=base+Math.max(0.02,rel);
+      /* The slide had exactly the disease the guide feed had: a hard rate limit
+         means it moves at the full 1.2 m/s or not at all, so every frame is a
+         step change in where the material sits at your fingers and the solver
+         wears it. Give the slide a velocity and let it accelerate — critically
+         damped, so it converges on the target without ringing past it. */
+      const wn=Math.max(0.5,P.handSlide);
+      slideVel+=(wn*wn*(wantRel-rel)-2*wn*slideVel)*dt;
+      if(!Number.isFinite(slideVel)) slideVel=0;
+      slideVel=Math.max(-1.2,Math.min(1.2,slideVel));   /* fingers cannot pass faster */
+      rel+=slideVel*dt;
+      if(rel<0.02){rel=0.02;slideVel=0;}                /* against the stripper: stop */
+      grabArc=base+rel;
       if(Dg>1.4) handIdx=-1;
     }
     handArc=grabArc;
     if(handIdx>0) handIdx=Math.max(1,Math.round(idxAt(grabArc)));
   }
 
-  if(!handActive) handIdx=-1;
+  if(!handActive){handIdx=-1;slideVel=0;}
   prevHandActive=handActive?handMode:0;
   handHeld=handActive&&handIdx>0;
   handPinched=handMode===2&&handIdx>0;
