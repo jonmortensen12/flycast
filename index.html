@@ -745,6 +745,15 @@ function lineBend(a,b,c,k){
    the tiptop and shoot line — and it dragged the material point along the belly
    toward your hand, which is why a later pinch always caught the middle of the
    pool: routing had already put it there. */
+/* Caps how far one pin application may move a point. Guides, the hand pulley
+   and the tip all chase a material-arc-length target that can jump between
+   node pairs in a single substep — see the note above solveGuide below. */
+const MAX_PIN_CORR=0.016;
+function clampCorr3(x,y,z){
+  const d=Math.hypot(x,y,z);
+  if(d>MAX_PIN_CORR){const s=MAX_PIN_CORR/d;return [x*s,y*s,z*s];}
+  return [x,y,z];
+}
 function pinLinePerp(sVal,x,y,z,k){
   const f=idxAt(sVal), a=Math.floor(f);
   if(a<1||a+2>=nAct) return;
@@ -757,7 +766,7 @@ function pinLinePerp(sVal,x,y,z,k){
   ex-=et*tx; ey-=et*ty; ez-=et*tz;
   const wa=(1-t)*(1-t)*invM[a], wb=t*t*invM[b], w=wa+wb;
   if(w<=0) return;
-  const lx=ex*k/w, ly=ey*k/w, lz=ez*k/w;
+  const [lx,ly,lz]=clampCorr3(ex*k/w, ey*k/w, ez*k/w);
   pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
   pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
 }
@@ -771,13 +780,18 @@ function pinLine(sVal,x,y,z,k){
   const px=pos[A]+(pos[B]-pos[A])*t, py=pos[A+1]+(pos[B+1]-pos[A+1])*t, pz=pos[A+2]+(pos[B+2]-pos[A+2])*t;
   const wa=(1-t)*(1-t)*invM[a], wb=t*t*invM[b], w=wa+wb;
   if(w<=0) return;
-  const lx=(x-px)*k/w, ly=(y-py)*k/w, lz=(z-pz)*k/w;
+  const [lx,ly,lz]=clampCorr3((x-px)*k/w, (y-py)*k/w, (z-pz)*k/w);
   pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
   pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
 }
 
-/* guide constraint: couples an interpolated point on the LINE to an
-   interpolated point on the ROD, both ways, so the line loads the blank */
+/* Guide constraint: couples an interpolated point on the LINE to an
+   interpolated point on the ROD, both ways, so the line loads the blank.
+   The pinned arc length is lineOut+GUIDE_ARC[g], and lineOut moves by a
+   discrete amount every substep as line feeds through — so the node pair
+   this interpolates between can reassign abruptly, which is what the
+   clamp in the position update below is for. This function IS the tiptop
+   too: g=NG-1 is the last guide, so the tip gets the same protection. */
 const _gd=new THREE.Vector3();
 function solveGuide(g,k){
   const sVal=lineOut+GUIDE_ARC[g];
@@ -793,7 +807,7 @@ function solveGuide(g,k){
   const wl=(1-t)*(1-t)*invM[a]+t*t*invM[b];
   const wr=(1-rt)*(1-rt)*rinvM[ra]+rt*rt*rinvM[rb];
   const w=wl+wr; if(w<=1e-9) return;
-  const lx=(rx-px)*k/w, ly=(ry-py)*k/w, lz=(rz-pz)*k/w;
+  const [lx,ly,lz]=clampCorr3((rx-px)*k/w, (ry-py)*k/w, (rz-pz)*k/w);
   pos[A]+=lx*(1-t)*invM[a];pos[A+1]+=ly*(1-t)*invM[a];pos[A+2]+=lz*(1-t)*invM[a];
   pos[B]+=lx*t*invM[b];    pos[B+1]+=ly*t*invM[b];    pos[B+2]+=lz*t*invM[b];
   rpos[RA]-=lx*(1-rt)*rinvM[ra];rpos[RA+1]-=ly*(1-rt)*rinvM[ra];rpos[RA+2]-=lz*(1-rt)*rinvM[ra];
@@ -1927,29 +1941,71 @@ const ghostHand=new THREE.Mesh(new THREE.SphereGeometry(0.042,10,8),
 ghostHand.renderOrder=6;ghostHand.visible=false;scene.add(ghostHand);
 const _ghostRod=new Float32Array(RN*3);
 
-/* ~72 Hz of rod nodes plus the line hand. A minute is about 600 KB, which is
-   nothing, so the cap exists to bound the timeline rather than the memory. */
+/* the recorded line, a slimmer copy of the live line tube */
+const GLINE_N=56;
+const ghostLine=new DynTube(GLINE_N,3);
+ghostLine.mesh.material=new THREE.MeshBasicMaterial({
+  color:0xff3ec8,transparent:true,opacity:0.55,depthWrite:false});
+ghostLine.mesh.renderOrder=6;ghostLine.mesh.visible=false;scene.add(ghostLine.mesh);
+for(let j=0;j<GLINE_N;j++) ghostLine.rad[j]=0.0028;
+const _ghostLinePath=new Float32Array(GLINE_N*3);
+
+/* a simple reel, placed off the recorded rod-hand orientation the same way
+   the real reelLip is offset from the live hand rig */
+const ghostReelMat=new THREE.MeshBasicMaterial({color:0xff3ec8,transparent:true,opacity:0.55,depthWrite:false});
+const ghostReel=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.043,0.022,14),ghostReelMat);
+ghostReel.visible=false;scene.add(ghostReel);
+const _reelOff=new THREE.Vector3(0,-0.076,0.20);
+const _reelOffW=new THREE.Vector3();
+const _ghostQ=new THREE.Quaternion();
+const _qZ90=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),Math.PI/2);
+
+/* Rod nodes, the resampled line, the line hand with its grip state, and the
+   rod hand's own orientation (for the reel). ~72 Hz; a minute is a few MB,
+   which is nothing, so REC_MAX bounds the timeline rather than memory. */
 const REC_MAX=4600;
 const REC={frames:[],recording:false,play:false,head:0,inF:0,outF:0,scrub:false};
+const REC_STRIDE=RN*3+4+4+GLINE_N*3;
 function recPush(){
   if(REC.frames.length>=REC_MAX){REC.recording=false;say('recording full');return;}
-  const r=new Float32Array(RN*3+4);
+  const r=new Float32Array(REC_STRIDE);
   r.set(rpos.subarray(0,RN*3));
-  r[RN*3]=_lh.x;r[RN*3+1]=_lh.y;r[RN*3+2]=_lh.z;r[RN*3+3]=handMode;
+  let o=RN*3;
+  r[o]=_lh.x;r[o+1]=_lh.y;r[o+2]=_lh.z;r[o+3]=handMode; o+=4;
+  r[o]=_q.x;r[o+1]=_q.y;r[o+2]=_q.z;r[o+3]=_q.w; o+=4;
+  /* dynPath was already resampled this frame for the live line render —
+     just take every 3rd point rather than resampling it again */
+  for(let j=0;j<GLINE_N;j++){
+    const k=Math.min(DYN_N-1,Math.round(j*(DYN_N-1)/(GLINE_N-1)))*3;
+    r[o+j*3]=dynPath[k];r[o+j*3+1]=dynPath[k+1];r[o+j*3+2]=dynPath[k+2];
+  }
   REC.frames.push(r);
 }
 function recShow(i){
   const n=REC.frames.length;
-  if(!n){ghostTube.mesh.visible=false;ghostHand.visible=false;return;}
+  if(!n){ghostTube.mesh.visible=false;ghostHand.visible=false;
+    ghostLine.mesh.visible=false;ghostReel.visible=false;return;}
   const k=Math.max(0,Math.min(n-1,Math.round(i)));
   const f=REC.frames[k];
   _ghostRod.set(f.subarray(0,RN*3));
   ghostTube.update(_ghostRod);
   ghostTube.mesh.visible=true;
-  ghostHand.position.set(f[RN*3],f[RN*3+1],f[RN*3+2]);
+  let o=RN*3;
+  ghostHand.position.set(f[o],f[o+1],f[o+2]);
   ghostHand.visible=true;
   /* the line hand goes bright while it is gripping, so hauls read clearly */
-  ghostHand.material.color.setHex(f[RN*3+3]>1.5?0xffd23e:f[RN*3+3]>0.5?0xff8fdc:0xff3ec8);
+  ghostHand.material.color.setHex(f[o+3]>1.5?0xffd23e:f[o+3]>0.5?0xff8fdc:0xff3ec8);
+  o+=4;
+  _ghostQ.set(f[o],f[o+1],f[o+2],f[o+3]); o+=4;
+  ghostReel.position.set(_ghostRod[0],_ghostRod[1],_ghostRod[2])
+    .add(_reelOff.clone().applyQuaternion(_ghostQ));
+  ghostReel.quaternion.copy(_ghostQ).multiply(_qZ90);   /* the reel's own local twist */
+  ghostReel.visible=true;
+  for(let j=0;j<GLINE_N;j++){
+    _ghostLinePath[j*3]=f[o+j*3];_ghostLinePath[j*3+1]=f[o+j*3+1];_ghostLinePath[j*3+2]=f[o+j*3+2];
+  }
+  ghostLine.update(_ghostLinePath);
+  ghostLine.mesh.visible=true;
 }
 
 const guideMeshes=[];
@@ -2205,9 +2261,13 @@ const TABS=(()=>{
   return out;
 })();
 let selTab=0;
-const TABY=44, TABH=46, ROW_Y0=150, ROWH2=44, PERCOL=12;
-const COLX2=[44,738], ROWW=620;
-const TRACKX2=300, TRACKW2=210, VALX2=540, RNGX2=556, RNGW2=62;
+/* Sized to use the panel fully: wider columns, a taller row, a much wider and
+   taller slider track. PERCOL=11 keeps the tallest section (River, 16 rows)
+   inside two columns with room to spare, and the description strip at the
+   bottom of the panel stays clear at every row count that appears in MENU. */
+const TABY=44, TABH=52, ROW_Y0=156, ROWH2=50, PERCOL=11;
+const COLX2=[40,724], ROWW=660;
+const TRACKX2=272, TRACKW2=304, VALX2=602, RNGX2=608, RNGW2=48;
 function tabRect(i){
   const w=(MW-80)/TABS.length;
   return {x:40+i*w,y:TABY,w:w-6,h:TABH};
@@ -2269,28 +2329,29 @@ function drawMenu(){
     const R=rowRect(i); if(!R) continue;
     const X=R.x, y=R.y;
     const on=i===menuSel;
-    if(on){c.fillStyle='rgba(181,113,63,0.22)';c.fillRect(X-10,y-24,ROWW,ROWH2-4);}
-    c.font='700 17px "Space Mono",monospace';
+    if(on){c.fillStyle='rgba(181,113,63,0.22)';c.fillRect(X-10,y-30,ROWW,ROWH2-4);}
+    c.font='700 18px "Space Mono",monospace';
     c.fillStyle=on?'#e8e3d4':'#a3b0b0';c.fillText(label,X,y);
     if(key.charCodeAt(0)===33){
       c.fillStyle=on?'#b5713f':'#4d6166';
-      c.font='700 16px "Space Mono",monospace';
+      c.font='700 17px "Space Mono",monospace';
       c.fillText('PUSH \u25B6',X+TRACKX2,y);
       continue;
     }
     const [lo,hi]=rowRange(key,mn,mx);
     const f=(P[key]-lo)/((hi-lo)||1);
-    c.fillStyle='#243438';c.fillRect(X+TRACKX2,y-14,TRACKW2,12);
+    /* a visibly taller track — was 12px, now 22px */
+    c.fillStyle='#243438';c.fillRect(X+TRACKX2,y-20,TRACKW2,22);
     c.fillStyle=on?'#b5713f':'#4d6166';
-    c.fillRect(X+TRACKX2,y-14,TRACKW2*Math.max(0,Math.min(1,f)),12);
+    c.fillRect(X+TRACKX2,y-20,TRACKW2*Math.max(0,Math.min(1,f)),22);
     c.fillStyle=on?'#e8e3d4':'#a3b0b0';c.textAlign='right';
-    c.font='700 17px "Space Mono",monospace';
+    c.font='700 18px "Space Mono",monospace';
     c.fillText(P[key].toFixed(Math.abs(P[key])<10?2:1),X+VALX2,y);c.textAlign='left';
     const m=rx(key);
-    c.fillStyle=m>1?'#3a2a1c':'#1b262a';c.fillRect(X+RNGX2,y-19,RNGW2,20);
+    c.fillStyle=m>1?'#3a2a1c':'#1b262a';c.fillRect(X+RNGX2,y-25,RNGW2,26);
     c.fillStyle=m>1?'#e0a45e':'#5d6f72';
     c.font='700 13px "Space Mono",monospace';
-    c.fillText(m>=1?(m+'x'):(m===0.1?'.1x':'.01x'),X+RNGX2+6,y-5);
+    c.fillText(m>=1?(m+'x'):(m===0.1?'.1x':'.01x'),X+RNGX2+6,y-9);
   }
   /* description strip */
   const sel=MENU[menuSel];
@@ -2513,14 +2574,14 @@ function menuPointer(trigPressed, trigEdge){
   let row=-1;
   for(const i of (TABS[selTab]?TABS[selTab].rows:[])){
     const R=rowRect(i); if(!R) continue;
-    if(px>=R.x-10&&px<=R.x-10+ROWW&&py>=R.y-24&&py<=R.y+ROWH2-28){row=i;break;}
+    if(px>=R.x-10&&px<=R.x-10+ROWW&&py>=R.y-30&&py<=R.y+ROWH2-32){row=i;break;}
   }
   if(row<0){if(!trigPressed)dragKey=null;return true;}
   menuSel=row;
   const [,key,mn,mx,st]=MENU[row], R=rowRect(row);
   if(trigEdge){
     if(key.charCodeAt(0)===33){ runAction(key); return true; }
-    if(px>=R.x+RNGX2&&px<=R.x+RNGX2+RNGW2&&py>=R.y-19&&py<=R.y+1){
+    if(px>=R.x+RNGX2&&px<=R.x+RNGX2+RNGW2&&py>=R.y-25&&py<=R.y+1){
       const m=cycleRange(key,mn,mx);
       say(MENU[row][0]+' range '+m+'x');
       return true;
