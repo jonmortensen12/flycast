@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08k</title>
+<title>Flycast — v8 one line — build 2026-08-08l</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -33,6 +33,28 @@
 #pvbar button{background:rgba(20,30,36,0.82);color:#dfe8ea;border:1px solid #46606c;
   border-radius:8px;padding:12px 14px;font:600 14px/1 system-ui,sans-serif;cursor:pointer}
 #pvbar button:active{background:rgba(60,86,100,0.9)}
+#pvmenu{position:fixed;inset:auto 0 0 0;max-height:62vh;display:none;z-index:50;
+  background:rgba(12,18,22,0.96);border-top:1px solid #46606c;
+  overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 12px 96px}
+#pvmenu h4{color:#8fb3bd;font:700 11px/1 system-ui,sans-serif;letter-spacing:.10em;
+  text-transform:uppercase;margin:16px 0 6px;position:sticky;top:0;
+  background:rgba(12,18,22,0.96);padding:8px 0 5px}
+.pvrow{padding:7px 0 11px;border-bottom:1px solid rgba(255,255,255,0.06)}
+.pvtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.pvlab{color:#dfe8ea;font:600 15px/1.3 system-ui,sans-serif}
+.pvval{color:#8fd0a8;font:700 15px/1.3 ui-monospace,monospace;min-width:64px;text-align:right}
+.pvtip{color:#93a7ad;font:400 12px/1.45 system-ui,sans-serif;margin-top:5px;display:none}
+.pvrow.open .pvtip{display:block}
+/* a 44 px target is the smallest thing a thumb hits reliably */
+.pvrow input[type=range]{width:100%;height:44px;margin:0;background:transparent;
+  -webkit-appearance:none;appearance:none}
+.pvrow input[type=range]::-webkit-slider-runnable-track{height:7px;border-radius:4px;
+  background:#2f4650}
+.pvrow input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:30px;height:30px;
+  border-radius:50%;background:#cf8a4a;border:2px solid #1b262b;margin-top:-12px}
+.pvrow input[type=range]::-moz-range-track{height:7px;border-radius:4px;background:#2f4650}
+.pvrow input[type=range]::-moz-range-thumb{width:30px;height:30px;border:2px solid #1b262b;
+  border-radius:50%;background:#cf8a4a}
 #pvhud{position:fixed;top:8px;left:8px;display:none;z-index:40;color:#cfe0e4;
   font:600 12px/1.5 ui-monospace,monospace;background:rgba(10,16,20,0.55);
   padding:6px 9px;border-radius:6px}
@@ -52,7 +74,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08k</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08l</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -90,7 +112,9 @@
 {"imports":{"three":"https://unpkg.com/three@0.169.0/build/three.module.js"}}
 </script>
 
+<div id="pvmenu"></div>
 <div id="pvbar">
+  <button id="pvSet">Settings</button>
   <button id="pvFwd">Forward</button>
   <button id="pvBack">Back</button>
   <button id="pvUp">Up</button>
@@ -211,7 +235,7 @@ const MENU=[
   ['Haze','fogAmt',0.00,3.00,0.05,'Distance haze. Costs nothing and does most of the work of making the reach feel long. Zero is perfectly clear air, which looks flat and makes the far bank feel like a wall.'],
   ['Scenery range m','treeRange',10.0,90.0,2.00,'How far away trees and loose rock are still drawn. Anything past this is scaled away, costing no fill and no vertex work. This is the most effective knob if the frame rate drops after loading models \u2014 the reach is over 100 m long and you can only ever see a slice of it.'],
   ['Scenery tri budget k','sceneTris',20.0,600.0,10.0,'Thousands of triangles allowed for instanced scenery. A loaded model is measured on arrival and the instance count is capped to fit, so a 15,000-triangle tree gets placed a few dozen times rather than 250 times and 3.7 million triangles. That measurement is reported when the model loads.'],
-  ['Use model assets','assetOn',0,1,1,'Whether files in the assets folder are used at all. Turning this off falls back to the built-in procedural meshes without deleting anything, which is the quickest way to confirm whether a model is what cost you the frame rate. Takes effect on reload.'],
+  ['Use model assets','assetOn',0,1,1,'Whether files in the assets folder are used at all. Turning this off falls back to the built-in procedural meshes without deleting anything, which is the quickest way to confirm whether a model is what cost you the frame rate. Swaps live, both ways \u2014 no reload.'],
   ['Bank growth','bankGrass',0.00,1.00,0.05,'Density of grass and scrub along the banks. Drawn as a single instanced mesh, so the whole bank is one draw call regardless of this setting.'],
   ['Fish detail','fishDetail',0.00,2.00,0.05,'Strength of the scale and spot relief on the trout. This is a generated normal map, not extra geometry, so it costs nothing per fish.'],
   ['Wet shine','wetShine',0.00,3.00,0.05,'How much glossier a trout goes the instant it clears the water. A wet fish out of the river is close to a mirror; this is what sells a jump and a landed fish in the hand.'],
@@ -1692,7 +1716,8 @@ for(let i=0;i<TREE_N;i++)
 function placeTrees(){
   if(!coniferMesh) return;
   let n=Math.round(TREE_N*Math.max(0,Math.min(1,P.bankGrass)));
-  if(assetVariants) n=Math.min(n,budgetInstances(assetTreeTris,TREE_N));
+  const useA=assetVariants&&useAssets();
+  if(useA) n=Math.min(n,budgetInstances(assetTreeTris,TREE_N));
   const hidden=new THREE.Matrix4();
   {const q=new THREE.Quaternion(),s0=new THREE.Vector3(0.0001,0.0001,0.0001),
          p0=new THREE.Vector3(0,-999,0);hidden.compose(p0,q,s0);}
@@ -1711,7 +1736,7 @@ function placeTrees(){
     _gQ.setFromEuler(_treeE.set(s.lean,s.yaw,s.lean*0.7,'YXZ'));
     _gS.setScalar(ok?s.sc:0.0001);
     _gM.compose(_gP,_gQ,_gS);
-    if(assetVariants){
+    if(useA){
       /* Instance i belongs to one variant. Every mesh WITHIN that variant gets
          the same matrix, so a model split into a trunk mesh and a leaf mesh
          stays assembled; every other variant hides that slot. */
@@ -1725,7 +1750,7 @@ function placeTrees(){
     if(s.conifer){ if(ci<TREE_N) coniferMesh.setMatrixAt(ci++,_gM); }
     else         { if(bi<TREE_N) broadMesh.setMatrixAt(bi++,_gM); }
   }
-  if(assetVariants){
+  if(useA){
     for(const V of assetVariants) for(const im of V.meshes) im.instanceMatrix.needsUpdate=true;
     return;
   }
@@ -1855,6 +1880,32 @@ async function loadSlot(slot){
 /* ── SCATTER SLOTS ──────────────────────────────────────────────────────── */
 let assetTrees=null, assetVariants=null, assetTreeTris=0;
 let assetRocks=null, assetRockVariants=null, assetRockTris=0;
+const assetRigGroups=[];          /* {anchor, group} for every swapped rig part */
+const useAssets=()=>P.assetOn>0.5;
+
+/* 'Use model assets' only ever gated the LOAD, which runs once at startup. Once
+   models were in the scene, turning it off changed nothing — the instanced
+   meshes stayed visible and the procedural ones stayed hidden. That is backwards
+   for the one setting whose entire purpose is A/B testing whether a model is
+   what cost you the frame rate, so it now swaps live in both directions. */
+function applyAssetToggle(){
+  const on=useAssets();
+  if(assetVariants){
+    for(const V of assetVariants) for(const im of V.meshes) im.visible=on;
+    if(coniferMesh) coniferMesh.visible=!on;
+    if(broadMesh)   broadMesh.visible=!on;
+  }
+  if(assetRockVariants){
+    for(const V of assetRockVariants) for(const im of V.meshes) im.visible=on;
+    if(rockMesh) rockMesh.visible=!on;
+  }
+  for(const {anchor,group} of assetRigGroups){
+    group.visible=on;
+    for(const ch of anchor.children) if(ch!==group) ch.visible=!on;
+  }
+  if(troutAsset) for(const f of fishes) f.rebuildMesh();
+  placeTrees();placeRocks();
+}
 
 /* A detailed model placed 250 times is 250x its triangle count, and that is
    almost always what a frame-rate drop after loading an asset turns out to be.
@@ -1929,6 +1980,7 @@ async function loadSceneAssets(){
       if(rot) grp.rotation.y=rot;
       anchor.add(grp);
       for(const ch of anchor.children) if(ch!==grp) ch.visible=false;
+      assetRigGroups.push({anchor,group:grp});
       say(slot+' model loaded');
     }
   }catch(e){ /* no loader, no network, or no assets: procedural scenery stays */ }
@@ -1981,7 +2033,7 @@ function placeRocks(){
     _gS.set(s.r,s.r*(0.62+s.tone*0.35),s.r*(0.82+s.tone*0.3));
     if(!ok) _gS.setScalar(0.0001);
     _gM.compose(_gP,_gQ,_gS);
-    if(assetRockVariants){
+    if(assetRockVariants&&useAssets()){
       const nV=assetRockVariants.length, mine=i%nV;
       for(let vi=0;vi<nV;vi++){
         const use=ok&&vi===mine;
@@ -1995,7 +2047,7 @@ function placeRocks(){
     _gC.setHSL(0.09+s.tone*0.05,0.06+s.tone*0.05,(0.30+s.tone*0.20)*(1-wet*0.45));
     rockMesh.setColorAt(i,_gC);
   }
-  if(assetRockVariants){
+  if(assetRockVariants&&useAssets()){
     for(const V of assetRockVariants) for(const im of V.meshes) im.instanceMatrix.needsUpdate=true;
     return;
   }
@@ -2564,7 +2616,7 @@ function finShape(pts){
 }
 function makeTrout(len){
   const g=new THREE.Group();
-  if(troutAsset){
+  if(troutAsset&&useAssets()){
     /* the model's own material inherits the swim shader, so a loaded fish
        still undulates and still goes glossy the moment it clears the water */
     const mat=makeSwimMaterial(troutAsset.mat);
@@ -4083,6 +4135,7 @@ function onSettingChanged(key){
   if(key==='bankGrass'){placeGrass();placeTrees();}
   if(key==='reelHand')applyReelHand();
   if(key==='treeRange'||key==='sceneTris'){placeTrees();placeRocks();}
+  if(key==='assetOn')applyAssetToggle();
   if(key==='speckSize'){speckMat.uniforms.uSize.value=P.speckSize;gSpeckMat.uniforms.uSize.value=P.speckSize;}
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
   if(key==='hudScale')hud.mesh.scale.setScalar(P.hudScale);
@@ -4844,6 +4897,7 @@ function previewStop(){
   document.getElementById('overlay').classList.remove('gone');
   document.getElementById('pvbar').style.display='none';
   document.getElementById('pvhud').style.display='none';
+  document.getElementById('pvmenu').style.display='none';
 }
 function previewUpdate(dt){
   if(!previewOn) return;
@@ -4891,6 +4945,57 @@ function previewUpdate(dt){
   hold('pvFwd','f');hold('pvBack','b');hold('pvUp','u');hold('pvDown','d');
   document.getElementById('pvExit').addEventListener('click',previewStop);
   document.getElementById('pvShot').addEventListener('click',()=>{pvShotWanted=true;});
+
+  /* ── touch settings panel ───────────────────────────────────────────────
+     Built from the same MENU array the in-headset menu uses, so labels,
+     ranges, steps and tooltips have exactly one definition. Only the visual
+     and water rows are listed: this is for judging how the river LOOKS on a
+     phone, and the physics rows are useless without a rod in your hand. */
+  const PV_GROUPS=[
+    ['Water',   ['current','grade','waterModel','waterDetail','foam','skyGlint']],
+    ['Sky and air',['fogAmt']],
+    ['Scenery', ['bankGrass','treeRange','sceneTris','assetOn']],
+    ['Fish',    ['riseAggro','riseRate','fishDetail','wetShine','takeRadius','showZones','showMarkers']],
+    ['Comfort', ['flySize','lineVis']],
+  ];
+  const panel=document.getElementById('pvmenu');
+  const rowByKey={};
+  for(const [title,keys] of PV_GROUPS){
+    const rows=keys.map(k=>MENU.find(m=>m[1]===k)).filter(Boolean);
+    if(!rows.length) continue;
+    const h=document.createElement('h4');h.textContent=title;panel.appendChild(h);
+    for(const [label,key,lo,hi,st,tip] of rows){
+      const row=document.createElement('div');row.className='pvrow';
+      const top=document.createElement('div');top.className='pvtop';
+      const lab=document.createElement('span');lab.className='pvlab';lab.textContent=label;
+      const val=document.createElement('span');val.className='pvval';
+      const inp=document.createElement('input');
+      inp.type='range';inp.min=lo;inp.max=hi;inp.step=st||0.01;inp.value=P[key];
+      const tipEl=document.createElement('div');tipEl.className='pvtip';tipEl.textContent=tip||'';
+      const fmt=v=>st>=1?String(Math.round(v)):v.toFixed(2);
+      val.textContent=fmt(P[key]);
+      inp.addEventListener('input',()=>{
+        let v=parseFloat(inp.value);
+        if(st>=1) v=Math.round(v/st)*st;
+        P[key]=v;val.textContent=fmt(v);
+        onSettingChanged(key);
+      });
+      top.appendChild(lab);top.appendChild(val);
+      row.appendChild(top);row.appendChild(inp);row.appendChild(tipEl);
+      /* tap the name to read why the setting exists */
+      lab.addEventListener('click',()=>row.classList.toggle('open'));
+      panel.appendChild(row);
+      rowByKey[key]={inp,val,fmt};
+    }
+  }
+  document.getElementById('pvSet').addEventListener('click',()=>{
+    const open=panel.style.display==='block';
+    panel.style.display=open?'none':'block';
+    if(!open) for(const k in rowByKey){          /* resync if VR changed them */
+      rowByKey[k].inp.value=P[k];
+      rowByKey[k].val.textContent=rowByKey[k].fmt(P[k]);
+    }
+  });
 }
 
 const overlay=document.getElementById('overlay'),enterBtn=document.getElementById('enter'),hint=document.getElementById('hint');
