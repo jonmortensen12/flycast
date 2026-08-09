@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08j</title>
+<title>Flycast — v8 one line — build 2026-08-08k</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -25,6 +25,17 @@
   .cols h2{font-size:.66rem;letter-spacing:.26em;text-transform:uppercase;color:var(--copper);margin:0 0 .55rem}
   .cols p{margin:0 0 .4rem;font-size:.75rem;line-height:1.6;color:#c3ccca}
   .cols b{color:var(--mayfly);font-weight:700}
+#preview{background:#2a3a44;color:#dfe8ea;border:1px solid #46606c;border-radius:8px;
+  padding:12px 20px;font:600 15px/1 system-ui,sans-serif;margin-top:10px;cursor:pointer}
+#preview:active{background:#354b57}
+#pvbar{position:fixed;left:0;right:0;bottom:0;display:none;gap:8px;padding:10px;
+  justify-content:center;background:linear-gradient(transparent,rgba(0,0,0,0.55));z-index:40}
+#pvbar button{background:rgba(20,30,36,0.82);color:#dfe8ea;border:1px solid #46606c;
+  border-radius:8px;padding:12px 14px;font:600 14px/1 system-ui,sans-serif;cursor:pointer}
+#pvbar button:active{background:rgba(60,86,100,0.9)}
+#pvhud{position:fixed;top:8px;left:8px;display:none;z-index:40;color:#cfe0e4;
+  font:600 12px/1.5 ui-monospace,monospace;background:rgba(10,16,20,0.55);
+  padding:6px 9px;border-radius:6px}
   #enter{align-self:flex-start;background:var(--copper);color:#140d07;border:0;cursor:pointer;
     font-family:"Space Mono",monospace;font-weight:700;font-size:.9rem;letter-spacing:.18em;
     text-transform:uppercase;padding:1rem 2.3rem;border-radius:2px;
@@ -41,7 +52,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08j</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08k</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -67,6 +78,7 @@
   </div>
 
   <button id="enter">Enter VR</button>
+  <button id="preview">Look around (no headset)</button>
 
   <p class="note" id="hint">
     Nothing pushes the line anywhere. Every metre that leaves the spool or the tiptop does so because
@@ -78,6 +90,15 @@
 {"imports":{"three":"https://unpkg.com/three@0.169.0/build/three.module.js"}}
 </script>
 
+<div id="pvbar">
+  <button id="pvFwd">Forward</button>
+  <button id="pvBack">Back</button>
+  <button id="pvUp">Up</button>
+  <button id="pvDown">Down</button>
+  <button id="pvShot">Photo</button>
+  <button id="pvExit">Exit</button>
+</div>
+<div id="pvhud"></div>
 <script type="module">
 import * as THREE from 'three';
 
@@ -1419,7 +1440,7 @@ const skyMat=new THREE.ShaderMaterial({
         vec2 cp=vDir.xz/(vDir.y+0.25);
         float d1=fbm(cp*0.62+vec2(uTime*0.0045,uTime*0.0016));
         float d2=fbm(cp*1.45-vec2(uTime*0.0080,0.0));
-        float cov=smoothstep(0.52,0.86,d1*0.72+d2*0.34);
+        float cov=smoothstep(0.40,0.70,d1*0.72+d2*0.34);
         cov*=smoothstep(0.02,0.30,vDir.y);
         /* lit tops, shaded bases */
         float lit=smoothstep(0.45,0.95,d1);
@@ -1429,19 +1450,21 @@ const skyMat=new THREE.ShaderMaterial({
 
       /* two ridgelines: a far range washed almost to haze, a nearer darker one */
       float az=atan(vDir.z,vDir.x);
-      float far=0.055+ridge(az,0.0,1.0)*0.045;
+      /* Haze mix was so heavy the ranges read as faint bumps rather than
+         mountains. Rendered offline against the same maths to check. */
+      float far=0.070+ridge(az,0.0,1.0)*0.055;
       float near=0.030+ridge(az,4.2,1.0)*0.030;
       if(vDir.y<far){
         float shade=smoothstep(far,far-0.16,vDir.y);
-        vec3 mtn=mix(vec3(0.52,0.57,0.62),vec3(0.30,0.36,0.40),shade);
+        vec3 mtn=mix(vec3(0.46,0.52,0.60),vec3(0.22,0.28,0.34),shade);
         /* snow on the tops of the far range */
-        mtn=mix(mtn,vec3(0.93,0.95,0.97),smoothstep(0.085,0.115,vDir.y)*0.8);
-        c=mix(c,mix(mtn,uHaze,0.55),smoothstep(far+0.004,far-0.004,vDir.y));
+        mtn=mix(mtn,vec3(0.93,0.95,0.97),smoothstep(0.100,0.132,vDir.y)*0.85);
+        c=mix(c,mix(mtn,uHaze,0.34),smoothstep(far+0.004,far-0.004,vDir.y));
       }
       if(vDir.y<near){
         float shade=smoothstep(near,near-0.10,vDir.y);
-        vec3 mtn=mix(vec3(0.34,0.40,0.35),vec3(0.19,0.25,0.21),shade);
-        c=mix(c,mix(mtn,uHaze,0.28),smoothstep(near+0.003,near-0.003,vDir.y));
+        vec3 mtn=mix(vec3(0.26,0.33,0.27),vec3(0.12,0.18,0.13),shade);
+        c=mix(c,mix(mtn,uHaze,0.12),smoothstep(near+0.003,near-0.003,vDir.y));
       }
 
       float s=max(dot(vDir,normalize(uSun)),0.0);
@@ -4769,7 +4792,28 @@ renderer.setAnimationLoop(()=>{
 
   hudT+=dt;
   if(hudT>0.1){hudT=0;drawHUD();if(menuOpen)drawMenu();if(recOpen)drawRec();}
+  previewUpdate(dt);
   renderer.render(scene,camera);
+  if(previewOn){
+    /* The screenshot has to be read in the SAME frame as the draw. Without
+       preserveDrawingBuffer the back buffer is gone by the next event, and
+       turning that flag on would cost every VR frame for a feature used on a
+       phone. Reading here costs nothing until the button is pressed. */
+    if(pvShotWanted){
+      pvShotWanted=false;
+      try{
+        const url=renderer.domElement.toDataURL('image/png');
+        const a=document.createElement('a');
+        a.href=url;a.download='flycast-'+Date.now()+'.png';a.click();
+      }catch(e){}
+    }
+    const hud=document.getElementById('pvhud');
+    if(hud) hud.textContent=
+      'x '+player.position.x.toFixed(1)+'  z '+player.position.z.toFixed(1)+
+      '   '+(1/Math.max(dt,1e-4)).toFixed(0)+' fps'+
+      '   tris '+renderer.info.render.triangles+
+      '   draws '+renderer.info.render.calls;
+  }
 });
 
 addEventListener('resize',()=>{
@@ -4780,7 +4824,77 @@ addEventListener('resize',()=>{
 /* ════════════════════════════════════════════════════════════
    9. ENTER VR
    ════════════════════════════════════════════════════════════ */
+/* ── FLAT PREVIEW ─────────────────────────────────────────────────────────
+   WebXR immersive-vr does not exist on a phone — Android exposes immersive-AR
+   through ARCore and nothing else, and Cardboard-style VR was removed years
+   ago. So the way to see this without a headset is not WebXR at all: it is an
+   ordinary flat render with a camera you can drag around, which any phone
+   browser will do. The simulation is untouched; only the camera changes. */
+let previewOn=false, pvYaw=0, pvPitch=-0.12, pvShotWanted=false;
+const pvKeys={f:0,b:0,u:0,d:0};
+function previewStart(){
+  previewOn=true;started=false;
+  document.getElementById('overlay').classList.add('gone');
+  document.getElementById('pvbar').style.display='flex';
+  document.getElementById('pvhud').style.display='block';
+  try{audioInit();}catch(e){}
+}
+function previewStop(){
+  previewOn=false;
+  document.getElementById('overlay').classList.remove('gone');
+  document.getElementById('pvbar').style.display='none';
+  document.getElementById('pvhud').style.display='none';
+}
+function previewUpdate(dt){
+  if(!previewOn) return;
+  const sp=(pvKeys.f-pvKeys.b)*3.2*dt, rise=(pvKeys.u-pvKeys.d)*1.8*dt;
+  if(sp){
+    player.position.x+=Math.sin(pvYaw)*-sp;
+    player.position.z+=Math.cos(pvYaw)*-sp;
+  }
+  if(rise) player.position.y=Math.max(-0.6,player.position.y+rise);
+  camera.rotation.set(pvPitch,pvYaw,0,'YXZ');
+}
+{
+  const cv=renderer.domElement;
+  let drag=false,lx=0,ly=0,pinch=0;
+  cv.style.touchAction='none';
+  cv.addEventListener('pointerdown',e=>{
+    if(!previewOn) return;
+    drag=true;lx=e.clientX;ly=e.clientY;cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove',e=>{
+    if(!previewOn||!drag) return;
+    const k=2.6/Math.max(320,innerWidth);
+    pvYaw-=(e.clientX-lx)*k;
+    pvPitch=Math.max(-1.35,Math.min(1.1,pvPitch-(e.clientY-ly)*k));
+    lx=e.clientX;ly=e.clientY;
+  });
+  const end=()=>{drag=false;};
+  cv.addEventListener('pointerup',end);cv.addEventListener('pointercancel',end);
+  /* two fingers pinched together or apart walks forward and back */
+  cv.addEventListener('touchmove',e=>{
+    if(!previewOn||e.touches.length<2) return;
+    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
+                       e.touches[0].clientY-e.touches[1].clientY);
+    if(pinch){ const dd=d-pinch; pvKeys.f=dd>2?1:0; pvKeys.b=dd<-2?1:0; }
+    pinch=d;
+  },{passive:true});
+  cv.addEventListener('touchend',()=>{pinch=0;pvKeys.f=0;pvKeys.b=0;});
+  const hold=(id,key)=>{
+    const b=document.getElementById(id);
+    const on=e=>{e.preventDefault();pvKeys[key]=1;};
+    const off=e=>{e.preventDefault();pvKeys[key]=0;};
+    b.addEventListener('pointerdown',on);b.addEventListener('pointerup',off);
+    b.addEventListener('pointerleave',off);b.addEventListener('pointercancel',off);
+  };
+  hold('pvFwd','f');hold('pvBack','b');hold('pvUp','u');hold('pvDown','d');
+  document.getElementById('pvExit').addEventListener('click',previewStop);
+  document.getElementById('pvShot').addEventListener('click',()=>{pvShotWanted=true;});
+}
+
 const overlay=document.getElementById('overlay'),enterBtn=document.getElementById('enter'),hint=document.getElementById('hint');
+document.getElementById('preview').addEventListener('click',previewStart);
 if(!navigator.xr){
   enterBtn.disabled=true;enterBtn.textContent='WebXR unavailable';
   hint.innerHTML='<b>No WebXR here.</b> Mouse aims, Space reels, F routes / Shift pinches line, '+
