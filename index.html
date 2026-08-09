@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08m</title>
+<title>Flycast — v8 one line — build 2026-08-08n</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -50,6 +50,9 @@
 .pvtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .pvlab{color:#dfe8ea;font:600 15px/1.3 system-ui,sans-serif}
 .pvval{color:#8fd0a8;font:700 15px/1.3 ui-monospace,monospace;min-width:64px;text-align:right}
+.pvmul{background:#22333b;color:#8fb3bd;border:1px solid #3c5560;border-radius:7px;
+  padding:8px 10px;min-width:52px;font:700 13px/1 ui-monospace,monospace;cursor:pointer}
+.pvmul.on{background:#cf8a4a;color:#1b120a;border-color:#cf8a4a}
 .pvtip{color:#93a7ad;font:400 12px/1.45 system-ui,sans-serif;margin-top:5px;display:none}
 .pvrow.open .pvtip{display:block}
 /* a 44 px target is the smallest thing a thumb hits reliably */
@@ -81,7 +84,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08m</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08n</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -1911,7 +1914,16 @@ function applyAssetToggle(){
     group.visible=on;
     for(const ch of anchor.children) if(ch!==group) ch.visible=!on;
   }
-  if(troutAsset) for(const f of fishes) f.rebuildMesh();
+  if(troutAsset){
+    for(const f of fishes) f.rebuildMesh();
+    /* the display fish is a plain mesh, not a Trout, so it needs its own swap */
+    if(pvFish){
+      const vis=pvFish.visible, pos=pvFish.position.clone();
+      scene.remove(pvFish);pvFish=null;
+      pvFishEnsure();
+      if(pvFish){pvFish.visible=vis;pvFish.position.copy(pos);}
+    }
+  }
   placeTrees();placeRocks();
 }
 
@@ -2707,14 +2719,21 @@ function makeTrout(len){
   /* MOUTH. The body is a closed sweep, so the nose was a blank bullet. A trout
      has a long jaw hinged back under the eye — a dark gape running from the
      snout to below the front of the eye, with a pale lower jaw beneath it. */
+  /* MOUTH. Two mistakes here. The tilt was POSITIVE, which lifts the back of
+     the gape and drops the snout — the opposite of a trout, whose jaw hinges
+     back and BELOW the eye while the snout tip rides higher. And the matrix
+     was built scale-then-rotate (M = S*R), so the rotation happened first and
+     the 0.24 vertical squash then sheared it, cutting an intended 0.16 rad
+     tilt down to about 0.04 and skewing the shape on the way. Rotating the
+     already-squashed ellipsoid (M = R*S) is the order that means anything. */
   const noseT=0.030, noseH=0.125*prof(noseT), noseW=noseH*0.52;
-  const gape=new THREE.Matrix4().makeScale(1,0.24,0.92);
-  gape.multiply(new THREE.Matrix4().makeRotationZ(0.16));
-  gape.setPosition(noseT-0.5+0.028,-noseH*0.10,0);
-  headParts.push({geo:new THREE.SphereGeometry(0.052,12,8),mat:gape,col:GAPE});
-  const jaw=new THREE.Matrix4().makeScale(1,0.34,0.86);
-  jaw.multiply(new THREE.Matrix4().makeRotationZ(0.10));
-  jaw.setPosition(noseT-0.5+0.030,-noseH*0.52,0);
+  const gape=new THREE.Matrix4().makeRotationZ(-0.22);
+  gape.multiply(new THREE.Matrix4().makeScale(1,0.24,0.92));
+  gape.setPosition(noseT-0.5+0.030,-noseH*0.06,0);
+  headParts.push({geo:new THREE.SphereGeometry(0.054,12,8),mat:gape,col:GAPE});
+  const jaw=new THREE.Matrix4().makeRotationZ(-0.16);
+  jaw.multiply(new THREE.Matrix4().makeScale(1,0.34,0.86));
+  jaw.setPosition(noseT-0.5+0.032,-noseH*0.50,0);
   headParts.push({geo:new THREE.SphereGeometry(0.050,12,8),mat:jaw,col:LIP});
   g.add(new THREE.Mesh(mergeGeos(headParts),
     new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.10,metalness:0.35})));
@@ -4184,7 +4203,20 @@ function audioInit(){
     s2.connect(SND.swishF); SND.swishF.connect(SND.swishGain); SND.swishGain.connect(SND.master);
     s2.start();
     SND.ok=true;
+    /* An AudioContext is born SUSPENDED and stays that way until something
+       resumes it. Creating one inside a click handler is usually enough on
+       desktop Chrome, but the Quest Browser and iOS Safari both want the call
+       made explicitly — and this was never calling it, so every voice was
+       wired up correctly and playing into a stopped clock. */
+    if(ctx.state!=='running') ctx.resume().catch(()=>{});
   }catch(e){}
+}
+/* Belt and braces: any later gesture nudges a context that is still suspended,
+   which covers the case where the very first one was refused. */
+for(const ev of ['pointerdown','touchend','keydown']){
+  window.addEventListener(ev,()=>{
+    if(SND.ok&&SND.ctx&&SND.ctx.state!=='running') SND.ctx.resume().catch(()=>{});
+  },{passive:true});
 }
 function sndBurst(freq,Q,dur,vol,sweep){
   if(!SND.ok||P.volume<=0.001) return;
@@ -4875,6 +4907,7 @@ renderer.setAnimationLoop(()=>{
       '   '+(1/Math.max(dt,1e-4)).toFixed(0)+' fps'+
       '   tris '+renderer.info.render.triangles+
       '   draws '+renderer.info.render.calls+
+      '   audio '+(SND.ok?(SND.ctx?SND.ctx.state:'?'):'off')+
       (pvLabel?'\n'+pvLabel+(pvFishSpeed!==1?'   '+pvFishSpeed+'\u00d7':''):'');
   }
 });
@@ -4902,7 +4935,7 @@ function previewStart(){
   document.getElementById('pvhud').style.display='block';
   pvFishEnsure();
   if(pvFish) pvFish.visible=true;
-  try{audioInit();}catch(e){}
+  try{audioInit(); if(SND.ok&&SND.ctx) SND.ctx.resume().catch(()=>{}); }catch(e){}
 }
 function previewStop(){
   previewOn=false;
@@ -4936,7 +4969,7 @@ function pvFishEnsure(){
   pvFish=makeTrout(0.36);
   pvFish.rotation.order='YZX';
   /* just inside the near bank, at eye level, so you can walk round it */
-  pvBase.set(0,1.42,CZ+HALFW*0.92);
+  pvBase.set(0,1.12,CZ+HALFW*0.92);
   pvFish.position.copy(pvBase);
   scene.add(pvFish);
 }
@@ -5049,9 +5082,12 @@ function previewUpdate(dt){
      phone, and the physics rows are useless without a rod in your hand. */
   const PV_GROUPS=[
     ['Water',   ['current','grade','waterModel','waterDetail','foam','skyGlint']],
+    ['Specks',  ['speckGPU','specks','speckSize','speckRange','speckSpread',
+                 'speckTravel','speckTrail']],
     ['Sky and air',['fogAmt']],
     ['Scenery', ['bankGrass','treeRange','sceneTris','assetOn']],
     ['Fish',    ['riseAggro','riseRate','fishDetail','wetShine','takeRadius','showZones','showMarkers']],
+    ['Sound',   ['volume','volRiver','volSplash','volLine','volReel']],
     ['Comfort', ['flySize','lineVis']],
   ];
   const panel=document.getElementById('pvmenu');
@@ -5059,7 +5095,9 @@ function previewUpdate(dt){
      panel sat on top — so opening it hid the very button that closes it.
      The bar now sits above the panel, and the panel carries its own Done. */
   const closeBar=document.createElement('div');closeBar.id='pvclose';
-  const ct=document.createElement('span');ct.textContent='Settings';
+  const ct=document.createElement('span');
+  ct.textContent='Settings \u2014 tap a name for help, \u00d7 to widen its range';
+  ct.style.font='600 12px/1.3 system-ui,sans-serif';ct.style.color='#93a7ad';
   const cb=document.createElement('button');cb.textContent='Done';
   closeBar.appendChild(ct);closeBar.appendChild(cb);panel.appendChild(closeBar);
   const rowByKey={};
@@ -5073,17 +5111,29 @@ function previewUpdate(dt){
       const lab=document.createElement('span');lab.className='pvlab';lab.textContent=label;
       const val=document.createElement('span');val.className='pvval';
       const inp=document.createElement('input');
-      inp.type='range';inp.min=lo;inp.max=hi;inp.step=st||0.01;inp.value=P[key];
+      inp.type='range';inp.step=st||0.01;
       const tipEl=document.createElement('div');tipEl.className='pvtip';tipEl.textContent=tip||'';
       const fmt=v=>st>=1?String(Math.round(v)):v.toFixed(2);
+      /* Same range multiplier the headset menu uses — rowRange and cycleRange
+         are shared, so a range widened on the phone is widened in VR too. */
+      const mul=document.createElement('button');mul.className='pvmul';
+      const applyRange=()=>{
+        const [a,b]=rowRange(key,lo,hi);
+        inp.min=a;inp.max=b;inp.value=P[key];
+        const m=rx(key);
+        mul.textContent=(m>=1?m:m===0.1?'0.1':'0.01')+'\u00d7';
+        mul.classList.toggle('on',m!==1);
+      };
+      applyRange();
       val.textContent=fmt(P[key]);
+      mul.addEventListener('click',e=>{e.stopPropagation();cycleRange(key,lo,hi);applyRange();});
       inp.addEventListener('input',()=>{
         let v=parseFloat(inp.value);
         if(st>=1) v=Math.round(v/st)*st;
         P[key]=v;val.textContent=fmt(v);
         onSettingChanged(key);
       });
-      top.appendChild(lab);top.appendChild(val);
+      top.appendChild(lab);top.appendChild(val);top.appendChild(mul);
       row.appendChild(top);row.appendChild(inp);row.appendChild(tipEl);
       /* tap the name to read why the setting exists */
       lab.addEventListener('click',()=>row.classList.toggle('open'));
