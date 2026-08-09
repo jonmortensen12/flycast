@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08l</title>
+<title>Flycast — v8 one line — build 2026-08-08m</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -29,15 +29,22 @@
   padding:12px 20px;font:600 15px/1 system-ui,sans-serif;margin-top:10px;cursor:pointer}
 #preview:active{background:#354b57}
 #pvbar{position:fixed;left:0;right:0;bottom:0;display:none;gap:8px;padding:10px;
-  justify-content:center;background:linear-gradient(transparent,rgba(0,0,0,0.55));z-index:40}
+  justify-content:center;background:linear-gradient(transparent,rgba(0,0,0,0.55));z-index:60;
+  flex-wrap:wrap}
 #pvbar button{background:rgba(20,30,36,0.82);color:#dfe8ea;border:1px solid #46606c;
   border-radius:8px;padding:12px 14px;font:600 14px/1 system-ui,sans-serif;cursor:pointer}
 #pvbar button:active{background:rgba(60,86,100,0.9)}
 #pvmenu{position:fixed;inset:auto 0 0 0;max-height:62vh;display:none;z-index:50;
   background:rgba(12,18,22,0.96);border-top:1px solid #46606c;
   overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 12px 96px}
+#pvclose{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;
+  align-items:center;background:rgba(12,18,22,0.98);padding:12px 0 10px;
+  border-bottom:1px solid #2c4048;margin-bottom:4px}
+#pvclose span{color:#dfe8ea;font:700 15px/1 system-ui,sans-serif}
+#pvclose button{background:#cf8a4a;color:#1b120a;border:0;border-radius:8px;
+  padding:11px 20px;font:700 15px/1 system-ui,sans-serif;cursor:pointer}
 #pvmenu h4{color:#8fb3bd;font:700 11px/1 system-ui,sans-serif;letter-spacing:.10em;
-  text-transform:uppercase;margin:16px 0 6px;position:sticky;top:0;
+  text-transform:uppercase;margin:16px 0 6px;position:sticky;top:46px;
   background:rgba(12,18,22,0.96);padding:8px 0 5px}
 .pvrow{padding:7px 0 11px;border-bottom:1px solid rgba(255,255,255,0.06)}
 .pvtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
@@ -57,7 +64,7 @@
   border-radius:50%;background:#cf8a4a}
 #pvhud{position:fixed;top:8px;left:8px;display:none;z-index:40;color:#cfe0e4;
   font:600 12px/1.5 ui-monospace,monospace;background:rgba(10,16,20,0.55);
-  padding:6px 9px;border-radius:6px}
+  padding:6px 9px;border-radius:6px;white-space:pre-line}
   #enter{align-self:flex-start;background:var(--copper);color:#140d07;border:0;cursor:pointer;
     font-family:"Space Mono",monospace;font-weight:700;font-size:.9rem;letter-spacing:.18em;
     text-transform:uppercase;padding:1rem 2.3rem;border-radius:2px;
@@ -74,7 +81,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08l</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08m</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -119,6 +126,7 @@
   <button id="pvBack">Back</button>
   <button id="pvUp">Up</button>
   <button id="pvDown">Down</button>
+  <button id="pvFish">Fish 1&times;</button>
   <button id="pvShot">Photo</button>
   <button id="pvExit">Exit</button>
 </div>
@@ -4846,6 +4854,7 @@ renderer.setAnimationLoop(()=>{
   hudT+=dt;
   if(hudT>0.1){hudT=0;drawHUD();if(menuOpen)drawMenu();if(recOpen)drawRec();}
   previewUpdate(dt);
+  if(previewOn) pvFishUpdate(dt,t);
   renderer.render(scene,camera);
   if(previewOn){
     /* The screenshot has to be read in the SAME frame as the draw. Without
@@ -4865,7 +4874,8 @@ renderer.setAnimationLoop(()=>{
       'x '+player.position.x.toFixed(1)+'  z '+player.position.z.toFixed(1)+
       '   '+(1/Math.max(dt,1e-4)).toFixed(0)+' fps'+
       '   tris '+renderer.info.render.triangles+
-      '   draws '+renderer.info.render.calls;
+      '   draws '+renderer.info.render.calls+
+      (pvLabel?'\n'+pvLabel+(pvFishSpeed!==1?'   '+pvFishSpeed+'\u00d7':''):'');
   }
 });
 
@@ -4890,6 +4900,8 @@ function previewStart(){
   document.getElementById('overlay').classList.add('gone');
   document.getElementById('pvbar').style.display='flex';
   document.getElementById('pvhud').style.display='block';
+  pvFishEnsure();
+  if(pvFish) pvFish.visible=true;
   try{audioInit();}catch(e){}
 }
 function previewStop(){
@@ -4898,7 +4910,85 @@ function previewStop(){
   document.getElementById('pvbar').style.display='none';
   document.getElementById('pvhud').style.display='none';
   document.getElementById('pvmenu').style.display='none';
+  if(pvFish) pvFish.visible=false;
 }
+/* ── DISPLAY FISH ─────────────────────────────────────────────────────────
+   A single trout hanging at eye level over the near bank, cycling through
+   every animation the game has so the model can be inspected without hooking
+   one. It reuses Trout.prototype.riseProfile rather than copying the curves,
+   so what you see here is exactly what the river does — if the profiles are
+   ever retuned this follows automatically. */
+const PV_SEQ=[
+  {k:'swim',d:3.0,l:'holding \u2014 idle beat'},
+  {k:'rise',kind:0,d:1.05,l:'rise: sip'},
+  {k:'swim',d:2.0,l:'holding'},
+  {k:'rise',kind:1,d:0.90,l:'rise: head and tail'},
+  {k:'swim',d:2.0,l:'holding'},
+  {k:'rise',kind:2,d:0.42,l:'rise: slash'},
+  {k:'swim',d:2.0,l:'holding'},
+  {k:'take',d:1.10,l:'swim to the fly and take'},
+  {k:'swim',d:2.5,l:'holding'},
+];
+let pvFish=null,pvPhase=0,pvPT=0,pvFishSpeed=1,pvFishYaw=0,pvLabel='';
+const pvBase=new THREE.Vector3();
+function pvFishEnsure(){
+  if(pvFish) return;
+  pvFish=makeTrout(0.36);
+  pvFish.rotation.order='YZX';
+  /* just inside the near bank, at eye level, so you can walk round it */
+  pvBase.set(0,1.42,CZ+HALFW*0.92);
+  pvFish.position.copy(pvBase);
+  scene.add(pvFish);
+}
+function pvFishUpdate(dt,t){
+  if(!pvFish) return;
+  const step=dt*pvFishSpeed;
+  const ph=PV_SEQ[pvPhase];
+  pvPT+=step;
+  const u=Math.min(1,pvPT/ph.d);
+  const mat=pvFish.userData.swim, uu=mat.userData.u;
+  uu.uT.value=t;
+  let pitch=0,roll=0,fwd=0,lift=0;
+  if(ph.k==='swim'){
+    uu.uSpd.value=2.6;uu.uAmp.value=1.0;
+    pvFishYaw+=step*0.50;              /* turn slowly so both flanks come round */
+    lift=Math.sin(t*1.1)*0.012;
+  } else if(ph.k==='rise'){
+    uu.uSpd.value=ph.kind===2?11.0:7.0;uu.uAmp.value=1.0;
+    const RP=Trout.prototype.riseProfile;
+    const pr=RP.call({riseKind:ph.kind},u);
+    const pv=RP.call({riseKind:ph.kind},Math.max(0,u-0.03));
+    const span=0.36;                   /* stand-in for lie-to-surface travel */
+    lift=pr.y*span; fwd=pr.f*0.55; roll=pr.roll;
+    const dy=(pr.y-pv.y)*span, df=(pr.f-pv.f)*0.55;
+    pitch=Math.atan2(dy,Math.max(df,0.004))*pr.lead;
+  } else {
+    uu.uSpd.value=9.0;uu.uAmp.value=1.0;
+    const e=u*u*(3-2*u), eP=Math.max(0,u-0.03), e2=eP*eP*(3-2*eP);
+    fwd=e*0.70; lift=Math.pow(e,0.66)*0.20;
+    pitch=Math.atan2((Math.pow(e,0.66)-Math.pow(e2,0.66))*0.20,
+                     Math.max((e-e2)*0.70,0.004))*0.80;
+  }
+  /* same tail drive the river fish use */
+  const w=Math.sin(7.0-t*uu.uSpd.value+uu.uPh.value);
+  const wPrev=Math.sin(7.0-(t-0.02)*uu.uSpd.value+uu.uPh.value);
+  pvFish.userData.tail.position.z=w*0.075*uu.uAmp.value;
+  pvFish.userData.tail.rotation.y=-(w-wPrev)*7.0*uu.uAmp.value;
+  /* wetness: it is in the air, so it should read as just out of the water */
+  if(mat.userData.wet!==undefined){
+    mat.userData.wet=1;
+    const wv=Math.max(0,P.wetShine);
+    mat.roughness=0.34-0.26*Math.min(1,wv);
+    mat.metalness=0.20+0.30*Math.min(1,wv);
+  }
+  pvFish.position.set(pvBase.x-Math.sin(pvFishYaw)*fwd,
+                      pvBase.y+lift,
+                      pvBase.z-Math.cos(pvFishYaw)*fwd);
+  pvFish.rotation.set(roll,pvFishYaw,-pitch);
+  pvLabel=ph.l;
+  if(pvPT>=ph.d){pvPT=0;pvPhase=(pvPhase+1)%PV_SEQ.length;}
+}
+
 function previewUpdate(dt){
   if(!previewOn) return;
   const sp=(pvKeys.f-pvKeys.b)*3.2*dt, rise=(pvKeys.u-pvKeys.d)*1.8*dt;
@@ -4943,6 +5033,12 @@ function previewUpdate(dt){
     b.addEventListener('pointerleave',off);b.addEventListener('pointercancel',off);
   };
   hold('pvFwd','f');hold('pvBack','b');hold('pvUp','u');hold('pvDown','d');
+  document.getElementById('pvFish').addEventListener('click',()=>{
+    /* a slash is over in 0.42 s, which is too quick to judge a model by */
+    pvFishSpeed=pvFishSpeed===1?0.5:pvFishSpeed===0.5?0.25:1;
+    document.getElementById('pvFish').innerHTML=
+      'Fish '+(pvFishSpeed===1?'1':pvFishSpeed===0.5?'\u00bd':'\u00bc')+'\u00d7';
+  });
   document.getElementById('pvExit').addEventListener('click',previewStop);
   document.getElementById('pvShot').addEventListener('click',()=>{pvShotWanted=true;});
 
@@ -4959,6 +5055,13 @@ function previewUpdate(dt){
     ['Comfort', ['flySize','lineVis']],
   ];
   const panel=document.getElementById('pvmenu');
+  /* The panel and the control bar were both pinned to the bottom, and the
+     panel sat on top — so opening it hid the very button that closes it.
+     The bar now sits above the panel, and the panel carries its own Done. */
+  const closeBar=document.createElement('div');closeBar.id='pvclose';
+  const ct=document.createElement('span');ct.textContent='Settings';
+  const cb=document.createElement('button');cb.textContent='Done';
+  closeBar.appendChild(ct);closeBar.appendChild(cb);panel.appendChild(closeBar);
   const rowByKey={};
   for(const [title,keys] of PV_GROUPS){
     const rows=keys.map(k=>MENU.find(m=>m[1]===k)).filter(Boolean);
@@ -4988,14 +5091,17 @@ function previewUpdate(dt){
       rowByKey[key]={inp,val,fmt};
     }
   }
-  document.getElementById('pvSet').addEventListener('click',()=>{
-    const open=panel.style.display==='block';
-    panel.style.display=open?'none':'block';
-    if(!open) for(const k in rowByKey){          /* resync if VR changed them */
+  const setPanel=open=>{
+    panel.style.display=open?'block':'none';
+    document.getElementById('pvSet').textContent=open?'Hide settings':'Settings';
+    if(open) for(const k in rowByKey){            /* resync if VR changed them */
       rowByKey[k].inp.value=P[k];
       rowByKey[k].val.textContent=rowByKey[k].fmt(P[k]);
     }
-  });
+  };
+  document.getElementById('pvSet').addEventListener('click',
+    ()=>setPanel(panel.style.display!=='block'));
+  cb.addEventListener('click',()=>setPanel(false));
 }
 
 const overlay=document.getElementById('overlay'),enterBtn=document.getElementById('enter'),hint=document.getElementById('hint');
