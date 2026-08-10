@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08n</title>
+<title>Flycast — v8 one line — build 2026-08-08o</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -84,7 +84,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08n</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08o</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -154,6 +154,7 @@ const P = {
   current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:0.60, obstHeight:0.80,
   waterDetail:1.00, foam:1.00, fogAmt:1.00, bankGrass:1.00, skyGlint:1.00,
   treeRange:38.0, sceneTris:140.0, assetOn:1,
+  gridSpan:80.0, gridFollow:0, surfWave:1.00, bedDetail:1.00,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -224,7 +225,10 @@ const MENU=[
   ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
   ['— RIVER —',null,0,0,0,''],
   ['Water model','waterModel',0,1,1,'0 is the analytic field: flow painted on by formula, fast but it can only do what was written into it. 1 solves shallow water on a grid — depth from the bed and obstacles, gravity down the surface slope, Manning bed friction and a pressure projection. Rocks divert flow because they ARE bed elevation, and eddies form because the solver makes them.'],
-  ['Grid cell m','gridCell',0.20,1.00,0.05,'Solver cell size. Smaller resolves rocks and eddies better and costs more. A 0.85 m rock needs cells well under half a metre to shed properly.'],
+  ['Grid span m','gridSpan',20.0,200.0,5.00,'Length of river the solver covers, centred on the origin or on you. The rest of the reach falls back to the analytic flow, which is what the water outside this window has always used. Shrinking the span and shrinking the cell together keeps the same cost while putting far more resolution where you are fishing.'],
+  ['Grid follows you','gridFollow',0,1,1,'0 pins the solved window to the middle of the reach. 1 slides it along with you, in whole-cell steps so no existing cell is ever disturbed \u2014 only a thin strip at the leading edge is new, and it is seeded from the analytic flow, exactly as the open upstream boundary already does every frame. Wade downstream and you will not see it; wade hard upstream and a settling transient washes down behind you.'],
+  ['Surface relief','surfWave',0.00,2.50,0.05,'How much the water surface is displaced by the SOLVED free surface rather than by decorative sine waves. This is the pillow that stands up in front of a rock, the drawdown over a lip, the standing wave below it. The solver has always computed this; until now the renderer threw it away and drew three hardcoded sines instead. Zero returns to that.'],
+  ['Grid cell m','gridCell',0.10,1.00,0.05,'Solver cell size. Smaller resolves rocks and eddies better and costs more. A 0.85 m rock needs cells well under half a metre to shed properly.'],
   ['Grid iterations','gridIter',4.00,48.0,1.00,'Pressure projection sweeps per step. More enforces continuity harder — too few and flow leaks through obstacles.'],
   ['Grid rate Hz','gridRate',5.00,40.0,1.00,'How often the fluid is stepped. It is unconditionally stable, so this is purely cost against how lively the eddies look.'],
   ['Manning n','manningN',0.015,0.120,0.005,'Bed roughness. Gravel trout streams run about 0.035-0.06. This is what sets the actual current speed, together with slope and depth — deeper water runs faster for the same slope, and riffles are fast because they are steep, not because they are shallow.'],
@@ -248,6 +252,7 @@ const MENU=[
   ['Scenery tri budget k','sceneTris',20.0,600.0,10.0,'Thousands of triangles allowed for instanced scenery. A loaded model is measured on arrival and the instance count is capped to fit, so a 15,000-triangle tree gets placed a few dozen times rather than 250 times and 3.7 million triangles. That measurement is reported when the model loads.'],
   ['Use model assets','assetOn',0,1,1,'Whether files in the assets folder are used at all. Turning this off falls back to the built-in procedural meshes without deleting anything, which is the quickest way to confirm whether a model is what cost you the frame rate. Swaps live, both ways \u2014 no reload.'],
   ['Bank growth','bankGrass',0.00,1.00,0.05,'Density of grass and scrub along the banks. Drawn as a single instanced mesh, so the whole bank is one draw call regardless of this setting.'],
+  ['Bed detail','bedDetail',0.00,3.00,0.05,'Relief of the cobble and gravel on the riverbed and banks. This is a generated normal map on a surface that was previously flat vertex colours a metre apart, which is why the bed used to read as smooth plastic. It costs one texture lookup on a mesh that is already a single draw call.'],
   ['Fish detail','fishDetail',0.00,2.00,0.05,'Strength of the scale and spot relief on the trout. This is a generated normal map, not extra geometry, so it costs nothing per fish.'],
   ['Wet shine','wetShine',0.00,3.00,0.05,'How much glossier a trout goes the instant it clears the water. A wet fish out of the river is close to a mirror; this is what sells a jump and a landed fish in the hand.'],
   ['— FISH —',null,0,0,0,''],
@@ -615,11 +620,17 @@ let slideVel=0;           /* m/s of line accelerating through routing fingers */
    run fast because the surface is steep there, eddies form because the solver
    makes them. Semi-Lagrangian advection, so it is unconditionally stable.
    ════════════════════════════════════════════════════════════ */
-const GX0=-40, GX1=40, GZ0=CZ-HALFW-0.6, GZ1=CZ+HALFW+0.6;
-let gdx=0.40, GNX=1, GNZ=1, gridReady=false;
+/* The X bounds move: the span is a setting and the window can follow the
+   angler. Z never moves — the grid already spans the full width of the river. */
+let GX0=-40, GX1=40;
+const GZ0=CZ-HALFW-0.6, GZ1=CZ+HALFW+0.6;
+let gridCentre=0;
+let gdx=0.40, GNX=1, GNZ=1, gridReady=false, gbed=null;
 let gu,gv,gu0,gv0,gp,gdiv,gh,ginv43,gsolid,gslope;
 function gridAlloc(){
-  gdx=Math.max(0.2,P.gridCell);
+  gdx=Math.max(0.10,P.gridCell);
+  const span=Math.max(10,P.gridSpan);
+  GX0=gridCentre-span*0.5; GX1=gridCentre+span*0.5;
   GNX=Math.max(8,Math.round((GX1-GX0)/gdx));
   GNZ=Math.max(6,Math.round((GZ1-GZ0)/gdx));
   const n=GNX*GNZ;
@@ -627,18 +638,22 @@ function gridAlloc(){
   gu0=new Float32Array(n); gv0=new Float32Array(n);
   gp=new Float32Array(n); gdiv=new Float32Array(n);
   gh=new Float32Array(n); ginv43=new Float32Array(n);
+  /* bed elevation, kept explicitly so the free surface can be reconstructed as
+     bed + depth. Without it the solved surface height is unrecoverable. */
+  gbed=new Float32Array(n);
   gsolid=new Uint8Array(n); gslope=new Float32Array(GNX);
   gridBuildBed();
   gridReady=true;
 }
-function gridBuildBed(){
+function gridBuildBed(i0,i1,seed){
+  i0=i0===undefined?0:i0; i1=i1===undefined?GNX:i1;
   for(let i=0;i<GNX;i++){
     const x=GX0+(i+0.5)*gdx;
     gslope[i]=(surfY(x-gdx)-surfY(x+gdx))/(2*gdx);   /* +ve downstream */
   }
   for(let j=0;j<GNZ;j++){
     const z=GZ0+(j+0.5)*gdx;
-    for(let i=0;i<GNX;i++){
+    for(let i=i0;i<i1;i++){
       const x=GX0+(i+0.5)*gdx, k=i+j*GNX;
       let bed=bedY(x,z);
       /* obstacles are bed elevation, which is what makes flow go round them */
@@ -650,13 +665,52 @@ function gridBuildBed(){
         }
       }
       const h=surfY(x)-bed;
+      gbed[k]=bed;
       gh[k]=Math.max(h,0);
       gsolid[k]=(h<0.05)?1:0;
       ginv43[k]=1/Math.pow(Math.max(h,0.08),4/3);
       if(gsolid[k]){gu[k]=0;gv[k]=0;}
+      else if(seed){
+        /* a newly exposed column is seeded from the analytic flow — the same
+           field the renderer falls back to outside the window, so the join is
+           no worse than the boundary that has always been there */
+        computeFlow(x,z); gu[k]=flowX; gv[k]=flowZ;
+      }
     }
   }
 }
+/* Slide the window by whole cells. Shifting by an integer number of cells is
+   what makes this safe: every surviving cell keeps its exact state, and only
+   the strip at the leading edge is new. The alternative — resampling onto a
+   fractionally offset grid — would smear the whole field every time you took
+   a step. */
+function gridShiftCells(cells){
+  if(!cells||!gridReady) return;
+  const n=GNX;
+  if(Math.abs(cells)>=n){ gridCentre+=cells*gdx; GX0=gridCentre-(n*gdx)*0.5;
+    GX1=GX0+n*gdx; gridBuildBed(0,n,true); return; }
+  const move=A=>{
+    if(cells>0){
+      for(let j=0;j<GNZ;j++){const r=j*n;
+        for(let i=0;i<n-cells;i++) A[r+i]=A[r+i+cells];}
+    } else {
+      const c=-cells;
+      for(let j=0;j<GNZ;j++){const r=j*n;
+        for(let i=n-1;i>=c;i--) A[r+i]=A[r+i-c];}
+    }
+  };
+  move(gu);move(gv);move(gh);move(gbed);move(ginv43);move(gsolid);
+  gridCentre+=cells*gdx;
+  GX0=gridCentre-(n*gdx)*0.5; GX1=GX0+n*gdx;
+  if(cells>0) gridBuildBed(n-cells,n,true);
+  else        gridBuildBed(0,-cells,true);
+}
+function gridFollowUpdate(px){
+  if(!gridReady||P.gridFollow<0.5) return;
+  const cells=Math.round((px-gridCentre)/gdx);
+  if(cells!==0) gridShiftCells(cells);
+}
+
 function gridSampleField(F,fx,fz){
   let i=Math.floor(fx), j=Math.floor(fz);
   if(i<0)i=0; if(j<0)j=0;
@@ -746,13 +800,23 @@ function gridBounds(){
   }
 }
 /* velocity texture for the GPU specks */
-let gridTex=null, gridTexData=null;
+let gridTex=null, gridTexData=null, gridTexH=null, gridTexHData=null;
 const GRID_VSCALE=6.0;
 function gridTexInit(){
   gridTexData=new Uint8Array(GNX*GNZ*4);
   gridTex=new THREE.DataTexture(gridTexData,GNX,GNZ,THREE.RGBAFormat);
   gridTex.magFilter=THREE.LinearFilter; gridTex.minFilter=THREE.LinearFilter;
   gridTex.needsUpdate=true;
+  /* A second small texture carrying the solved free surface, sampled in the
+     VERTEX shader to displace the water. Eight bits over a 0.6 m window is
+     2.3 mm a step, and linear filtering across 0.45 m cells hides that far
+     below the ripple normals. Float textures would be exact but cost four
+     times the upload and need a filtering extension to interpolate at all. */
+  gridTexHData=new Uint8Array(GNX*GNZ*4);
+  gridTexH=new THREE.DataTexture(gridTexHData,GNX,GNZ,THREE.RGBAFormat);
+  gridTexH.magFilter=THREE.LinearFilter; gridTexH.minFilter=THREE.LinearFilter;
+  gridTexH.needsUpdate=true;
+  waterMat.uniforms.uHt.value=gridTexH;
 }
 function gridTexUpdate(){
   if(!gridTex) return;
@@ -774,8 +838,15 @@ function gridTexUpdate(){
       turb=Math.abs(dudx+dvdz)+Math.abs(dvdx-dudz)*0.75;
     }
     gridTexData[p+3]=Math.max(0,Math.min(255,Math.round(turb*26)));
+    /* free surface departure from the still-water line, which is what the
+       vertex shader needs to raise a pillow in front of a rock */
+    const xk=GX0+((k%GNX)+0.5)*gdx;
+    const dev=(gbed[k]+gh[k])-surfY(xk);
+    gridTexHData[p]=Math.max(0,Math.min(255,Math.round((dev/0.60+0.5)*255)));
+    gridTexHData[p+1]=0;gridTexHData[p+2]=0;gridTexHData[p+3]=255;
   }
   gridTex.needsUpdate=true;
+  if(gridTexH) gridTexH.needsUpdate=true;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1515,7 +1586,7 @@ float surfY(float x){
   return y;
 }`;
 
-let bedGeo,bedPosAttr;
+let bedGeo,bedPosAttr,bedMat=null;
 {
   bedGeo=new THREE.PlaneGeometry(170,64,180,74);
   bedGeo.rotateX(-Math.PI/2);bedGeo.translate(0,0,CZ);
@@ -1523,7 +1594,88 @@ let bedGeo,bedPosAttr;
   for(let i=0;i<pa.count;i++) col.push(1,1,1);
   bedGeo.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
   bedPosAttr=pa;
-  const bed=new THREE.Mesh(bedGeo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1}));
+  /* The bed had no texture at all — vertex colours on points a metre apart,
+     which is why it read as smooth plastic under clear water. Two generated
+     maps fix that on a mesh that is already a single draw call, and the GPU
+     here is idle.
+
+     The colour map is deliberately near-GREY. It multiplies the existing
+     vertex colours, which is where gravel, silt, bank and the procedural
+     ambient occlusion all live; if the texture carried hue of its own it
+     would fight them and the channel would stop looking like a channel. So
+     the texture supplies structure and the vertex colours supply colour. */
+  const bedMaps=(()=>{
+    const N=512, hf=new Float32Array(N*N);
+    const cv=document.createElement('canvas');cv.width=N;cv.height=N;
+    const g=cv.getContext('2d');
+    g.fillStyle='#b9b4ab';g.fillRect(0,0,N,N);
+    const rnd=(a,b)=>a+Math.random()*(b-a);
+    const stones=[];
+    /* big cobbles first, then shingle packed into the gaps */
+    for(const [count,rlo,rhi] of [[95,17,34],[240,8,17],[900,3,8]]){
+      for(let i=0;i<count;i++){
+        const x=Math.random()*N,y=Math.random()*N,r=rnd(rlo,rhi);
+        const sq=rnd(0.62,1.0), rot=Math.random()*Math.PI;
+        const tone=rnd(0.80,1.14);
+        stones.push({x,y,r,sq,rot,tone});
+      }
+    }
+    for(const s of stones){
+      for(const [ox,oy] of [[0,0],[N,0],[-N,0],[0,N],[0,-N]]){   /* tile seams */
+        const x=s.x+ox,y=s.y+oy;
+        if(x<-40||x>N+40||y<-40||y>N+40) continue;
+        const v=Math.round(185*s.tone);
+        const gg=g.createRadialGradient(x-s.r*0.30,y-s.r*0.32,s.r*0.15,x,y,s.r);
+        gg.addColorStop(0,`rgb(${Math.min(255,v+26)},${Math.min(255,v+24)},${Math.min(255,v+18)})`);
+        gg.addColorStop(0.72,`rgb(${v},${v-3},${v-10})`);
+        gg.addColorStop(1,`rgb(${(v*0.62)|0},${(v*0.61)|0},${(v*0.58)|0})`);
+        g.save();g.translate(x,y);g.rotate(s.rot);g.scale(1,s.sq);
+        g.fillStyle=gg;g.beginPath();g.arc(0,0,s.r,0,Math.PI*2);g.fill();g.restore();
+        /* the same stone pushed into the height field, so relief and paint agree */
+        const x0=Math.max(0,(x-s.r)|0),x1=Math.min(N-1,(x+s.r)|0);
+        const y0=Math.max(0,(y-s.r*s.sq)|0),y1=Math.min(N-1,(y+s.r*s.sq)|0);
+        for(let yy=y0;yy<=y1;yy++)for(let xx=x0;xx<=x1;xx++){
+          const dx=(xx-x)/s.r, dy=(yy-y)/(s.r*s.sq), d2=dx*dx+dy*dy;
+          if(d2<1) hf[xx+yy*N]=Math.max(hf[xx+yy*N],Math.sqrt(1-d2)*s.r*0.045);
+        }
+      }
+    }
+    /* fine silt grain over everything */
+    const img=g.getImageData(0,0,N,N);
+    for(let i=0;i<img.data.length;i+=4){
+      const n=(Math.random()-0.5)*17;
+      img.data[i]=Math.max(0,Math.min(255,img.data[i]+n));
+      img.data[i+1]=Math.max(0,Math.min(255,img.data[i+1]+n));
+      img.data[i+2]=Math.max(0,Math.min(255,img.data[i+2]+n));
+    }
+    g.putImageData(img,0,0);
+    const map=new THREE.CanvasTexture(cv);
+    map.colorSpace=THREE.SRGBColorSpace;
+    map.wrapS=map.wrapT=THREE.RepeatWrapping;
+    map.repeat.set(85,32);                    /* 170 x 64 m plane, 2 m a tile */
+
+    const nc=document.createElement('canvas');nc.width=N;nc.height=N;
+    const nx=nc.getContext('2d'),nimg=nx.createImageData(N,N);
+    const at=(i,j)=>hf[(((i%N)+N)%N)+(((j%N)+N)%N)*N];
+    for(let j=0;j<N;j++)for(let i=0;i<N;i++){
+      const dx=(at(i+1,j)-at(i-1,j))*14, dy=(at(i,j+1)-at(i,j-1))*14;
+      let ax=-dx,ay=-dy,az=1;
+      const l=Math.hypot(ax,ay,az)||1;
+      const q=(i+j*N)*4;
+      nimg.data[q]=(ax/l*0.5+0.5)*255;nimg.data[q+1]=(ay/l*0.5+0.5)*255;
+      nimg.data[q+2]=(az/l*0.5+0.5)*255;nimg.data[q+3]=255;
+    }
+    nx.putImageData(nimg,0,0);
+    const nrm=new THREE.CanvasTexture(nc);
+    nrm.wrapS=nrm.wrapT=THREE.RepeatWrapping;
+    nrm.repeat.set(85,32);
+    return {map,nrm};
+  })();
+  bedMat=new THREE.MeshStandardMaterial({
+    map:bedMaps.map,normalMap:bedMaps.nrm,
+    normalScale:new THREE.Vector2(P.bedDetail,P.bedDetail),
+    vertexColors:true,roughness:0.96});
+  const bed=new THREE.Mesh(bedGeo,bedMat);
   bed.renderOrder=-1;scene.add(bed);
 }
 const _bedGravel=new THREE.Color(0x8a8071),_bedGrass=new THREE.Color(0x53663f),
@@ -1548,7 +1700,9 @@ function rebuildBed(){
     }
     ao*=1-0.30*Math.min(1,d/1.5);
     ao*=0.86+0.14*Math.min(1,Math.abs(Math.abs(u)-1.0)*2.2);
-    _bedC.multiplyScalar(ao);
+    /* the cobble map averages about 0.72, so lift the vertex colours to land
+       back where the bed sat before it gained a texture */
+    _bedC.multiplyScalar(ao*1.38);
     ca.setXYZ(i,_bedC.r,_bedC.g,_bedC.b);
   }
   pa.needsUpdate=true;ca.needsUpdate=true;bedGeo.computeVertexNormals();
@@ -2120,7 +2274,8 @@ const waterMat=new THREE.ShaderMaterial({
     uDeep:{value:new THREE.Color(0x1d3f43)},uShal:{value:new THREE.Color(0x53897a)},
     uFast:{value:new THREE.Color(0x9ab9b0)},
     uUseGrid:{value:0},uFlow:{value:null},
-    uNorm:{value:waterNormalTex},
+    uNorm:{value:waterNormalTex},uHt:{value:null},
+    uUseGridV:{value:0},uWave:{value:P.surfWave},
     uDetail:{value:P.waterDetail},uFoamK:{value:P.foam},uGlint:{value:P.skyGlint},
     uFoamC:{value:new THREE.Color(0xeef4f1)},
     uSkyLo:{value:SKY_LO},uSkyHi:{value:SKY_HI},uSun:{value:SUN_DIR},
@@ -2128,7 +2283,9 @@ const waterMat=new THREE.ShaderMaterial({
     uGMin:{value:new THREE.Vector2(GX0,GZ0)},
     uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)}},
   vertexShader:`
-    uniform float uTime,uQ,uGrade; varying float vD,vS; varying vec3 vW;
+    uniform float uTime,uQ,uGrade,uUseGridV,uWave;
+    uniform vec2 uGMin,uGSize; uniform sampler2D uHt;
+    varying float vD,vS; varying vec3 vW;
     ${GLSL_SURF}
     void main(){
       vec4 wp=modelMatrix*vec4(position,1.0);
@@ -2140,7 +2297,21 @@ const waterMat=new THREE.ShaderMaterial({
       float h=(sin(wp.x*1.7+uTime*2.3)*0.011
               +sin(wp.x*0.7+wp.z*0.9+uTime*1.5)*0.017
               +sin(wp.z*2.4-uTime*1.1)*0.008)*0.55;
-      wp.y=surfY(wp.x)+h*(0.3+s*0.5);
+      /* The SOLVED free surface. Everything the shallow-water solver knows
+         about standing waves, the pillow upstream of a rock and the drawdown
+         over a lip has always been sitting in the grid and been discarded
+         here in favour of three decorative sines. Fade it out at the window
+         edge so the join to the analytic reach outside is smooth. */
+      float dev=0.0;
+      if(uUseGridV>0.5){
+        vec2 tc=vec2((wp.x-uGMin.x)/uGSize.x,(wp.z-uGMin.y)/uGSize.y);
+        if(tc.x>0.0&&tc.x<1.0&&tc.y>0.0&&tc.y<1.0){
+          dev=(texture2D(uHt,tc).r-0.5)*0.60;
+          vec2 e=min(tc,1.0-tc);
+          dev*=smoothstep(0.0,0.035,min(e.x,e.y));
+        }
+      }
+      wp.y=surfY(wp.x)+h*(0.3+s*0.5)*(1.0-0.6*uWave)+dev*uWave;
       vD=d;vS=s;vW=wp.xyz;
       gl_Position=projectionMatrix*viewMatrix*wp;
     }`,
@@ -4161,6 +4332,8 @@ function onSettingChanged(key){
   if(key==='grade'){waterMat.uniforms.uGrade.value=P.grade;placeTrees();placeRocks();}
   if(key==='bankGrass'){placeGrass();placeTrees();}
   if(key==='reelHand')applyReelHand();
+  if(key==='bedDetail'&&bedMat&&bedMat.normalScale)
+    bedMat.normalScale.set(P.bedDetail,P.bedDetail);
   if(key==='treeRange'||key==='sceneTris'){placeTrees();placeRocks();}
   if(key==='assetOn')applyAssetToggle();
   if(key==='speckSize'){speckMat.uniforms.uSize.value=P.speckSize;gSpeckMat.uniforms.uSize.value=P.speckSize;}
@@ -4384,6 +4557,7 @@ renderer.setAnimationLoop(()=>{
   /* fluid runs on its own clock, independent of render rate */
   if(P.waterModel>0.5){
     if(!gridReady){gridAlloc();gridTexInit();}
+    gridFollowUpdate(_camW.x);
     gridAccum+=dt;
     const step=1/Math.max(2,P.gridRate);
     let guard=0;
@@ -4433,6 +4607,11 @@ renderer.setAnimationLoop(()=>{
     if(gridReady)gridBuildBed();}
   if(Math.abs(P.gridCell-lastCell)>0.005){lastCell=P.gridCell;gridAlloc();gridTexInit();
     for(let i=0;i<60;i++)gridStep(1/20);gridTexUpdate();}
+  if(key==='gridSpan'||key==='gridFollow'){
+    if(key==='gridFollow'&&P.gridFollow<0.5) gridCentre=0;
+    gridReady=false;gridAlloc();gridTexInit();
+    for(let i=0;i<60;i++)gridStep(1/20);gridTexUpdate();
+  }
   {
     const sig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;
     if(Math.abs(sig-lastSig)>0.004){
@@ -4853,7 +5032,13 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uFogD.value=0.0070*P.fogAmt;
   if(scene.fog) scene.fog.density=0.0070*P.fogAmt;
   waterMat.uniforms.uUseGrid.value=(P.waterModel>0.5&&gridTex)?1:0;
+  waterMat.uniforms.uUseGridV.value=(P.waterModel>0.5&&gridTexH)?1:0;
+  waterMat.uniforms.uWave.value=P.surfWave;
   waterMat.uniforms.uFlow.value=gridTex;
+  waterMat.uniforms.uHt.value=gridTexH;
+  /* the window moves, so its bounds are a per-frame uniform now */
+  waterMat.uniforms.uGMin.value.set(GX0,GZ0);
+  waterMat.uniforms.uGSize.value.set(GX1-GX0,GZ1-GZ0);
 
   /* Fastest-moving point on the line, and which section it is in. Exists so a
      visible jump can be reported as a number instead of a description -- and
@@ -4908,6 +5093,8 @@ renderer.setAnimationLoop(()=>{
       '   tris '+renderer.info.render.triangles+
       '   draws '+renderer.info.render.calls+
       '   audio '+(SND.ok?(SND.ctx?SND.ctx.state:'?'):'off')+
+      '\ngrid '+GNX+'x'+GNZ+' = '+(GNX*GNZ)+' cells  '+gdx.toFixed(2)+'m  '+
+      gridMs.toFixed(2)+'ms  x['+GX0.toFixed(0)+','+GX1.toFixed(0)+']'+
       (pvLabel?'\n'+pvLabel+(pvFishSpeed!==1?'   '+pvFishSpeed+'\u00d7':''):'');
   }
 });
