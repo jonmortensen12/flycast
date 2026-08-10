@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08p</title>
+<title>Flycast — v8 one line — build 2026-08-08q</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -84,7 +84,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08p</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08q</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -156,6 +156,7 @@ const P = {
   treeRange:38.0, sceneTris:140.0, assetOn:1,
   gridSpan:80.0, gridFollow:0, surfWave:1.00, bedDetail:1.00,
   foamLife:6.00, boil:1.00, streak:1.00, caustics:1.00, bedVary:1.00,
+  waveShade:1.00, froth:1.00,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -248,6 +249,8 @@ const MENU=[
   ['Surface detail','waterDetail',0.00,3.00,0.05,'Strength of the ripple normals on the water. The pattern scrolls ALONG the local flow vector taken from the solved grid, so it travels with the water rather than past it, and it scales with local speed — slack water stays glassy while a riffle textures up on its own.'],
   ['Foam life s','foamLife',0.00,25.0,0.50,'How long foam survives once it is made. Foam is generated where the flow tears \u2014 rock shoulders, the seam off the log, the lip of a drop \u2014 and then CARRIED downstream by the solved velocity, which is what turns it from a glow around obstacles into the long trailing streaks a real river has. Zero reverts to foam that only exists where turbulence is happening right now.'],
   ['Boils','boil',0.00,3.00,0.05,'Upwellings. Where the solved flow diverges, water is rising from below: the surface goes smooth and glassy and reflects the sky. Where it converges it dimples and collects foam. Taking the SIGN of divergence rather than its magnitude is what separates the two \u2014 they look nothing alike on a real river and used to be drawn identically.'],
+  ['Wave shading','waveShade',0.00,3.00,0.05,'Shades the water by the SLOPE of the solved free surface, not just the ripple texture. Surface relief already moves the geometry, so the pillow in front of a rock and the standing wave below it were physically there \u2014 but nothing lit them, so they stayed invisible. This is what makes them read.'],
+  ['Whitewater','froth',0.00,2.00,0.05,'Broken white where the flow goes supercritical, meaning the Froude number passes 1 and the water is moving faster than a wave can travel across it. That is the actual physical definition of the boundary between green water and white, and it lands on the lips of drops and the fast shallow chutes without anyone placing it.'],
   ['Flow streaking','streak',0.00,2.00,0.05,'Stretches the surface ripple ALONG the current and squeezes it across, which is how moving water actually looks and the main reason you can read a river at a glance. Raise it if you want the current legible without the specks turned on.'],
   ['Foam','foam',0.00,3.00,0.05,'How much white water appears. Foam is driven by the divergence and shear of the solved flow field, so it forms where the water genuinely tears itself apart — seams, rock shoulders, the lee of the log — instead of being painted on by hand. Zero for a glassy river.'],
   ['Sun glint','skyGlint',0.00,3.00,0.05,'Specular sun highlight and sky reflection on the surface, through a Fresnel term. Strong glint reads as bright midday; low reads as overcast and makes the bed far easier to see.'],
@@ -1655,7 +1658,8 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
      makes ground read as wallpaper — a river bed changes with the flow over it,
      and the blend weights come free because the shader already knows where it
      is across the channel and how deep the water is. */
-  const bedSurface=(coarse,tint,seed)=>{
+  const bedSurface=(coarse,tint,opts)=>{
+    opts=opts||{};
     const N=512, hf=new Float32Array(N*N);
     const cv=document.createElement('canvas');cv.width=N;cv.height=N;
     const g=cv.getContext('2d');
@@ -1692,10 +1696,25 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
         }
       }
     }
+    /* bank cover: grass blades and leaf litter, which is what actually makes
+       a bank read as a bank rather than as grey stones with a green wash */
+    if(opts.grass){
+      for(let i=0;i<5200;i++){
+        const x=Math.random()*N,y=Math.random()*N;
+        const len=3+Math.random()*11, ang=Math.random()*Math.PI*2;
+        const shade=Math.random();
+        g.strokeStyle=shade<0.62
+          ? `rgba(${72+((Math.random()*46)|0)},${96+((Math.random()*58)|0)},${44+((Math.random()*30)|0)},0.85)`
+          : `rgba(${104+((Math.random()*40)|0)},${88+((Math.random()*30)|0)},${52+((Math.random()*24)|0)},0.70)`;
+        g.lineWidth=0.8+Math.random()*1.5;
+        g.beginPath();g.moveTo(x,y);
+        g.lineTo(x+Math.cos(ang)*len,y+Math.sin(ang)*len);g.stroke();
+      }
+    }
     /* fine silt grain over everything */
     const img=g.getImageData(0,0,N,N);
     for(let i=0;i<img.data.length;i+=4){
-      const n=(Math.random()-0.5)*17;
+      const n=(Math.random()-0.5)*(opts.grain||17);
       img.data[i]=Math.max(0,Math.min(255,img.data[i]+n));
       img.data[i+1]=Math.max(0,Math.min(255,img.data[i+1]+n));
       img.data[i+2]=Math.max(0,Math.min(255,img.data[i+2]+n));
@@ -1723,9 +1742,16 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
     nrm.repeat.set(85,32);
     return {map,nrm};
   };
-  const bedCobble=bedSurface([[95,17,34],[240,8,17],[900,3,8]],'#b9b4ab');
-  const bedSilt  =bedSurface([[30,10,20],[420,2,5],[1600,1,3]],'#a89e8c');
-  const bedSoil  =bedSurface([[60,9,20],[300,4,10],[1100,2,6]],'#9d9482');
+  /* Four surfaces that are actually different from each other. The old three
+     were tinted #b9b4ab, #a89e8c and #9d9482 — lumas of 180, 159 and 149 with
+     almost no hue between them — and they were then multiplied by vertex
+     colours carrying the real hue, which crushed what little difference there
+     was. Now the TEXTURE carries the colour and the vertex colours carry only
+     shading, so these read apart at a glance. */
+  const bedCobble=bedSurface([[110,18,38],[260,9,18],[900,3,8]],'#8e9298',{grain:22});
+  const bedGravel=bedSurface([[40,7,13],[700,3,7],[2600,1.5,3.5]],'#a8916a',{grain:26});
+  const bedSand  =bedSurface([[8,5,10],[120,1.5,3]],           '#cdbd93',{grain:34});
+  const bedSoil  =bedSurface([[70,8,18],[320,3,9]],            '#5d5138',{grass:true,grain:20});
 
   /* Macro variation. Tiling is invisible when the eye has something larger to
      lock onto and glaring when it does not, so one sheet of low-frequency
@@ -1765,13 +1791,18 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
      set Bed variation and Caustics to zero and it renders as it did. */
   bedMat.customProgramCacheKey=()=>'flycast-bed-1';
   bedMat.onBeforeCompile=sh=>{
-    sh.uniforms.uSilt={value:bedSilt.map};
+    sh.uniforms.uGravel={value:bedGravel.map};
+    sh.uniforms.uSand={value:bedSand.map};
     sh.uniforms.uSoil={value:bedSoil.map};
     sh.uniforms.uMacro={value:bedMacro};
     sh.uniforms.uRip={value:bedCobble.nrm};
     sh.uniforms.uBedT={value:0};
     sh.uniforms.uVary={value:P.bedVary};
     sh.uniforms.uCaus={value:P.caustics};
+    sh.uniforms.uBFlow={value:null};
+    sh.uniforms.uBUse={value:0};
+    sh.uniforms.uBMin={value:new THREE.Vector2(0,0)};
+    sh.uniforms.uBSize={value:new THREE.Vector2(1,1)};
     bedShader=sh;
     sh.vertexShader=sh.vertexShader
       .replace('#include <common>','#include <common>\nvarying vec3 vBedW;')
@@ -1780,23 +1811,44 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
     sh.fragmentShader=sh.fragmentShader
       .replace('#include <common>',
         `#include <common>
-         uniform sampler2D uSilt,uSoil,uMacro,uRip;
-         uniform float uBedT,uVary,uCaus;
+         uniform sampler2D uGravel,uSand,uSoil,uMacro,uRip,uBFlow;
+         uniform float uBedT,uVary,uCaus,uBUse;
+         uniform vec2 uBMin,uBSize;
          varying vec3 vBedW;`)
       .replace('#include <map_fragment>',
         `#ifdef USE_MAP
          vec2 bUv=vMapUv;
-         vec4 cob=texture2D(map,bUv);
-         vec4 sil=texture2D(uSilt,bUv);
-         vec4 soi=texture2D(uSoil,bUv);
-         /* where we are: across the channel, and how deep the water is */
+         /* WHERE WE ARE, and more importantly what the water is doing here.
+            The old version keyed the bed on DEPTH, which put silt straight down
+            the middle of the channel — the fastest water in the river, and the
+            one place a real bed is scoured clean. Grade the bed by SPEED
+            instead, taken from the solved grid: fast water strips everything
+            down to cobble, moderate water leaves gravel, slack water drops its
+            sand, and the bank is the bank. The bed is then a readable map of
+            the flow that made it, which is how a real river works. */
          float uu=abs((vBedW.z-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)});
-         float bankW=smoothstep(0.90,1.12,uu);
+         float bankW=smoothstep(0.86,1.14,uu);
          float cross=max(0.0,1.0-uu*uu);
          float dep=${MAXDEPTH.toFixed(2)}*cross*(0.55+0.45*sin(vBedW.x*0.13+1.3));
-         /* silt settles where it is deep and slow, cobble scours where it is not */
-         float siltW=smoothstep(0.55,1.25,dep)*(1.0-bankW);
-         vec4 sampledDiffuseColor=mix(mix(cob,sil,siltW),soi,bankW);
+         float spd=cross*1.1;
+         if(uBUse>0.5){
+           vec2 ftc=vec2((vBedW.x-uBMin.x)/uBSize.x,(vBedW.z-uBMin.y)/uBSize.y);
+           if(ftc.x>0.004&&ftc.x<0.996&&ftc.y>0.004&&ftc.y<0.996){
+             vec4 ft=texture2D(uBFlow,ftc);
+             spd=length((ft.rg-0.5)*${GRID_VSCALE.toFixed(1)});
+             dep=ft.b*255.0/80.0;
+           }
+         }
+         /* macro noise also perturbs WHERE the boundaries fall, so the bands
+            are ragged the way a real bar is rather than three neat stripes */
+         float edge=(texture2D(uMacro,bUv*0.030).r-0.5)*0.55;
+         float cobbleW=smoothstep(0.62,1.30,spd+edge);
+         float sandW  =1.0-smoothstep(0.10,0.55,spd+edge*0.6);
+         sandW*=smoothstep(0.05,0.35,dep);          /* not on the dry margin */
+         vec4 sampledDiffuseColor=texture2D(uGravel,bUv);
+         sampledDiffuseColor=mix(sampledDiffuseColor,texture2D(uSand,bUv),sandW*(1.0-bankW));
+         sampledDiffuseColor=mix(sampledDiffuseColor,texture2D(map,bUv),cobbleW*(1.0-bankW));
+         sampledDiffuseColor=mix(sampledDiffuseColor,texture2D(uSoil,bUv),bankW);
          /* macro patchiness, so the two-metre tile stops announcing itself */
          float mac=texture2D(uMacro,bUv*0.024).r;
          sampledDiffuseColor.rgb*=1.0+(mac-0.5)*0.55*uVary;
@@ -1828,8 +1880,14 @@ function rebuildBed(){
     const x=pa.getX(i),z=pa.getZ(i),u=(z-CZ)/HALFW,d=bedDepth(x,z);
     const y2=bedY(x,z)+Math.sin(x*2.3+z*1.7)*0.025+Math.sin(x*0.6-z*1.1)*0.045;
     pa.setY(i,y2);
+    /* The vertex colours used to carry the bed's hue, which then multiplied
+       the texture and flattened four distinct surfaces back into one. They now
+       carry only shading — occlusion, the wet band, a little tonal drift — and
+       the texture supplies the colour. */
     if(Math.abs(u)<1) _bedC.copy(_bedGravel).lerp(_bedSilt,Math.min(1,d/1.4));
     else              _bedC.copy(_bedGravel).lerp(_bedGrass,Math.min(1,(Math.abs(u)-1)*1.6));
+    const lum=0.2126*_bedC.r+0.7152*_bedC.g+0.0722*_bedC.b;
+    _bedC.lerp(new THREE.Color(lum,lum,lum),0.80);
     /* occlusion: contact darkening under every rock and the log, plus depth
        extinction down the channel, plus a little crease at the toe of the bank */
     let ao=1;
@@ -1846,7 +1904,7 @@ function rebuildBed(){
     if(above>-0.02&&above<0.16) _bedC.multiplyScalar(0.62+0.38*(above/0.16));
     /* the cobble map averages about 0.72, so lift the vertex colours to land
        back where the bed sat before it gained a texture */
-    _bedC.multiplyScalar(ao*1.38);
+    _bedC.multiplyScalar(ao*1.30);
     ca.setXYZ(i,_bedC.r,_bedC.g,_bedC.b);
   }
   pa.needsUpdate=true;ca.needsUpdate=true;bedGeo.computeVertexNormals();
@@ -2421,6 +2479,8 @@ const waterMat=new THREE.ShaderMaterial({
     uNorm:{value:waterNormalTex},uHt:{value:null},
     uUseGridV:{value:0},uWave:{value:P.surfWave},
     uStreak:{value:P.streak},uBoil:{value:P.boil},
+    uWaveN:{value:P.waveShade},uFroth:{value:P.froth},
+    uGTexel:{value:new THREE.Vector2(1/64,1/64)},uCell:{value:0.45},
     uDetail:{value:P.waterDetail},uFoamK:{value:P.foam},uGlint:{value:P.skyGlint},
     uFoamC:{value:new THREE.Color(0xeef4f1)},
     uSkyLo:{value:SKY_LO},uSkyHi:{value:SKY_HI},uSun:{value:SUN_DIR},
@@ -2463,7 +2523,8 @@ const waterMat=new THREE.ShaderMaterial({
   fragmentShader:`
     uniform vec3 uDeep,uShal,uFast,uFoamC,uSkyLo,uSkyHi,uSun,uFogC;
     uniform float uUseGrid,uTime,uDetail,uFoamK,uGlint,uFogD,uStreak,uBoil;
-    uniform vec2 uGMin,uGSize;
+    uniform float uWaveN,uFroth,uCell;
+    uniform vec2 uGMin,uGSize,uGTexel;
     uniform sampler2D uFlow; uniform sampler2D uNorm; uniform sampler2D uHt;
     varying float vD,vS; varying vec3 vW;
     void main(){
@@ -2480,17 +2541,36 @@ const waterMat=new THREE.ShaderMaterial({
       }
       if(d<0.02) discard;
 
-      /* Boils and seams, read from the SIGNED divergence packed alongside the
-         surface height. Rising water goes glassy; converging water dimples. */
-      float boil=0.0, seam=0.0;
+      /* Boils, seams, and the SLOPE of the solved free surface. The slope is
+         the important one: Surface relief already displaces the geometry, so
+         the pillow in front of a rock and the standing wave below it were
+         physically in the mesh — but the shading came only from the ripple
+         texture, so nothing lit them and they stayed invisible. Four taps on
+         the height texture give the real surface normal. */
+      float boil=0.0, seam=0.0, slx=0.0, slz=0.0;
       if(uUseGrid>0.5){
         vec2 tc2=vec2((vW.x-uGMin.x)/uGSize.x,(vW.z-uGMin.y)/uGSize.y);
-        if(tc2.x>0.004&&tc2.x<0.996&&tc2.y>0.004&&tc2.y<0.996){
+        if(tc2.x>0.02&&tc2.x<0.98&&tc2.y>0.02&&tc2.y<0.98){
           vec4 hh=texture2D(uHt,tc2);
           boil=(hh.g-0.5)*2.0;     /* +ve upwelling, -ve convergence */
           seam=hh.b;
+          float hL=texture2D(uHt,tc2-vec2(uGTexel.x,0.0)).r;
+          float hR=texture2D(uHt,tc2+vec2(uGTexel.x,0.0)).r;
+          float hD=texture2D(uHt,tc2-vec2(0.0,uGTexel.y)).r;
+          float hU=texture2D(uHt,tc2+vec2(0.0,uGTexel.y)).r;
+          slx=((hR-hL)*0.60)/(2.0*uCell);   /* metres of rise per metre run */
+          slz=((hU-hD)*0.60)/(2.0*uCell);
         }
       }
+
+      /* Shallow-water wave celerity. A disturbance travels at sqrt(g*d) across
+         the water, so relative to the bank one family of waves moves at v+c and
+         the other at v-c. In a slow pool those go opposite ways, which is why
+         a pool's surface looks busy rather than simply sliding downstream. At
+         v = c they stall: that is a standing wave, and it is the same number
+         that decides where the water turns white. */
+      float cel=sqrt(9.81*max(d,0.03));
+      float fr=sp/max(cel,0.05);
 
       /* Ripple normals in a FLOW-ALIGNED frame: stretched along the current and
          squeezed across it. Still water has no direction and looks like it;
@@ -2499,15 +2579,19 @@ const waterMat=new THREE.ShaderMaterial({
       vec2 fperp=vec2(-fdir.y,fdir.x);
       float sAlong=dot(vW.xz,fdir), sAcross=dot(vW.xz,fperp);
       float st=1.0+uStreak*min(sp,2.2)*1.30;
-      float adv=uTime*max(sp,0.06);
-      vec2 uvA=vec2(sAlong*0.42/st-adv*0.55, sAcross*0.42*(0.55+0.45/st));
-      vec2 uvB=vec2(sAlong*1.55/st+adv*0.19, sAcross*1.55);
+      /* the two wave families, carried at v+c and v-c */
+      float advD=uTime*(sp+cel)*0.16;
+      float advU=uTime*(sp-cel)*0.16;
+      vec2 uvA=vec2(sAlong*0.42/st-advD, sAcross*0.42*(0.55+0.45/st));
+      vec2 uvB=vec2(sAlong*1.55/st-advU, sAcross*1.55);
       vec2 nA=texture2D(uNorm,uvA).xy*2.0-1.0;
       vec2 nB=texture2D(uNorm,uvB).xy*2.0-1.0;
       /* chop grows with speed; an upwelling flattens it right out */
       float calm=1.0-clamp(boil,0.0,1.0)*0.80*uBoil;
       vec2 nxz=(nA+nB*0.55)*uDetail*(0.16+sp*0.42)*calm;
-      vec3 N=normalize(vec3(nxz.x,1.0,nxz.y));
+      /* the solved surface slope goes in alongside the ripple, so a standing
+         wave is lit as a standing wave rather than as flat water */
+      vec3 N=normalize(vec3(nxz.x-slx*uWaveN*2.6,1.0,nxz.y-slz*uWaveN*2.6));
 
       vec3 V=normalize(cameraPosition-vW);
       float fres=pow(1.0-clamp(dot(N,V),0.0,1.0),4.0);
@@ -2515,13 +2599,18 @@ const waterMat=new THREE.ShaderMaterial({
       vec3 sky=mix(uSkyLo,uSkyHi,smoothstep(-0.10,0.70,R.y));
       float glint=pow(max(dot(R,normalize(uSun)),0.0),120.0);
 
-      vec3 c=mix(uShal,uDeep,clamp(d/1.5,0.0,1.0));
+      /* light dies exponentially with the water it passes through, not
+         linearly — which is why a gravel bar under a foot of water still reads
+         as gravel and the channel two feet away reads as green */
+      vec3 c=mix(uShal,uDeep,1.0-exp(-d*1.35));
       c=mix(c,uFast,smoothstep(0.4,1.7,sp)*0.42);
       c=mix(c,sky,clamp(fres*0.90,0.0,0.72)*(0.35+0.65*uGlint));
       c+=vec3(1.0,0.96,0.86)*glint*0.85*uGlint;
 
-      /* foam has been carried here from wherever it was torn loose */
-      float foam=clamp(turb*1.9*uFoamK,0.0,1.0);
+      /* foam has been carried here from wherever it was torn loose, plus the
+         water that is white because it is genuinely supercritical */
+      float white=smoothstep(0.88,1.45,fr)*uFroth;
+      float foam=clamp(turb*1.9*uFoamK+white*0.75,0.0,1.0);
       foam*=smoothstep(0.02,0.13,d);
       /* a boil is a smooth dome that mirrors the sky; a convergence dimples and
          darkens, and is where the foam ends up collecting */
@@ -5208,8 +5297,17 @@ renderer.setAnimationLoop(()=>{
     bedShader.uniforms.uBedT.value=simTime;
     bedShader.uniforms.uVary.value=P.bedVary;
     bedShader.uniforms.uCaus.value=P.caustics;
+    /* the bed reads the same flow texture the water does */
+    bedShader.uniforms.uBFlow.value=gridTex;
+    bedShader.uniforms.uBUse.value=(P.waterModel>0.5&&gridTex)?1:0;
+    bedShader.uniforms.uBMin.value.set(GX0,GZ0);
+    bedShader.uniforms.uBSize.value.set(GX1-GX0,GZ1-GZ0);
   }
   waterMat.uniforms.uBoil.value=P.boil;
+  waterMat.uniforms.uWaveN.value=P.waveShade;
+  waterMat.uniforms.uFroth.value=P.froth;
+  waterMat.uniforms.uCell.value=gdx;
+  waterMat.uniforms.uGTexel.value.set(1/Math.max(2,GNX),1/Math.max(2,GNZ));
   waterMat.uniforms.uFlow.value=gridTex;
   waterMat.uniforms.uHt.value=gridTexH;
   /* the window moves, so its bounds are a per-frame uniform now */
