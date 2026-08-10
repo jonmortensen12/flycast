@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08q</title>
+<title>Flycast — v8 one line — build 2026-08-08r</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -84,7 +84,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08q</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08r</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -156,7 +156,7 @@ const P = {
   treeRange:38.0, sceneTris:140.0, assetOn:1,
   gridSpan:80.0, gridFollow:0, surfWave:1.00, bedDetail:1.00,
   foamLife:6.00, boil:1.00, streak:1.00, caustics:1.00, bedVary:1.00,
-  waveShade:1.00, froth:1.00,
+  waveShade:1.00, froth:1.00, drift:1.00,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -249,6 +249,7 @@ const MENU=[
   ['Surface detail','waterDetail',0.00,3.00,0.05,'Strength of the ripple normals on the water. The pattern scrolls ALONG the local flow vector taken from the solved grid, so it travels with the water rather than past it, and it scales with local speed — slack water stays glassy while a riffle textures up on its own.'],
   ['Foam life s','foamLife',0.00,25.0,0.50,'How long foam survives once it is made. Foam is generated where the flow tears \u2014 rock shoulders, the seam off the log, the lip of a drop \u2014 and then CARRIED downstream by the solved velocity, which is what turns it from a glow around obstacles into the long trailing streaks a real river has. Zero reverts to foam that only exists where turbulence is happening right now.'],
   ['Boils','boil',0.00,3.00,0.05,'Upwellings. Where the solved flow diverges, water is rising from below: the surface goes smooth and glassy and reflects the sky. Where it converges it dimples and collects foam. Taking the SIGN of divergence rather than its magnitude is what separates the two \u2014 they look nothing alike on a real river and used to be drawn identically.'],
+  ['Surface drift','drift',0.00,1.00,0.05,'How much of the surface pattern travels at the speed the WATER travels, rather than the speed waves travel. These are different numbers \u2014 a wave crosses shallow water at the square root of g times depth, which has nothing to do with where your fly will go \u2014 and the surface was previously showing the wave speed. That is physically correct and exactly wrong for a fishing game, because the one thing you need to read off the water is where a drifting fly ends up. At 1.00 the surface moves with the specks and with the line.'],
   ['Wave shading','waveShade',0.00,3.00,0.05,'Shades the water by the SLOPE of the solved free surface, not just the ripple texture. Surface relief already moves the geometry, so the pillow in front of a rock and the standing wave below it were physically there \u2014 but nothing lit them, so they stayed invisible. This is what makes them read.'],
   ['Whitewater','froth',0.00,2.00,0.05,'Broken white where the flow goes supercritical, meaning the Froude number passes 1 and the water is moving faster than a wave can travel across it. That is the actual physical definition of the boundary between green water and white, and it lands on the lips of drops and the fast shallow chutes without anyone placing it.'],
   ['Flow streaking','streak',0.00,2.00,0.05,'Stretches the surface ripple ALONG the current and squeezes it across, which is how moving water actually looks and the main reason you can read a river at a glance. Raise it if you want the current legible without the specks turned on.'],
@@ -1794,6 +1795,9 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
     sh.uniforms.uGravel={value:bedGravel.map};
     sh.uniforms.uSand={value:bedSand.map};
     sh.uniforms.uSoil={value:bedSoil.map};
+    sh.uniforms.uGravelN={value:bedGravel.nrm};
+    sh.uniforms.uSandN={value:bedSand.nrm};
+    sh.uniforms.uSoilN={value:bedSoil.nrm};
     sh.uniforms.uMacro={value:bedMacro};
     sh.uniforms.uRip={value:bedCobble.nrm};
     sh.uniforms.uBedT={value:0};
@@ -1812,9 +1816,30 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
       .replace('#include <common>',
         `#include <common>
          uniform sampler2D uGravel,uSand,uSoil,uMacro,uRip,uBFlow;
+         uniform sampler2D uGravelN,uSandN,uSoilN;
          uniform float uBedT,uVary,uCaus,uBUse;
          uniform vec2 uBMin,uBSize;
          varying vec3 vBedW;`)
+      /* The colour was blending four surfaces while the RELIEF stayed cobble
+         for all of them, so sand and soil were shaped like a cobble bed and
+         read as one. Blend the normals by the same weights. The bed is a
+         near-horizontal plane, so the map can perturb the world normal
+         directly and we can skip the tangent frame entirely — which also
+         avoids depending on how three spells its TBN helper this release. */
+      .replace('#include <normal_fragment_maps>',
+        `#ifdef USE_NORMALMAP
+         vec3 nCob=texture2D(normalMap,bUv).xyz*2.0-1.0;
+         vec3 nGrv=texture2D(uGravelN,bUv).xyz*2.0-1.0;
+         vec3 nSnd=texture2D(uSandN,bUv).xyz*2.0-1.0;
+         vec3 nSol=texture2D(uSoilN,bUv).xyz*2.0-1.0;
+         vec3 mixN=nGrv;
+         mixN=mix(mixN,nSnd,sandW*(1.0-bankW));
+         mixN=mix(mixN,nCob,cobbleW*(1.0-bankW));
+         mixN=mix(mixN,nSol,bankW);
+         normal=normalize(vec3(normal.x+mixN.x*normalScale.x,
+                               normal.y,
+                               normal.z+mixN.y*normalScale.y));
+         #endif`)
       .replace('#include <map_fragment>',
         `#ifdef USE_MAP
          vec2 bUv=vMapUv;
@@ -1849,6 +1874,10 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
          sampledDiffuseColor=mix(sampledDiffuseColor,texture2D(uSand,bUv),sandW*(1.0-bankW));
          sampledDiffuseColor=mix(sampledDiffuseColor,texture2D(map,bUv),cobbleW*(1.0-bankW));
          sampledDiffuseColor=mix(sampledDiffuseColor,texture2D(uSoil,bUv),bankW);
+         /* push the four apart harder: sand and soil read at the wrong value
+            otherwise once three's tone mapping has had a go at them */
+         sampledDiffuseColor.rgb*=mix(1.0,1.14,sandW*(1.0-bankW));
+         sampledDiffuseColor.rgb*=mix(1.0,0.84,bankW);
          /* macro patchiness, so the two-metre tile stops announcing itself */
          float mac=texture2D(uMacro,bUv*0.024).r;
          sampledDiffuseColor.rgb*=1.0+(mac-0.5)*0.55*uVary;
@@ -2479,7 +2508,7 @@ const waterMat=new THREE.ShaderMaterial({
     uNorm:{value:waterNormalTex},uHt:{value:null},
     uUseGridV:{value:0},uWave:{value:P.surfWave},
     uStreak:{value:P.streak},uBoil:{value:P.boil},
-    uWaveN:{value:P.waveShade},uFroth:{value:P.froth},
+    uWaveN:{value:P.waveShade},uFroth:{value:P.froth},uDrift:{value:P.drift},
     uGTexel:{value:new THREE.Vector2(1/64,1/64)},uCell:{value:0.45},
     uDetail:{value:P.waterDetail},uFoamK:{value:P.foam},uGlint:{value:P.skyGlint},
     uFoamC:{value:new THREE.Color(0xeef4f1)},
@@ -2523,7 +2552,7 @@ const waterMat=new THREE.ShaderMaterial({
   fragmentShader:`
     uniform vec3 uDeep,uShal,uFast,uFoamC,uSkyLo,uSkyHi,uSun,uFogC;
     uniform float uUseGrid,uTime,uDetail,uFoamK,uGlint,uFogD,uStreak,uBoil;
-    uniform float uWaveN,uFroth,uCell;
+    uniform float uWaveN,uFroth,uCell,uDrift;
     uniform vec2 uGMin,uGSize,uGTexel;
     uniform sampler2D uFlow; uniform sampler2D uNorm; uniform sampler2D uHt;
     varying float vD,vS; varying vec3 vW;
@@ -2579,13 +2608,29 @@ const waterMat=new THREE.ShaderMaterial({
       vec2 fperp=vec2(-fdir.y,fdir.x);
       float sAlong=dot(vW.xz,fdir), sAcross=dot(vW.xz,fperp);
       float st=1.0+uStreak*min(sp,2.2)*1.30;
-      /* the two wave families, carried at v+c and v-c */
-      float advD=uTime*(sp+cel)*0.16;
-      float advU=uTime*(sp-cel)*0.16;
-      vec2 uvA=vec2(sAlong*0.42/st-advD, sAcross*0.42*(0.55+0.45/st));
-      vec2 uvB=vec2(sAlong*1.55/st-advU, sAcross*1.55);
-      vec2 nA=texture2D(uNorm,uvA).xy*2.0-1.0;
-      vec2 nB=texture2D(uNorm,uvB).xy*2.0-1.0;
+      /* FLOW-MAP ADVECTION. Scrolling a texture at a constant rate cannot show
+         a varying velocity field: the pattern shears without bound and ends up
+         indicating nothing. Instead carry it in two half-cycle-offset phases
+         and cross-fade, resetting each cycle before the smear becomes visible.
+         The pattern then travels at the LOCAL WATER SPEED — the same field the
+         specks are advected by and the same one that carries the fly — so what
+         you read off the surface is where your drift is actually going.
+
+         The wave-celerity layer stays underneath as a minority contribution,
+         because a real surface does carry both, but it no longer leads. */
+      float cyc=0.55;
+      float ph1=fract(uTime*cyc), ph2=fract(uTime*cyc+0.5);
+      float blend=abs(1.0-2.0*ph1);
+      float tsp=sp*uDrift+(sp-cel)*(1.0-uDrift)*0.35;
+      vec2 fA1=vec2(sAlong*0.42/st-tsp*ph1*1.5, sAcross*0.42*(0.55+0.45/st));
+      vec2 fA2=vec2(sAlong*0.42/st-tsp*ph2*1.5, sAcross*0.42*(0.55+0.45/st));
+      vec2 nA=mix(texture2D(uNorm,fA1).xy,texture2D(uNorm,fA2).xy,blend)*2.0-1.0;
+      /* second scale, offset in phase so the two never reset together */
+      float qh1=fract(uTime*cyc*0.73+0.31), qh2=fract(uTime*cyc*0.73+0.81);
+      float qblend=abs(1.0-2.0*qh1);
+      vec2 fB1=vec2(sAlong*1.55/st-tsp*qh1*1.5, sAcross*1.55);
+      vec2 fB2=vec2(sAlong*1.55/st-tsp*qh2*1.5, sAcross*1.55);
+      vec2 nB=mix(texture2D(uNorm,fB1).xy,texture2D(uNorm,fB2).xy,qblend)*2.0-1.0;
       /* chop grows with speed; an upwelling flattens it right out */
       float calm=1.0-clamp(boil,0.0,1.0)*0.80*uBoil;
       vec2 nxz=(nA+nB*0.55)*uDetail*(0.16+sp*0.42)*calm;
@@ -5306,6 +5351,7 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uBoil.value=P.boil;
   waterMat.uniforms.uWaveN.value=P.waveShade;
   waterMat.uniforms.uFroth.value=P.froth;
+  waterMat.uniforms.uDrift.value=P.drift;
   waterMat.uniforms.uCell.value=gdx;
   waterMat.uniforms.uGTexel.value.set(1/Math.max(2,GNX),1/Math.max(2,GNZ));
   waterMat.uniforms.uFlow.value=gridTex;
@@ -5541,16 +5587,11 @@ function previewUpdate(dt){
      ranges, steps and tooltips have exactly one definition. Only the visual
      and water rows are listed: this is for judging how the river LOOKS on a
      phone, and the physics rows are useless without a rod in your hand. */
-  const PV_GROUPS=[
-    ['Water',   ['current','grade','waterModel','waterDetail','foam','skyGlint']],
-    ['Specks',  ['speckGPU','specks','speckSize','speckRange','speckSpread',
-                 'speckTravel','speckTrail']],
-    ['Sky and air',['fogAmt']],
-    ['Scenery', ['bankGrass','treeRange','sceneTris','assetOn']],
-    ['Fish',    ['riseAggro','riseRate','fishDetail','wetShine','takeRadius','showZones','showMarkers']],
-    ['Sound',   ['volume','volRiver','volSplash','volLine','volReel']],
-    ['Comfort', ['flySize','lineVis']],
-  ];
+  /* Built from the SAME section structure the headset menu uses, rather than
+     a hand-kept list of keys — that list had already drifted twice, and every
+     setting added since was missing here. Now nothing can be added to MENU
+     without appearing on the phone. */
+  const PV_GROUPS=TABS.map(t=>[t.name,t.rows.map(i=>MENU[i][1])]);
   const panel=document.getElementById('pvmenu');
   /* The panel and the control bar were both pinned to the bottom, and the
      panel sat on top — so opening it hid the very button that closes it.
@@ -5563,7 +5604,7 @@ function previewUpdate(dt){
   closeBar.appendChild(ct);closeBar.appendChild(cb);panel.appendChild(closeBar);
   const rowByKey={};
   for(const [title,keys] of PV_GROUPS){
-    const rows=keys.map(k=>MENU.find(m=>m[1]===k)).filter(Boolean);
+    const rows=keys.map(k=>MENU.find(m=>m[1]===k)).filter(r=>r&&r[1]);
     if(!rows.length) continue;
     const h=document.createElement('h4');h.textContent=title;panel.appendChild(h);
     for(const [label,key,lo,hi,st,tip] of rows){
