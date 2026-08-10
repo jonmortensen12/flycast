@@ -4326,6 +4326,13 @@ function menuPointer(trigPressed, trigEdge){
   return true;
 }
 function onSettingChanged(key){
+  /* Rebuilding the solver window means reallocating every field, so it has to
+     re-settle before it is drawn or the first frames show a flat sheet. */
+  if(key==='gridSpan'||key==='gridFollow'){
+    if(P.gridFollow<0.5) gridCentre=0;
+    gridReady=false;gridAlloc();gridTexInit();
+    for(let i=0;i<60;i++)gridStep(1/20);gridTexUpdate();
+  }
   if(key==='lineWt'||key==='tippetLen'||key==='massMul')rebuildMasses();
   if(key==='rodE'||key==='rodMass'||key==='tipSoft'||key==='rodTaper'){lastTipSoft=P.tipSoft;lastTaper=P.rodTaper;rebuildRod();}
   if(key==='current')waterMat.uniforms.uQ.value=P.current;
@@ -4607,11 +4614,6 @@ renderer.setAnimationLoop(()=>{
     if(gridReady)gridBuildBed();}
   if(Math.abs(P.gridCell-lastCell)>0.005){lastCell=P.gridCell;gridAlloc();gridTexInit();
     for(let i=0;i<60;i++)gridStep(1/20);gridTexUpdate();}
-  if(key==='gridSpan'||key==='gridFollow'){
-    if(key==='gridFollow'&&P.gridFollow<0.5) gridCentre=0;
-    gridReady=false;gridAlloc();gridTexInit();
-    for(let i=0;i<60;i++)gridStep(1/20);gridTexUpdate();
-  }
   {
     const sig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;
     if(Math.abs(sig-lastSig)>0.004){
