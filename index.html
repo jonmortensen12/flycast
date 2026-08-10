@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08o</title>
+<title>Flycast — v8 one line — build 2026-08-08p</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -84,7 +84,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08o</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08p</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -155,6 +155,7 @@ const P = {
   waterDetail:1.00, foam:1.00, fogAmt:1.00, bankGrass:1.00, skyGlint:1.00,
   treeRange:38.0, sceneTris:140.0, assetOn:1,
   gridSpan:80.0, gridFollow:0, surfWave:1.00, bedDetail:1.00,
+  foamLife:6.00, boil:1.00, streak:1.00, caustics:1.00, bedVary:1.00,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -245,6 +246,9 @@ const MENU=[
   ['Eddy strength','vortex',0.00,2.50,0.10,'Strength of vortices shed off the rocks and log. Zero gives smooth steady flow.'],
   ['— LOOKS —',null,0,0,0,''],
   ['Surface detail','waterDetail',0.00,3.00,0.05,'Strength of the ripple normals on the water. The pattern scrolls ALONG the local flow vector taken from the solved grid, so it travels with the water rather than past it, and it scales with local speed — slack water stays glassy while a riffle textures up on its own.'],
+  ['Foam life s','foamLife',0.00,25.0,0.50,'How long foam survives once it is made. Foam is generated where the flow tears \u2014 rock shoulders, the seam off the log, the lip of a drop \u2014 and then CARRIED downstream by the solved velocity, which is what turns it from a glow around obstacles into the long trailing streaks a real river has. Zero reverts to foam that only exists where turbulence is happening right now.'],
+  ['Boils','boil',0.00,3.00,0.05,'Upwellings. Where the solved flow diverges, water is rising from below: the surface goes smooth and glassy and reflects the sky. Where it converges it dimples and collects foam. Taking the SIGN of divergence rather than its magnitude is what separates the two \u2014 they look nothing alike on a real river and used to be drawn identically.'],
+  ['Flow streaking','streak',0.00,2.00,0.05,'Stretches the surface ripple ALONG the current and squeezes it across, which is how moving water actually looks and the main reason you can read a river at a glance. Raise it if you want the current legible without the specks turned on.'],
   ['Foam','foam',0.00,3.00,0.05,'How much white water appears. Foam is driven by the divergence and shear of the solved flow field, so it forms where the water genuinely tears itself apart — seams, rock shoulders, the lee of the log — instead of being painted on by hand. Zero for a glassy river.'],
   ['Sun glint','skyGlint',0.00,3.00,0.05,'Specular sun highlight and sky reflection on the surface, through a Fresnel term. Strong glint reads as bright midday; low reads as overcast and makes the bed far easier to see.'],
   ['Haze','fogAmt',0.00,3.00,0.05,'Distance haze. Costs nothing and does most of the work of making the reach feel long. Zero is perfectly clear air, which looks flat and makes the far bank feel like a wall.'],
@@ -252,6 +256,8 @@ const MENU=[
   ['Scenery tri budget k','sceneTris',20.0,600.0,10.0,'Thousands of triangles allowed for instanced scenery. A loaded model is measured on arrival and the instance count is capped to fit, so a 15,000-triangle tree gets placed a few dozen times rather than 250 times and 3.7 million triangles. That measurement is reported when the model loads.'],
   ['Use model assets','assetOn',0,1,1,'Whether files in the assets folder are used at all. Turning this off falls back to the built-in procedural meshes without deleting anything, which is the quickest way to confirm whether a model is what cost you the frame rate. Swaps live, both ways \u2014 no reload.'],
   ['Bank growth','bankGrass',0.00,1.00,0.05,'Density of grass and scrub along the banks. Drawn as a single instanced mesh, so the whole bank is one draw call regardless of this setting.'],
+  ['Bed variation','bedVary',0.00,2.00,0.05,'Large-scale patchiness across the bed, at roughly forty metres, laid over the two-metre cobble tile. Tiling is invisible when the eye has something bigger to lock onto and glaring when it does not, so this does more for the bed than any amount of extra texture resolution.'],
+  ['Caustics','caustics',0.00,3.00,0.05,'The net of moving light the water surface throws onto the bed. It is generated from the same ripple pattern the surface uses and scrolled along the solved flow, so the light moves the way the water above it is actually moving. Fades out with depth, and stops at the waterline.'],
   ['Bed detail','bedDetail',0.00,3.00,0.05,'Relief of the cobble and gravel on the riverbed and banks. This is a generated normal map on a surface that was previously flat vertex colours a metre apart, which is why the bed used to read as smooth plastic. It costs one texture lookup on a mesh that is already a single draw call.'],
   ['Fish detail','fishDetail',0.00,2.00,0.05,'Strength of the scale and spot relief on the trout. This is a generated normal map, not extra geometry, so it costs nothing per fish.'],
   ['Wet shine','wetShine',0.00,3.00,0.05,'How much glossier a trout goes the instant it clears the water. A wet fish out of the river is close to a mirror; this is what sells a jump and a landed fish in the hand.'],
@@ -626,6 +632,7 @@ let GX0=-40, GX1=40;
 const GZ0=CZ-HALFW-0.6, GZ1=CZ+HALFW+0.6;
 let gridCentre=0;
 let gdx=0.40, GNX=1, GNZ=1, gridReady=false, gbed=null;
+let gfoam=null, gfoam0=null, gdivs=null, gshear=null;
 let gu,gv,gu0,gv0,gp,gdiv,gh,ginv43,gsolid,gslope;
 function gridAlloc(){
   gdx=Math.max(0.10,P.gridCell);
@@ -641,6 +648,10 @@ function gridAlloc(){
   /* bed elevation, kept explicitly so the free surface can be reconstructed as
      bed + depth. Without it the solved surface height is unrecoverable. */
   gbed=new Float32Array(n);
+  /* foam is a transported scalar, not a per-frame readout: it is created where
+     the flow tears itself apart and then carried away by that same flow */
+  gfoam=new Float32Array(n); gfoam0=new Float32Array(n);
+  gdivs=new Float32Array(n); gshear=new Float32Array(n);
   gsolid=new Uint8Array(n); gslope=new Float32Array(GNX);
   gridBuildBed();
   gridReady=true;
@@ -679,6 +690,44 @@ function gridBuildBed(i0,i1,seed){
     }
   }
 }
+/* Foam transport. Semi-Lagrangian: for every cell, look back along the local
+   velocity to where this water was a moment ago, take the foam that was there,
+   decay it, and add whatever the flow is tearing loose right now. One extra
+   pass over the grid, which at 5,700 cells and 12 Hz is nothing next to the
+   line solver — and it is the difference between foam that glows around a rock
+   and foam that streams off it the way it does in a real river. */
+function gridFoam(dt){
+  if(!gridReady||!gfoam) return;
+  const inv=1/(2*gdx), life=Math.max(0.05,P.foamLife);
+  const decay=Math.exp(-dt/life);
+  gfoam0.set(gfoam);
+  for(let j=1;j<GNZ-1;j++){
+    for(let i=1;i<GNX-1;i++){
+      const k=i+j*GNX;
+      if(gsolid[k]){gfoam[k]=0;gdivs[k]=0;gshear[k]=0;continue;}
+      const dudx=(gu[k+1]-gu[k-1])*inv, dvdz=(gv[k+GNX]-gv[k-GNX])*inv;
+      const dudz=(gu[k+GNX]-gu[k-GNX])*inv, dvdx=(gv[k+1]-gv[k-1])*inv;
+      const div=dudx+dvdz, shear=dvdx-dudz;
+      gdivs[k]=div; gshear[k]=Math.abs(shear);
+      /* CONVERGENCE makes foam. Divergence is water rising, which makes a boil
+         and is handled separately in the shader — treating the two the same
+         was why every rock had a symmetric halo. */
+      const conv=Math.max(0,-div);
+      const sp=Math.hypot(gu[k],gv[k]);
+      const gen=conv*0.55+Math.abs(shear)*0.16+Math.max(0,sp-1.5)*0.22;
+      /* trace back up the streamline */
+      const bx=i+0.5-gu[k]*dt/gdx, bz=j+0.5-gv[k]*dt/gdx;
+      let fi=Math.floor(bx-0.5), fj=Math.floor(bz-0.5);
+      if(fi<0)fi=0; if(fj<0)fj=0;
+      if(fi>GNX-2)fi=GNX-2; if(fj>GNZ-2)fj=GNZ-2;
+      const tx=(bx-0.5)-fi, tz=(bz-0.5)-fj, kk=fi+fj*GNX;
+      const back=gfoam0[kk]*(1-tx)*(1-tz)+gfoam0[kk+1]*tx*(1-tz)
+                +gfoam0[kk+GNX]*(1-tx)*tz+gfoam0[kk+GNX+1]*tx*tz;
+      gfoam[k]=Math.min(1.6,back*decay+gen*dt);
+    }
+  }
+}
+
 /* Slide the window by whole cells. Shifting by an integer number of cells is
    what makes this safe: every surviving cell keeps its exact state, and only
    the strip at the leading edge is new. The alternative — resampling onto a
@@ -829,21 +878,18 @@ function gridTexUpdate(){
        rock shoulders, the seam off the log, the lip of each drop — instead of
        being painted along hand-placed lines. Free, because the grid is already
        being walked to build this texture. */
-    const gi=k%GNX, gj=(k-gi)/GNX;
-    let turb=0;
-    if(gi>0&&gi<GNX-1&&gj>0&&gj<GNZ-1&&!gsolid[k]){
-      const inv=1/(2*gdx);
-      const dudx=(gu[k+1]-gu[k-1])*inv, dvdz=(gv[k+GNX]-gv[k-GNX])*inv;
-      const dudz=(gu[k+GNX]-gu[k-GNX])*inv, dvdx=(gv[k+1]-gv[k-1])*inv;
-      turb=Math.abs(dudx+dvdz)+Math.abs(dvdx-dudz)*0.75;
-    }
-    gridTexData[p+3]=Math.max(0,Math.min(255,Math.round(turb*26)));
+    /* alpha now carries TRANSPORTED foam rather than instantaneous turbulence */
+    gridTexData[p+3]=Math.max(0,Math.min(255,Math.round(gfoam[k]*160)));
     /* free surface departure from the still-water line, which is what the
        vertex shader needs to raise a pillow in front of a rock */
     const xk=GX0+((k%GNX)+0.5)*gdx;
     const dev=(gbed[k]+gh[k])-surfY(xk);
     gridTexHData[p]=Math.max(0,Math.min(255,Math.round((dev/0.60+0.5)*255)));
-    gridTexHData[p+1]=0;gridTexHData[p+2]=0;gridTexHData[p+3]=255;
+    /* SIGNED divergence: above 0.5 the water is rising and the surface goes
+       glassy, below it is converging and dimples. Shear in blue marks seams. */
+    gridTexHData[p+1]=Math.max(0,Math.min(255,Math.round((gdivs[k]/6+0.5)*255)));
+    gridTexHData[p+2]=Math.max(0,Math.min(255,Math.round(gshear[k]*34)));
+    gridTexHData[p+3]=255;
   }
   gridTex.needsUpdate=true;
   if(gridTexH) gridTexH.needsUpdate=true;
@@ -1586,7 +1632,7 @@ float surfY(float x){
   return y;
 }`;
 
-let bedGeo,bedPosAttr,bedMat=null;
+let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
 {
   bedGeo=new THREE.PlaneGeometry(170,64,180,74);
   bedGeo.rotateX(-Math.PI/2);bedGeo.translate(0,0,CZ);
@@ -1604,15 +1650,19 @@ let bedGeo,bedPosAttr,bedMat=null;
      ambient occlusion all live; if the texture carried hue of its own it
      would fight them and the channel would stop looking like a channel. So
      the texture supplies structure and the vertex colours supply colour. */
-  const bedMaps=(()=>{
+  /* THREE surfaces, not one: cobble in the channel, fine silt where the water
+     slows, and packed earth on the banks. One tiled texture everywhere is what
+     makes ground read as wallpaper — a river bed changes with the flow over it,
+     and the blend weights come free because the shader already knows where it
+     is across the channel and how deep the water is. */
+  const bedSurface=(coarse,tint,seed)=>{
     const N=512, hf=new Float32Array(N*N);
     const cv=document.createElement('canvas');cv.width=N;cv.height=N;
     const g=cv.getContext('2d');
-    g.fillStyle='#b9b4ab';g.fillRect(0,0,N,N);
+    g.fillStyle=tint;g.fillRect(0,0,N,N);
     const rnd=(a,b)=>a+Math.random()*(b-a);
     const stones=[];
-    /* big cobbles first, then shingle packed into the gaps */
-    for(const [count,rlo,rhi] of [[95,17,34],[240,8,17],[900,3,8]]){
+    for(const [count,rlo,rhi] of coarse){
       for(let i=0;i<count;i++){
         const x=Math.random()*N,y=Math.random()*N,r=rnd(rlo,rhi);
         const sq=rnd(0.62,1.0), rot=Math.random()*Math.PI;
@@ -1620,15 +1670,17 @@ let bedGeo,bedPosAttr,bedMat=null;
         stones.push({x,y,r,sq,rot,tone});
       }
     }
+    const base=parseInt(tint.slice(1),16);
+    const bR=(base>>16)&255, bG=(base>>8)&255, bB=base&255;
     for(const s of stones){
       for(const [ox,oy] of [[0,0],[N,0],[-N,0],[0,N],[0,-N]]){   /* tile seams */
         const x=s.x+ox,y=s.y+oy;
         if(x<-40||x>N+40||y<-40||y>N+40) continue;
-        const v=Math.round(185*s.tone);
+        const cl=(a,b)=>Math.max(0,Math.min(255,Math.round(a*b)));
         const gg=g.createRadialGradient(x-s.r*0.30,y-s.r*0.32,s.r*0.15,x,y,s.r);
-        gg.addColorStop(0,`rgb(${Math.min(255,v+26)},${Math.min(255,v+24)},${Math.min(255,v+18)})`);
-        gg.addColorStop(0.72,`rgb(${v},${v-3},${v-10})`);
-        gg.addColorStop(1,`rgb(${(v*0.62)|0},${(v*0.61)|0},${(v*0.58)|0})`);
+        gg.addColorStop(0,`rgb(${cl(bR,s.tone*1.14)},${cl(bG,s.tone*1.12)},${cl(bB,s.tone*1.08)})`);
+        gg.addColorStop(0.72,`rgb(${cl(bR,s.tone)},${cl(bG,s.tone*0.98)},${cl(bB,s.tone*0.94)})`);
+        gg.addColorStop(1,`rgb(${cl(bR,s.tone*0.62)},${cl(bG,s.tone*0.61)},${cl(bB,s.tone*0.58)})`);
         g.save();g.translate(x,y);g.rotate(s.rot);g.scale(1,s.sq);
         g.fillStyle=gg;g.beginPath();g.arc(0,0,s.r,0,Math.PI*2);g.fill();g.restore();
         /* the same stone pushed into the height field, so relief and paint agree */
@@ -1670,11 +1722,97 @@ let bedGeo,bedPosAttr,bedMat=null;
     nrm.wrapS=nrm.wrapT=THREE.RepeatWrapping;
     nrm.repeat.set(85,32);
     return {map,nrm};
+  };
+  const bedCobble=bedSurface([[95,17,34],[240,8,17],[900,3,8]],'#b9b4ab');
+  const bedSilt  =bedSurface([[30,10,20],[420,2,5],[1600,1,3]],'#a89e8c');
+  const bedSoil  =bedSurface([[60,9,20],[300,4,10],[1100,2,6]],'#9d9482');
+
+  /* Macro variation. Tiling is invisible when the eye has something larger to
+     lock onto and glaring when it does not, so one sheet of low-frequency
+     noise at roughly forty metres does more here than any amount of extra
+     texture resolution would. */
+  const bedMacro=(()=>{
+    const N=128,cv=document.createElement('canvas');cv.width=N;cv.height=N;
+    const g=cv.getContext('2d'),img=g.createImageData(N,N);
+    const h=new Float32Array(N*N);
+    const hash=(x,y,s)=>{const n=Math.sin(x*127.1+y*311.7+s*74.7)*43758.5453;return n-Math.floor(n);};
+    const fade=t=>t*t*(3-2*t), lerp=(a,b,t)=>a+(b-a)*t;
+    for(const [f,a,sd] of [[2,0.55,3],[4,0.28,5],[8,0.17,9]]){
+      const wrap=v=>((v%f)+f)%f;
+      for(let j=0;j<N;j++)for(let i=0;i<N;i++){
+        const fx=i/N*f, fz=j/N*f;
+        const x0=Math.floor(fx),z0=Math.floor(fz),tx=fade(fx-x0),tz=fade(fz-z0);
+        h[i+j*N]+=lerp(lerp(hash(wrap(x0),wrap(z0),sd),hash(wrap(x0+1),wrap(z0),sd),tx),
+                       lerp(hash(wrap(x0),wrap(z0+1),sd),hash(wrap(x0+1),wrap(z0+1),sd),tx),tz)*a;
+      }
+    }
+    for(let i=0;i<N*N;i++){
+      const v=Math.max(0,Math.min(255,Math.round(h[i]*255)));
+      img.data[i*4]=img.data[i*4+1]=img.data[i*4+2]=v;img.data[i*4+3]=255;
+    }
+    g.putImageData(img,0,0);
+    const t=new THREE.CanvasTexture(cv);
+    t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(4.2,1.6);   /* ~40 m */
+    return t;
   })();
+
   bedMat=new THREE.MeshStandardMaterial({
-    map:bedMaps.map,normalMap:bedMaps.nrm,
+    map:bedCobble.map,normalMap:bedCobble.nrm,
     normalScale:new THREE.Vector2(P.bedDetail,P.bedDetail),
     vertexColors:true,roughness:0.96});
+  /* Injected rather than a raw ShaderMaterial, so the bed keeps three.js
+     lighting, fog and tone mapping for free. Everything below is additive:
+     set Bed variation and Caustics to zero and it renders as it did. */
+  bedMat.customProgramCacheKey=()=>'flycast-bed-1';
+  bedMat.onBeforeCompile=sh=>{
+    sh.uniforms.uSilt={value:bedSilt.map};
+    sh.uniforms.uSoil={value:bedSoil.map};
+    sh.uniforms.uMacro={value:bedMacro};
+    sh.uniforms.uRip={value:bedCobble.nrm};
+    sh.uniforms.uBedT={value:0};
+    sh.uniforms.uVary={value:P.bedVary};
+    sh.uniforms.uCaus={value:P.caustics};
+    bedShader=sh;
+    sh.vertexShader=sh.vertexShader
+      .replace('#include <common>','#include <common>\nvarying vec3 vBedW;')
+      .replace('#include <begin_vertex>',
+        '#include <begin_vertex>\n  vBedW=(modelMatrix*vec4(position,1.0)).xyz;');
+    sh.fragmentShader=sh.fragmentShader
+      .replace('#include <common>',
+        `#include <common>
+         uniform sampler2D uSilt,uSoil,uMacro,uRip;
+         uniform float uBedT,uVary,uCaus;
+         varying vec3 vBedW;`)
+      .replace('#include <map_fragment>',
+        `#ifdef USE_MAP
+         vec2 bUv=vMapUv;
+         vec4 cob=texture2D(map,bUv);
+         vec4 sil=texture2D(uSilt,bUv);
+         vec4 soi=texture2D(uSoil,bUv);
+         /* where we are: across the channel, and how deep the water is */
+         float uu=abs((vBedW.z-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)});
+         float bankW=smoothstep(0.90,1.12,uu);
+         float cross=max(0.0,1.0-uu*uu);
+         float dep=${MAXDEPTH.toFixed(2)}*cross*(0.55+0.45*sin(vBedW.x*0.13+1.3));
+         /* silt settles where it is deep and slow, cobble scours where it is not */
+         float siltW=smoothstep(0.55,1.25,dep)*(1.0-bankW);
+         vec4 sampledDiffuseColor=mix(mix(cob,sil,siltW),soi,bankW);
+         /* macro patchiness, so the two-metre tile stops announcing itself */
+         float mac=texture2D(uMacro,bUv*0.024).r;
+         sampledDiffuseColor.rgb*=1.0+(mac-0.5)*0.55*uVary;
+         /* caustics: the ripple pattern reprojected onto the bed, scrolled and
+            faded out with depth. Only underwater, and never on dry bank. */
+         if(uCaus>0.001&&dep>0.02){
+           vec2 cu=vBedW.xz*0.55+vec2(uBedT*0.13,0.0);
+           vec2 cv2=vBedW.xz*0.94-vec2(uBedT*0.21,uBedT*0.05);
+           float a=texture2D(uRip,cu*0.5).x, b=texture2D(uRip,cv2*0.5).y;
+           float caus=pow(clamp(1.0-abs(a-b)*3.4,0.0,1.0),7.0);
+           float fade=smoothstep(0.02,0.22,dep)*(1.0-smoothstep(0.7,1.6,dep));
+           sampledDiffuseColor.rgb+=vec3(1.0,0.98,0.90)*caus*fade*0.55*uCaus;
+         }
+         diffuseColor*=sampledDiffuseColor;
+         #endif`);
+  };
   const bed=new THREE.Mesh(bedGeo,bedMat);
   bed.renderOrder=-1;scene.add(bed);
 }
@@ -1688,7 +1826,8 @@ function rebuildBed(){
   const pa=bedPosAttr,ca=bedGeo.attributes.color;
   for(let i=0;i<pa.count;i++){
     const x=pa.getX(i),z=pa.getZ(i),u=(z-CZ)/HALFW,d=bedDepth(x,z);
-    pa.setY(i,bedY(x,z)+Math.sin(x*2.3+z*1.7)*0.025+Math.sin(x*0.6-z*1.1)*0.045);
+    const y2=bedY(x,z)+Math.sin(x*2.3+z*1.7)*0.025+Math.sin(x*0.6-z*1.1)*0.045;
+    pa.setY(i,y2);
     if(Math.abs(u)<1) _bedC.copy(_bedGravel).lerp(_bedSilt,Math.min(1,d/1.4));
     else              _bedC.copy(_bedGravel).lerp(_bedGrass,Math.min(1,(Math.abs(u)-1)*1.6));
     /* occlusion: contact darkening under every rock and the log, plus depth
@@ -1700,6 +1839,11 @@ function rebuildBed(){
     }
     ao*=1-0.30*Math.min(1,d/1.5);
     ao*=0.86+0.14*Math.min(1,Math.abs(Math.abs(u)-1.0)*2.2);
+    /* A wet band at the waterline. Stone that the river has been over is
+       darker and stays darker for a hand's width above the surface, and its
+       absence is one of those things you do not notice until it is there. */
+    const above=y2-surfY(x);
+    if(above>-0.02&&above<0.16) _bedC.multiplyScalar(0.62+0.38*(above/0.16));
     /* the cobble map averages about 0.72, so lift the vertex colours to land
        back where the bed sat before it gained a texture */
     _bedC.multiplyScalar(ao*1.38);
@@ -2276,6 +2420,7 @@ const waterMat=new THREE.ShaderMaterial({
     uUseGrid:{value:0},uFlow:{value:null},
     uNorm:{value:waterNormalTex},uHt:{value:null},
     uUseGridV:{value:0},uWave:{value:P.surfWave},
+    uStreak:{value:P.streak},uBoil:{value:P.boil},
     uDetail:{value:P.waterDetail},uFoamK:{value:P.foam},uGlint:{value:P.skyGlint},
     uFoamC:{value:new THREE.Color(0xeef4f1)},
     uSkyLo:{value:SKY_LO},uSkyHi:{value:SKY_HI},uSun:{value:SUN_DIR},
@@ -2317,8 +2462,9 @@ const waterMat=new THREE.ShaderMaterial({
     }`,
   fragmentShader:`
     uniform vec3 uDeep,uShal,uFast,uFoamC,uSkyLo,uSkyHi,uSun,uFogC;
-    uniform float uUseGrid,uTime,uDetail,uFoamK,uGlint,uFogD;
-    uniform vec2 uGMin,uGSize; uniform sampler2D uFlow; uniform sampler2D uNorm;
+    uniform float uUseGrid,uTime,uDetail,uFoamK,uGlint,uFogD,uStreak,uBoil;
+    uniform vec2 uGMin,uGSize;
+    uniform sampler2D uFlow; uniform sampler2D uNorm; uniform sampler2D uHt;
     varying float vD,vS; varying vec3 vW;
     void main(){
       float d=vD, sp=vS, turb=0.0;
@@ -2334,17 +2480,33 @@ const waterMat=new THREE.ShaderMaterial({
       }
       if(d<0.02) discard;
 
-      /* Ripple normals scrolled ALONG the local flow, at two scales and two
-         rates. One texture sampled twice beats two textures on a tile GPU, and
-         because the direction comes from the solved field the surface travels
-         with the water instead of sliding past it. */
+      /* Boils and seams, read from the SIGNED divergence packed alongside the
+         surface height. Rising water goes glassy; converging water dimples. */
+      float boil=0.0, seam=0.0;
+      if(uUseGrid>0.5){
+        vec2 tc2=vec2((vW.x-uGMin.x)/uGSize.x,(vW.z-uGMin.y)/uGSize.y);
+        if(tc2.x>0.004&&tc2.x<0.996&&tc2.y>0.004&&tc2.y<0.996){
+          vec4 hh=texture2D(uHt,tc2);
+          boil=(hh.g-0.5)*2.0;     /* +ve upwelling, -ve convergence */
+          seam=hh.b;
+        }
+      }
+
+      /* Ripple normals in a FLOW-ALIGNED frame: stretched along the current and
+         squeezed across it. Still water has no direction and looks like it;
+         moving water is streaky, and that anisotropy is the main reason you can
+         read a river at a glance. This is what should make the specks optional. */
+      vec2 fperp=vec2(-fdir.y,fdir.x);
+      float sAlong=dot(vW.xz,fdir), sAcross=dot(vW.xz,fperp);
+      float st=1.0+uStreak*min(sp,2.2)*1.30;
       float adv=uTime*max(sp,0.06);
-      vec2 uvA=vW.xz*0.42-fdir*adv*0.55;
-      vec2 uvB=vW.xz*1.55+fdir*adv*0.19;
+      vec2 uvA=vec2(sAlong*0.42/st-adv*0.55, sAcross*0.42*(0.55+0.45/st));
+      vec2 uvB=vec2(sAlong*1.55/st+adv*0.19, sAcross*1.55);
       vec2 nA=texture2D(uNorm,uvA).xy*2.0-1.0;
       vec2 nB=texture2D(uNorm,uvB).xy*2.0-1.0;
-      /* chop grows with speed: slack water stays glassy on its own */
-      vec2 nxz=(nA+nB*0.55)*uDetail*(0.16+sp*0.42);
+      /* chop grows with speed; an upwelling flattens it right out */
+      float calm=1.0-clamp(boil,0.0,1.0)*0.80*uBoil;
+      vec2 nxz=(nA+nB*0.55)*uDetail*(0.16+sp*0.42)*calm;
       vec3 N=normalize(vec3(nxz.x,1.0,nxz.y));
 
       vec3 V=normalize(cameraPosition-vW);
@@ -2358,11 +2520,16 @@ const waterMat=new THREE.ShaderMaterial({
       c=mix(c,sky,clamp(fres*0.90,0.0,0.72)*(0.35+0.65*uGlint));
       c+=vec3(1.0,0.96,0.86)*glint*0.85*uGlint;
 
-      /* foam from the divergence and shear packed into alpha upstream, plus a
-         little standing white in genuinely fast water */
-      float foam=clamp(turb*2.4*uFoamK+smoothstep(1.30,2.05,sp)*0.30*uFoamK,0.0,1.0);
+      /* foam has been carried here from wherever it was torn loose */
+      float foam=clamp(turb*1.9*uFoamK,0.0,1.0);
       foam*=smoothstep(0.02,0.13,d);
-      c=mix(c,uFoamC,foam*0.80);
+      /* a boil is a smooth dome that mirrors the sky; a convergence dimples and
+         darkens, and is where the foam ends up collecting */
+      c=mix(c,sky,clamp(boil,0.0,1.0)*0.30*uBoil);
+      c*=1.0-clamp(-boil,0.0,1.0)*0.10*uBoil;
+      /* shear seams draw a faint line down the join between two speeds */
+      c*=1.0-clamp(seam,0.0,1.0)*0.13;
+      c=mix(c,uFoamC,foam*0.85);
 
       /* depth fade: thin water goes transparent so the bed reads through it,
          and a glancing view goes opaque because that is when reflection wins */
@@ -4331,7 +4498,7 @@ function onSettingChanged(key){
   if(key==='gridSpan'||key==='gridFollow'){
     if(P.gridFollow<0.5) gridCentre=0;
     gridReady=false;gridAlloc();gridTexInit();
-    for(let i=0;i<60;i++)gridStep(1/20);gridTexUpdate();
+    for(let i=0;i<60;i++){gridStep(1/20);gridFoam(1/20);}gridTexUpdate();
   }
   if(key==='lineWt'||key==='tippetLen'||key==='massMul')rebuildMasses();
   if(key==='rodE'||key==='rodMass'||key==='tipSoft'||key==='rodTaper'){lastTipSoft=P.tipSoft;lastTaper=P.rodTaper;rebuildRod();}
@@ -4557,7 +4724,7 @@ renderer.setAnimationLoop(()=>{
   if(!started){
     resetCast();
     gridAlloc(); gridTexInit();
-    for(let i=0;i<120;i++) gridStep(1/20);   /* settle the flow before play */
+    for(let i=0;i<120;i++){ gridStep(1/20); gridFoam(1/20); }  /* settle before play */
     gridTexUpdate();
     started=true;
   }
@@ -4569,7 +4736,7 @@ renderer.setAnimationLoop(()=>{
     const step=1/Math.max(2,P.gridRate);
     let guard=0;
     const t0=nowMs();
-    while(gridAccum>=step&&guard++<3){ gridStep(step); gridAccum-=step; }
+    while(gridAccum>=step&&guard++<3){ gridStep(step); gridFoam(step); gridAccum-=step; }
     if(guard>1){ gridMs+=((nowMs()-t0)-gridMs)*0.15; gridTexUpdate(); }
   }
   M.fps+=(1/Math.max(dt,1e-4)-M.fps)*0.06;
@@ -4613,7 +4780,7 @@ renderer.setAnimationLoop(()=>{
   if(Math.abs(P.obstHeight-lastObst)>0.01){lastObst=P.obstHeight;placeObstacles();
     if(gridReady)gridBuildBed();}
   if(Math.abs(P.gridCell-lastCell)>0.005){lastCell=P.gridCell;gridAlloc();gridTexInit();
-    for(let i=0;i<60;i++)gridStep(1/20);gridTexUpdate();}
+    for(let i=0;i<60;i++){gridStep(1/20);gridFoam(1/20);}gridTexUpdate();}
   {
     const sig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;
     if(Math.abs(sig-lastSig)>0.004){
@@ -5036,6 +5203,13 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uUseGrid.value=(P.waterModel>0.5&&gridTex)?1:0;
   waterMat.uniforms.uUseGridV.value=(P.waterModel>0.5&&gridTexH)?1:0;
   waterMat.uniforms.uWave.value=P.surfWave;
+  waterMat.uniforms.uStreak.value=P.streak;
+  if(bedShader){
+    bedShader.uniforms.uBedT.value=simTime;
+    bedShader.uniforms.uVary.value=P.bedVary;
+    bedShader.uniforms.uCaus.value=P.caustics;
+  }
+  waterMat.uniforms.uBoil.value=P.boil;
   waterMat.uniforms.uFlow.value=gridTex;
   waterMat.uniforms.uHt.value=gridTexH;
   /* the window moves, so its bounds are a per-frame uniform now */
