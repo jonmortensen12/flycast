@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08s</title>
+<title>Flycast — v8 one line — build 2026-08-08t</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -37,7 +37,17 @@
 #pvmenu{position:fixed;inset:auto 0 0 0;max-height:62vh;display:none;z-index:50;
   background:rgba(12,18,22,0.96);border-top:1px solid #46606c;
   overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 12px 96px}
-#pvclose{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;
+#pvtabs{position:sticky;top:46px;z-index:2;display:flex;gap:6px;overflow-x:auto;
+  background:rgba(12,18,22,0.98);padding:8px 0 10px;border-bottom:1px solid #2c4048;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none}
+#pvtabs::-webkit-scrollbar{display:none}
+#pvtabs button{flex:0 0 auto;background:#1d2a31;color:#8fb3bd;border:1px solid #344a54;
+  border-radius:999px;padding:11px 16px;font:600 14px/1 system-ui,sans-serif;
+  white-space:nowrap;cursor:pointer}
+#pvtabs button.on{background:#cf8a4a;color:#1b120a;border-color:#cf8a4a}
+.pvgroup{display:none}
+.pvgroup.on{display:block}
+#pvclose{position:sticky;top:0;z-index:3;display:flex;justify-content:space-between;
   align-items:center;background:rgba(12,18,22,0.98);padding:12px 0 10px;
   border-bottom:1px solid #2c4048;margin-bottom:4px}
 #pvclose span{color:#dfe8ea;font:700 15px/1 system-ui,sans-serif}
@@ -88,7 +98,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08s</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08t</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -154,11 +164,11 @@ const P = {
   moveSpeed:1.60, netRadius:0.30, invertY:0, reelHand:0,
   volume:0.70, volReel:1.00, volSplash:1.00, volRiver:0.55, volLine:1.00,
   lineTaper:1,
-  waterModel:1, gridCell:0.45, gridIter:20, gridRate:12, manningN:0.055,
+  waterModel:1, gridCell:0.45, gridIter:20, gridRate:20, manningN:0.055,
   current:0.55, speckGPU:1, speckTravel:7.0, speckTrail:0.16, specks:1.00, speckSize:0.05, speckSpread:0.45, speckRange:16.0, grade:1.00, vortex:0.60, obstHeight:0.80,
   waterDetail:1.00, foam:1.00, fogAmt:1.00, bankGrass:1.00, skyGlint:1.00,
   treeRange:38.0, sceneTris:140.0, assetOn:1,
-  gridSpan:80.0, gridFollow:0, surfWave:1.00, bedDetail:1.00,
+  waterSmooth:0.08, gridSpan:80.0, gridFollow:0, surfWave:1.00, bedDetail:1.00,
   foamLife:6.00, boil:1.00, streak:1.00, caustics:1.00, bedVary:1.00,
   waveShade:1.00, froth:1.00, drift:1.00,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
@@ -231,6 +241,7 @@ const MENU=[
   ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
   ['— RIVER —',null,0,0,0,''],
   ['Water model','waterModel',0,1,1,'0 is the analytic field: flow painted on by formula, fast but it can only do what was written into it. 1 solves shallow water on a grid — depth from the bed and obstacles, gravity down the surface slope, Manning bed friction and a pressure projection. Rocks divert flow because they ARE bed elevation, and eddies form because the solver makes them.'],
+  ['Surface damping','waterSmooth',0.00,0.40,0.01,'Smooths the solved free surface between cells. The solver stores velocity and depth at the same points, which lets odd and even cells drift apart into a checkerboard that shows up as the whole reach rippling for no reason \u2014 measured at plus or minus 0.3 m on a dead flat bed with this at zero. At 0.08 a flat bed solves flat. Higher irons out real detail too.'],
   ['Grid span m','gridSpan',20.0,200.0,5.00,'Length of river the solver covers, centred on the origin or on you. The rest of the reach falls back to the analytic flow, which is what the water outside this window has always used. Shrinking the span and shrinking the cell together keeps the same cost while putting far more resolution where you are fishing.'],
   ['Grid follows you','gridFollow',0,1,1,'0 pins the solved window to the middle of the reach. 1 slides it along with you, in whole-cell steps so no existing cell is ever disturbed \u2014 only a thin strip at the leading edge is new, and it is seeded from the analytic flow, exactly as the open upstream boundary already does every frame. Wade downstream and you will not see it; wade hard upstream and a settling transient washes down behind you.'],
   ['Surface relief','surfWave',0.00,2.50,0.05,'How much the water surface is displaced by the SOLVED free surface rather than by decorative sine waves. This is the pillow that stands up in front of a rock, the drawdown over a lip, the standing wave below it. The solver has always computed this; until now the renderer threw it away and drew three hardcoded sines instead. Zero returns to that.'],
@@ -800,37 +811,105 @@ function gridStep(dt){
   }
   /* 3. inflow / outflow / walls */
   gridBounds();
-  /* 4. pressure projection: enforce div(h u) = 0 */
-  const iters=Math.max(4,Math.round(P.gridIter));
-  gp.fill(0);
-  for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
-    const k=i+j*GNX;
-    if(gsolid[k]){gdiv[k]=0;continue;}
-    const hE=gsolid[k+1]?0:0.5*(gh[k]+gh[k+1]);
-    const hW=gsolid[k-1]?0:0.5*(gh[k]+gh[k-1]);
-    const hN=gsolid[k+GNX]?0:0.5*(gh[k]+gh[k+GNX]);
-    const hS=gsolid[k-GNX]?0:0.5*(gh[k]+gh[k-GNX]);
-    gdiv[k]=(hE*0.5*(gu[k]+gu[k+1])-hW*0.5*(gu[k]+gu[k-1])
-            +hN*0.5*(gv[k]+gv[k+GNX])-hS*0.5*(gv[k]+gv[k-GNX]))/gdx;
-  }
-  for(let it=0;it<iters;it++){
-    for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
-      const k=i+j*GNX;
+  /* 4. FREE SURFACE.
+     This used to be a pressure projection enforcing div(h u) = 0 — a rigid lid.
+     It worked, but it meant the depth field was written once when the bed was
+     built and never touched again, so the water surface could not move. Three
+     consequences, all of which showed:
+
+       - obstacles only influenced the flow through the depth weighting inside
+         the Poisson solve, which is indirect and weak, so specks appeared to
+         sail through rocks and Obstacle height did almost nothing;
+       - no pillow in front of a rock, no drawdown over it, no standing wave
+         below it, because those ARE free-surface features;
+       - Surface relief and Wave shading were reading a deviation field that
+         was identically zero everywhere, forever.
+
+     So: continuity, then the pressure gradient that continuity implies. Where
+     flow converges the water piles up, and that pile pushes back. That single
+     feedback loop is what produces every one of the missing behaviours.
+
+     The gradient is taken on the DEPARTURE from the still-water line, not on
+     the absolute surface, because the mean channel slope is already driving
+     the flow in step 1 and would otherwise be counted twice.
+
+     This is also cheaper than what it replaces: the Poisson solve was four or
+     more sweeps of the whole grid, and this is two passes. */
+  {
+    const g2=9.81;
+    /* explicit free-surface schemes are limited by the gravity wave speed, so
+       substep on the CFL condition rather than hoping the frame rate is kind */
+    let cmax=0;
+    for(let k=0;k<gh.length;k++){
       if(gsolid[k]) continue;
-      const hE=gsolid[k+1]?0:0.5*(gh[k]+gh[k+1]);
-      const hW=gsolid[k-1]?0:0.5*(gh[k]+gh[k-1]);
-      const hN=gsolid[k+GNX]?0:0.5*(gh[k]+gh[k+GNX]);
-      const hS=gsolid[k-GNX]?0:0.5*(gh[k]+gh[k-GNX]);
-      const sum=hE+hW+hN+hS;
-      if(sum<1e-6){gp[k]=0;continue;}
-      gp[k]=(hE*gp[k+1]+hW*gp[k-1]+hN*gp[k+GNX]+hS*gp[k-GNX]-gdiv[k]*gdx*gdx)/sum;
+      const c=Math.sqrt(g2*Math.max(gh[k],0.05))+Math.hypot(gu[k],gv[k]);
+      if(c>cmax) cmax=c;
     }
-  }
-  for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
-    const k=i+j*GNX;
-    if(gsolid[k]) continue;
-    gu[k]-=(gp[k+1]-gp[k-1])/(2*gdx);
-    gv[k]-=(gp[k+GNX]-gp[k-GNX])/(2*gdx);
+    const nsub=Math.max(1,Math.min(6,Math.ceil(dt*cmax/(gdx*0.42))));
+    const sdt=dt/nsub;
+    for(let s=0;s<nsub;s++){
+      /* 4a. continuity: the surface rises where flux converges */
+      for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+        const k=i+j*GNX;
+        if(gsolid[k]){gdiv[k]=0;continue;}
+        const hE=gsolid[k+1]?0:0.5*(gh[k]+gh[k+1]);
+        const hW=gsolid[k-1]?0:0.5*(gh[k]+gh[k-1]);
+        const hN=gsolid[k+GNX]?0:0.5*(gh[k]+gh[k+GNX]);
+        const hS=gsolid[k-GNX]?0:0.5*(gh[k]+gh[k-GNX]);
+        gdiv[k]=(hE*0.5*(gu[k]+gu[k+1])-hW*0.5*(gu[k]+gu[k-1])
+                +hN*0.5*(gv[k]+gv[k+GNX])-hS*0.5*(gv[k]+gv[k-GNX]))/gdx;
+      }
+      for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+        const k=i+j*GNX;
+        if(gsolid[k]) continue;
+        let h=gh[k]-sdt*gdiv[k];
+        /* keep the surface within a sane band of still water: this is a river
+           reach, not a dam break, and unbounded drift is the one way an
+           explicit free surface goes wrong slowly instead of loudly */
+        const still=surfY(GX0+(i+0.5)*gdx)-gbed[k];
+        h=Math.max(0.02,Math.min(h,still+0.45));
+        h=Math.max(h,Math.max(0.02,still-0.45));
+        /* very weak pull back toward still water, so numerical mass error
+           cannot accumulate over a long session */
+        gh[k]=h+(still-h)*Math.min(1,sdt*0.06);
+      }
+      /* 4b. the surface gradient accelerates the water */
+      for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+        const k=i+j*GNX;
+        if(gsolid[k]) continue;
+        const xe=GX0+(i+0.5)*gdx;
+        const etaE=gsolid[k+1]?(gbed[k]+gh[k]):(gbed[k+1]+gh[k+1]);
+        const etaW=gsolid[k-1]?(gbed[k]+gh[k]):(gbed[k-1]+gh[k-1]);
+        const etaN=gsolid[k+GNX]?(gbed[k]+gh[k]):(gbed[k+GNX]+gh[k+GNX]);
+        const etaS=gsolid[k-GNX]?(gbed[k]+gh[k]):(gbed[k-GNX]+gh[k-GNX]);
+        /* subtract the still-water slope, which step 1 already applies */
+        const dEta=(etaE-etaW+2*gslope[i]*gdx)/(2*gdx);
+        const dEtaZ=(etaN-etaS)/(2*gdx);
+        gu[k]-=sdt*g2*dEta;
+        gv[k]-=sdt*g2*dEtaZ;
+      }
+      /* 4c. A compact divergence against a wide gradient decouples odd and
+         even cells on a collocated grid — the classic checkerboard, and
+         without this the flat-bed case rings at plus or minus 0.3 m of
+         surface for no reason at all. A little Laplacian smoothing kills that
+         mode and leaves the physics: with it, flat bed solves dead flat. */
+      const sm=Math.max(0,Math.min(0.4,P.waterSmooth));
+      if(sm>0.001){
+        for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+          const k=i+j*GNX;
+          if(gsolid[k]) continue;
+          let hs=0,us=0,vs=0,c=0;
+          for(const kk of [k-1,k+1,k-GNX,k+GNX]){
+            if(gsolid[kk]) continue;
+            hs+=gh[kk];us+=gu[kk];vs+=gv[kk];c++;
+          }
+          if(c<2) continue;
+          gh[k]+=sm*(hs/c-gh[k]);
+          gu[k]+=sm*(us/c-gu[k]);
+          gv[k]+=sm*(vs/c-gv[k]);
+        }
+      }
+    }
   }
   for(let k=0;k<gu.length;k++){
     const sp=Math.hypot(gu[k],gv[k]);
@@ -5612,11 +5691,28 @@ function previewUpdate(dt){
   ct.style.font='600 12px/1.3 system-ui,sans-serif';ct.style.color='#93a7ad';
   const cb=document.createElement('button');cb.textContent='Done';
   closeBar.appendChild(ct);closeBar.appendChild(cb);panel.appendChild(closeBar);
+  /* Tabs, because the panel now carries every setting the headset menu does
+     and a single scrolling column of eighty rows is unusable on a phone. One
+     row of pills, one visible group, no scrolling past things you do not want. */
+  const tabBar=document.createElement('div');tabBar.id='pvtabs';
+  panel.appendChild(tabBar);
+  const groupEls=[],tabEls=[];
+  const showTab=n=>{
+    groupEls.forEach((g,i)=>g.classList.toggle('on',i===n));
+    tabEls.forEach((b,i)=>b.classList.toggle('on',i===n));
+    panel.scrollTop=0;
+  };
   const rowByKey={};
   for(const [title,keys] of PV_GROUPS){
     const rows=keys.map(k=>MENU.find(m=>m[1]===k)).filter(r=>r&&r[1]);
     if(!rows.length) continue;
-    const h=document.createElement('h4');h.textContent=title;panel.appendChild(h);
+    const group=document.createElement('div');group.className='pvgroup';
+    const idx=groupEls.length;
+    groupEls.push(group);panel.appendChild(group);
+    const tb=document.createElement('button');
+    tb.textContent=title.replace(/^[\u2014\s]+|[\u2014\s]+$/g,'');
+    tb.addEventListener('click',()=>showTab(idx));
+    tabBar.appendChild(tb);tabEls.push(tb);
     for(const [label,key,lo,hi,st,tip] of rows){
       /* Rows whose key starts with ! are ACTIONS, not settings — there is no
          P[key] behind them. Reading one gave undefined, and undefined.toFixed
@@ -5630,7 +5726,7 @@ function previewUpdate(dt){
         const tipEl=document.createElement('div');tipEl.className='pvtip';
         tipEl.textContent=tip||'';
         b.addEventListener('dblclick',()=>row.classList.toggle('open'));
-        row.appendChild(b);row.appendChild(tipEl);panel.appendChild(row);
+        row.appendChild(b);row.appendChild(tipEl);group.appendChild(row);
         continue;
       }
       const row=document.createElement('div');row.className='pvrow';
@@ -5664,7 +5760,7 @@ function previewUpdate(dt){
       row.appendChild(top);row.appendChild(inp);row.appendChild(tipEl);
       /* tap the name to read why the setting exists */
       lab.addEventListener('click',()=>row.classList.toggle('open'));
-      panel.appendChild(row);
+      group.appendChild(row);
       rowByKey[key]={inp,val,fmt};
     }
   }
@@ -5676,6 +5772,7 @@ function previewUpdate(dt){
       rowByKey[k].val.textContent=rowByKey[k].fmt(P[k]);
     }
   };
+  if(groupEls.length) showTab(0);
   document.getElementById('pvSet').addEventListener('click',
     ()=>setPanel(panel.style.display!=='block'));
   cb.addEventListener('click',()=>setPanel(false));
