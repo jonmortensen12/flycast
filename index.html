@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — water v2 — build 2026-08-10</title>
+<title>Flycast — v8 one line — build 2026-08-08u</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -98,7 +98,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 09 · spool to fly, one chain · water v2</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08u</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -240,18 +240,18 @@ const MENU=[
   ['Reel hand','reelHand',0,1,1,'Which side of the reel the handle is on. 0 is left-hand wind, the usual setup for a right-handed caster, and puts the handle on the side facing you. 1 is right-hand wind. Takes effect immediately.'],
   ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
   ['— RIVER —',null,0,0,0,''],
-  ['Water model','waterModel',0,1,1,'0 is the analytic field. 1 is water v2: a conservative finite-volume shallow-water solve. Depth and momentum are conserved across cell faces, solid cells are impermeable bed, Manning friction is implicit, and the free surface is part of the state.'],
+  ['Water model','waterModel',0,1,1,'0 is the analytic field: flow painted on by formula, fast but it can only do what was written into it. 1 solves shallow water on a grid — depth from the bed and obstacles, gravity down the surface slope, Manning bed friction and a pressure projection. Rocks divert flow because they ARE bed elevation, and eddies form because the solver makes them.'],
   ['Surface damping','waterSmooth',0.00,0.40,0.01,'Smooths the solved free surface between cells. The solver stores velocity and depth at the same points, which lets odd and even cells drift apart into a checkerboard that shows up as the whole reach rippling for no reason \u2014 measured at plus or minus 0.3 m on a dead flat bed with this at zero. At 0.08 a flat bed solves flat. Higher irons out real detail too.'],
   ['Grid span m','gridSpan',20.0,200.0,5.00,'Length of river the solver covers, centred on the origin or on you. The rest of the reach falls back to the analytic flow, which is what the water outside this window has always used. Shrinking the span and shrinking the cell together keeps the same cost while putting far more resolution where you are fishing.'],
   ['Grid follows you','gridFollow',0,1,1,'0 pins the solved window to the middle of the reach. 1 slides it along with you, in whole-cell steps so no existing cell is ever disturbed \u2014 only a thin strip at the leading edge is new, and it is seeded from the analytic flow, exactly as the open upstream boundary already does every frame. Wade downstream and you will not see it; wade hard upstream and a settling transient washes down behind you.'],
   ['Surface relief','surfWave',0.00,2.50,0.05,'How much the water surface is displaced by the SOLVED free surface rather than by decorative sine waves. This is the pillow that stands up in front of a rock, the drawdown over a lip, the standing wave below it. The solver has always computed this; until now the renderer threw it away and drew three hardcoded sines instead. Zero returns to that.'],
   ['Grid cell m','gridCell',0.10,1.00,0.05,'Solver cell size. Smaller resolves rocks and eddies better and costs more. A 0.85 m rock needs cells well under half a metre to shed properly.'],
-  ['Grid iterations','gridIter',4.00,48.0,1.00,'Legacy setting retained for shared presets; water v2 is finite-volume and does not use a pressure-iteration count. Lowering this no longer changes the water solve.'],
-  ['Grid rate Hz','gridRate',5.00,40.0,1.00,'Water v2 solver rate. The finite-volume step substeps automatically from the gravity-wave CFL condition when current or grade rises.'],
+  ['Grid iterations','gridIter',4.00,48.0,1.00,'Pressure projection sweeps per step. More enforces continuity harder — too few and flow leaks through obstacles.'],
+  ['Grid rate Hz','gridRate',5.00,40.0,1.00,'How often the fluid is stepped. It is unconditionally stable, so this is purely cost against how lively the eddies look.'],
   ['Manning n','manningN',0.015,0.120,0.005,'Bed roughness. Gravel trout streams run about 0.035-0.06. This is what sets the actual current speed, together with slope and depth — deeper water runs faster for the same slope, and riffles are fast because they are steep, not because they are shallow.'],
   ['Current','current',0.10,1.40,0.05,'Master flow multiplier. On the grid model it scales the driving slope; on the analytic model it is discharge per unit width.'],
   ['River grade','grade',0.00,2.50,0.10,'Steepness of the reach and the size of the drops between pools. Rebuilds the bed live.'],
-  ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: 12544 stateful specks living in a float texture, advected once a frame with RK2. The flow texture is now linear float data, so GPU bilinear sampling matches CPU interpolation instead of decoding a nonlinear byte encoding. Toggle freely.'],
+  ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: 12544 specks living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
   ['Speck life s','speckTravel',2.00,20.0,0.50,'How long a speck lives before it fades out and is reborn upstream. Longer specks trace the whole run of the river past you; shorter ones read as local flow direction. Specks seeded around you live about a third as long as ones drifting down from upstream.'],
   ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter dots showing where it was a moment ago, which makes direction and speed readable at a glance. This is the gap between them in seconds. Zero collapses them onto the head.'],
   ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 12544 on the GPU path.'],
@@ -424,7 +424,7 @@ function analyticFlow(x,z){
      that happening. Averaged over five metres it answers for the reach, which
      is the only thing this fallback was ever entitled to answer for. */
   const S=Math.max(1e-5,((surfY(x-2.5)-surfY(x+2.5))/5.0)*P.current*2.0);
-  const s=Math.min(20,(1/Math.max(P.manningN,0.005))*Math.pow(d,2/3)*Math.sqrt(S))*Math.pow(cross,0.35);
+  const s=Math.min(8,(1/Math.max(P.manningN,0.005))*Math.pow(d,2/3)*Math.sqrt(S))*Math.pow(cross,0.35);
   let vx=s,vz=0;
   for(let i=0;i<OBST.length;i++){
     const o=OBST[i],dx=x-o.x,dz=z-o.z,dd=Math.hypot(dx,dz)||1e-4;
@@ -665,33 +665,22 @@ let slideVel=0;           /* m/s of line accelerating through routing fingers */
 
 
 /* ════════════════════════════════════════════════════════════
-   2b. SHALLOW-WATER GRID — WATER V2
-   One conservative finite-volume shallow-water field is authoritative.
-   h is water depth; gu/gv are depth-averaged velocity; gbed is bed elevation.
-   The renderer, CPU particles, GPU particles and line all sample this field.
+   2b. SHALLOW-WATER GRID
+   The analytic field could only have flow painted onto it. Here the flow is
+   SOLVED: depth comes from the bed and the obstacles, a body force comes from
+   the water-surface slope, bed friction is Manning, and a pressure projection
+   enforces continuity. Rocks divert flow because they are bed elevation, riffles
+   run fast because the surface is steep there, eddies form because the solver
+   makes them. Semi-Lagrangian advection, so it is unconditionally stable.
    ════════════════════════════════════════════════════════════ */
-
-/* The grid is deliberately local. The bed and its boundary conditions are
-   shared with the analytic reach, but inside this window the velocity/depth
-   field is solved rather than painted. */
+/* The X bounds move: the span is a setting and the window can follow the
+   angler. Z never moves — the grid already spans the full width of the river. */
 let GX0=-40, GX1=40;
 const GZ0=CZ-HALFW-0.6, GZ1=CZ+HALFW+0.6;
 let gridCentre=0;
 let gdx=0.40, GNX=1, GNZ=1, gridReady=false, gbed=null;
-
-/* Conservative state:
-     gh       = depth
-     gmx/gmz  = depth * velocity
-   gu/gv remain the public velocity field consumed everywhere else. */
-let gu,gv,gdiv;
-let gh,gmx,gmz,gh0,gmx0,gmz0;
-let gfoam=null,gfoam0=null,gdivs=null,gshear=null;
-let gsolid=null,gslope=null,gsurf=null;
-
-/* Scratch for the Rusanov face flux. A function avoids allocating arrays in
-   the hot loop. */
-let ffH=0,ffX=0,ffZ=0;
-
+let gfoam=null, gfoam0=null, gdivs=null, gshear=null;
+let gu,gv,gu0,gv0,gp,gdiv,gh,ginv43,gsolid,gslope,gsurf;
 function gridAlloc(){
   gdx=Math.max(0.10,P.gridCell);
   const span=Math.max(10,P.gridSpan);
@@ -699,163 +688,124 @@ function gridAlloc(){
   GNX=Math.max(8,Math.round((GX1-GX0)/gdx));
   GNZ=Math.max(6,Math.round((GZ1-GZ0)/gdx));
   const n=GNX*GNZ;
-
   gu=new Float32Array(n); gv=new Float32Array(n);
-  gh=new Float32Array(n); gmx=new Float32Array(n); gmz=new Float32Array(n);
-  gh0=new Float32Array(n); gmx0=new Float32Array(n); gmz0=new Float32Array(n);
-  gdiv=new Float32Array(n);
+  gu0=new Float32Array(n); gv0=new Float32Array(n);
+  gp=new Float32Array(n); gdiv=new Float32Array(n);
+  gh=new Float32Array(n); ginv43=new Float32Array(n);
+  /* bed elevation, kept explicitly so the free surface can be reconstructed as
+     bed + depth. Without it the solved surface height is unrecoverable. */
+  gbed=new Float32Array(n);
+  /* foam is a transported scalar, not a per-frame readout: it is created where
+     the flow tears itself apart and then carried away by that same flow */
   gfoam=new Float32Array(n); gfoam0=new Float32Array(n);
   gdivs=new Float32Array(n); gshear=new Float32Array(n);
-  gbed=new Float32Array(n); gsolid=new Uint8Array(n);
-  gslope=new Float32Array(GNX); gsurf=new Float32Array(GNX);
-
+  gsolid=new Uint8Array(n); gslope=new Float32Array(GNX); gsurf=new Float32Array(GNX);
   gridBuildBed();
   gridReady=true;
 }
-
-/* Build the physical bed. Obstacles are elevated bed, not a separate velocity
-   hack: a face becomes impermeable when either adjacent cell is solid. */
 function gridBuildBed(i0,i1,seed){
   i0=i0===undefined?0:i0; i1=i1===undefined?GNX:i1;
-
+  /* surfY costs six smoothsteps and depends only on x, and it was being called
+     per cell per substep inside the free-surface loop — a quarter of a million
+     smoothsteps a solver step, for a column of eighty numbers. Cached here
+     alongside the slope, which is rebuilt whenever the window moves anyway. */
   for(let i=0;i<GNX;i++){
     const x=GX0+(i+0.5)*gdx;
     gsurf[i]=surfY(x);
-    gslope[i]=(surfY(x-gdx)-surfY(x+gdx))/(2*gdx);
+    gslope[i]=(surfY(x-gdx)-surfY(x+gdx))/(2*gdx);   /* +ve downstream */
   }
-
   for(let j=0;j<GNZ;j++){
     const z=GZ0+(j+0.5)*gdx;
     for(let i=i0;i<i1;i++){
       const x=GX0+(i+0.5)*gdx, k=i+j*GNX;
       let bed=bedY(x,z);
-
+      /* obstacles are bed elevation, which is what makes flow go round them */
       for(const o of OBST){
         const d=Math.hypot(x-o.x,z-o.z);
         if(d<o.r){
-          const top=bedY(o.x,o.z)+o.h*P.obstHeight*
-            (1-0.35*(d/o.r)*(d/o.r));
+          const top=bedY(o.x,o.z)+o.h*P.obstHeight*(1-0.35*(d/o.r)*(d/o.r));
           if(top>bed) bed=top;
         }
       }
-
-      const h=Math.max(0,gsurf[i]-bed);
+      const h=gsurf[i]-bed;
       gbed[k]=bed;
-      gh[k]=h;
-      gsolid[k]=h<0.05?1:0;
-
-      /* Start from the same normal-flow estimate used by the analytic field.
-         This makes startup converge quickly without changing the solved field. */
-      if(gsolid[k]){
-        gu[k]=gv[k]=gmx[k]=gmz[k]=0;
-      }else{
-        const cr=Math.max(0,1-Math.pow((z-CZ)/HALFW,2));
-        const S=Math.max(1e-5,gslope[i]*P.current*2.0);
-        const u=(1/Math.max(P.manningN,0.005))*
-          Math.pow(Math.max(h,0.05),2/3)*Math.sqrt(S)*
-          Math.pow(Math.max(cr,1e-4),0.35);
-        gu[k]=Math.min(8,Math.max(0,u));
-        gv[k]=0;
-        gmx[k]=h*gu[k];
-        gmz[k]=0;
+      gh[k]=Math.max(h,0);
+      gsolid[k]=(h<0.05)?1:0;
+      ginv43[k]=1/Math.pow(Math.max(h,0.08),4/3);
+      if(gsolid[k]){gu[k]=0;gv[k]=0;}
+      else if(seed){
+        /* a newly exposed column is seeded from the analytic flow — the same
+           field the renderer falls back to outside the window, so the join is
+           no worse than the boundary that has always been there */
+        computeFlow(x,z); gu[k]=flowX; gv[k]=flowZ;
       }
     }
   }
 }
-
-/* Rusanov flux for the 2-D shallow-water equations.
-   U=[h,hu,hv]. A solid face is a zero-flux wall. */
-function shallowFace(a,b,axis){
-  if(a<0||b<0||gsolid[a]||gsolid[b]){ffH=ffX=ffZ=0;return;}
-
-  const ha=Math.max(gh0[a],0), hb=Math.max(gh0[b],0);
-  if(ha<1e-5&&hb<1e-5){ffH=ffX=ffZ=0;return;}
-
-  const ua=ha>1e-5?gmx0[a]/ha:0, va=ha>1e-5?gmz0[a]/ha:0;
-  const ub=hb>1e-5?gmx0[b]/hb:0, vb=hb>1e-5?gmz0[b]/hb:0;
-  const ca=Math.sqrt(9.81*ha), cb=Math.sqrt(9.81*hb);
-
-  let FAH,FAX,FAZ,FBH,FBX,FBZ,unA,unB;
-  if(axis===0){
-    FAH=ha*ua; FAX=ha*ua*ua+0.5*9.81*ha*ha; FAZ=ha*ua*va;
-    FBH=hb*ub; FBX=hb*ub*ub+0.5*9.81*hb*hb; FBZ=hb*ub*vb;
-    unA=ua;unB=ub;
-  }else{
-    FAH=ha*va; FAX=ha*ua*va; FAZ=ha*va*va+0.5*9.81*ha*ha;
-    FBH=hb*vb; FBX=hb*ub*vb; FBZ=hb*vb*vb+0.5*9.81*hb*hb;
-    unA=va;unB=vb;
-  }
-  const al=Math.max(Math.abs(unA)+ca,Math.abs(unB)+cb);
-  ffH=0.5*(FAH+FBH)-0.5*al*(hb-ha);
-  ffX=0.5*(FAX+FBX)-0.5*al*(gmx0[b]-gmx0[a]);
-  ffZ=0.5*(FAZ+FBZ)-0.5*al*(gmz0[b]-gmz0[a]);
-}
-
-/* Foam is a transported scalar. Generation is based on convergence, shear and
-   genuinely fast shallow flow; advection uses the same velocity field. */
+/* Foam transport. Semi-Lagrangian: for every cell, look back along the local
+   velocity to where this water was a moment ago, take the foam that was there,
+   decay it, and add whatever the flow is tearing loose right now. One extra
+   pass over the grid, which at 5,700 cells and 12 Hz is nothing next to the
+   line solver — and it is the difference between foam that glows around a rock
+   and foam that streams off it the way it does in a real river. */
 function gridFoam(dt){
   if(!gridReady||!gfoam) return;
   const inv=1/(2*gdx), life=Math.max(0.05,P.foamLife);
   const decay=Math.exp(-dt/life);
   gfoam0.set(gfoam);
-
-  for(let j=1;j<GNZ-1;j++) for(let i=1;i<GNX-1;i++){
-    const k=i+j*GNX;
-    if(gsolid[k]){
-      gfoam[k]=0;gdivs[k]=0;gshear[k]=0;continue;
+  for(let j=1;j<GNZ-1;j++){
+    for(let i=1;i<GNX-1;i++){
+      const k=i+j*GNX;
+      if(gsolid[k]){gfoam[k]=0;gdivs[k]=0;gshear[k]=0;continue;}
+      const dudx=(gu[k+1]-gu[k-1])*inv, dvdz=(gv[k+GNX]-gv[k-GNX])*inv;
+      const dudz=(gu[k+GNX]-gu[k-GNX])*inv, dvdx=(gv[k+1]-gv[k-1])*inv;
+      const div=dudx+dvdz, shear=dvdx-dudz;
+      gdivs[k]=div; gshear[k]=Math.abs(shear);
+      /* CONVERGENCE makes foam. Divergence is water rising, which makes a boil
+         and is handled separately in the shader — treating the two the same
+         was why every rock had a symmetric halo. */
+      const conv=Math.max(0,-div);
+      const sp=Math.hypot(gu[k],gv[k]);
+      const gen=conv*0.55+Math.abs(shear)*0.16+Math.max(0,sp-1.5)*0.22;
+      /* trace back up the streamline */
+      const bx=i+0.5-gu[k]*dt/gdx, bz=j+0.5-gv[k]*dt/gdx;
+      let fi=Math.floor(bx-0.5), fj=Math.floor(bz-0.5);
+      if(fi<0)fi=0; if(fj<0)fj=0;
+      if(fi>GNX-2)fi=GNX-2; if(fj>GNZ-2)fj=GNZ-2;
+      const tx=(bx-0.5)-fi, tz=(bz-0.5)-fj, kk=fi+fj*GNX;
+      const back=gfoam0[kk]*(1-tx)*(1-tz)+gfoam0[kk+1]*tx*(1-tz)
+                +gfoam0[kk+GNX]*(1-tx)*tz+gfoam0[kk+GNX+1]*tx*tz;
+      gfoam[k]=Math.min(1.6,back*decay+gen*dt);
     }
-    const dudx=(gu[k+1]-gu[k-1])*inv, dvdz=(gv[k+GNX]-gv[k-GNX])*inv;
-    const dudz=(gu[k+GNX]-gu[k-GNX])*inv, dvdx=(gv[k+1]-gv[k-1])*inv;
-    const div=dudx+dvdz, shear=dvdx-dudz;
-    gdivs[k]=div; gshear[k]=Math.abs(shear);
-
-    const conv=Math.max(0,-div), sp=Math.hypot(gu[k],gv[k]);
-    const froude=sp/Math.max(Math.sqrt(9.81*Math.max(gh[k],0.03)),0.05);
-    const gen=conv*0.55+Math.abs(shear)*0.16+
-      Math.max(0,sp-1.5)*0.18+Math.max(0,froude-0.85)*0.22;
-
-    const bx=i+0.5-gu[k]*dt/gdx, bz=j+0.5-gv[k]*dt/gdx;
-    let fi=Math.floor(bx-0.5), fj=Math.floor(bz-0.5);
-    fi=Math.max(0,Math.min(GNX-2,fi));
-    fj=Math.max(0,Math.min(GNZ-2,fj));
-    const tx=(bx-0.5)-fi, tz=(bz-0.5)-fj, kk=fi+fj*GNX;
-    const back=gfoam0[kk]*(1-tx)*(1-tz)+gfoam0[kk+1]*tx*(1-tz)+
-      gfoam0[kk+GNX]*(1-tx)*tz+gfoam0[kk+1+GNX]*tx*tz;
-    gfoam[k]=Math.min(1.6,back*decay+gen*dt);
   }
 }
 
-/* Shift every field that belongs to the moving window. Diagnostic fields used
-   to be left behind, which made foam/shear disagree with the velocity field. */
+/* Slide the window by whole cells. Shifting by an integer number of cells is
+   what makes this safe: every surviving cell keeps its exact state, and only
+   the strip at the leading edge is new. The alternative — resampling onto a
+   fractionally offset grid — would smear the whole field every time you took
+   a step. */
 function gridShiftCells(cells){
   if(!cells||!gridReady) return;
   const n=GNX;
-  if(Math.abs(cells)>=n){
-    gridCentre+=cells*gdx; GX0=gridCentre-(n*gdx)*0.5; GX1=GX0+n*gdx;
-    gridBuildBed(0,n,true);
-    gfoam.fill(0);gdivs.fill(0);gshear.fill(0);
-    return;
-  }
+  if(Math.abs(cells)>=n){ gridCentre+=cells*gdx; GX0=gridCentre-(n*gdx)*0.5;
+    GX1=GX0+n*gdx; gridBuildBed(0,n,true); return; }
   const move=A=>{
     if(cells>0){
       for(let j=0;j<GNZ;j++){const r=j*n;
-        for(let i=0;i<n-cells;i++) A[r+i]=A[r+i+cells];
-      }
-    }else{
+        for(let i=0;i<n-cells;i++) A[r+i]=A[r+i+cells];}
+    } else {
       const c=-cells;
       for(let j=0;j<GNZ;j++){const r=j*n;
-        for(let i=n-1;i>=c;i--) A[r+i]=A[r+i-c];
-      }
+        for(let i=n-1;i>=c;i--) A[r+i]=A[r+i-c];}
     }
   };
-  for(const A of [gu,gv,gh,gmx,gmz,gbed,gsolid,gfoam,gdivs,gshear]) move(A);
-
+  move(gu);move(gv);move(gh);move(gbed);move(ginv43);move(gsolid);
   gridCentre+=cells*gdx;
   GX0=gridCentre-(n*gdx)*0.5; GX1=GX0+n*gdx;
   if(cells>0) gridBuildBed(n-cells,n,true);
   else        gridBuildBed(0,-cells,true);
 }
-
 function gridFollowUpdate(px){
   if(!gridReady||P.gridFollow<0.5) return;
   const cells=Math.round((px-gridCentre)/gdx);
@@ -864,199 +814,251 @@ function gridFollowUpdate(px){
 
 function gridSampleField(F,fx,fz){
   let i=Math.floor(fx), j=Math.floor(fz);
-  if(i<0)i=0;if(j<0)j=0;
-  if(i>GNX-2)i=GNX-2;if(j>GNZ-2)j=GNZ-2;
-  const tx=fx-i,tz=fz-j,k=i+j*GNX;
-  return F[k]*(1-tx)*(1-tz)+F[k+1]*tx*(1-tz)+
-    F[k+GNX]*(1-tx)*tz+F[k+GNX+1]*tx*tz;
+  if(i<0)i=0; if(j<0)j=0;
+  if(i>GNX-2)i=GNX-2; if(j>GNZ-2)j=GNZ-2;
+  const tx=fx-i, tz=fz-j, k=i+j*GNX;
+  return F[k]*(1-tx)*(1-tz)+F[k+1]*tx*(1-tz)+F[k+GNX]*(1-tx)*tz+F[k+GNX+1]*tx*tz;
 }
-
-/* The solved free surface is bed + depth. */
+/* Departure of the SOLVED free surface from the still-water line. The solver
+   has computed this all along and the water mesh has been displaced by it since
+   `surfWave` landed — but nothing else was. The film the line rides on, the
+   height the specks are drawn at and the surface the fish rise through were all
+   still the flat still-water line, so a fly could sit visibly buried in the
+   pillow in front of a rock or hang in the air over a drawdown. One function,
+   used everywhere, so the water you see and the water the line feels are the
+   same water. surfWave 0 restores the old flat behaviour exactly. */
 function solvedDev(x,z){
   if(!(P.waterModel>0.5&&gridReady&&gbed)) return 0;
   if(!(x>GX0+gdx&&x<GX1-gdx&&z>GZ0+gdx&&z<GZ1-gdx)) return 0;
-  const fx=(x-GX0)/gdx-0.5,fz=(z-GZ0)/gdx-0.5;
+  const fx=(x-GX0)/gdx-0.5, fz=(z-GZ0)/gdx-0.5;
   return (gridSampleField(gbed,fx,fz)+gridSampleField(gh,fx,fz))-surfY(x);
 }
 const filmY=(x,z,t)=>
   surfY(x)+ripple(x,z,t)*(1-0.6*P.surfWave)+solvedDev(x,z)*P.surfWave;
 
-/* Future nymphing hook: the surface solver stays 2-D, but a particle can ask
-   for a cheap depth-dependent 3-D velocity. It is deliberately not a second
-   fluid solve: a log-like profile slows toward the bed and follows the same
-   horizontal field above. */
-function sampleWater3D(x,y,z,out){
-  out=out||{x:0,y:0,z:0,depth:0,surface:0,bed:0};
-  computeFlow(x,z);
-  const surface=filmY(x,z,simTime), bed=bedY(x,z);
-  const depth=Math.max(0.001,surface-bed);
-  const q=Math.max(0,Math.min(1,(y-bed)/depth));
-  const prof=0.20+0.80*Math.pow(q,0.35);
-  out.x=flowX*prof; out.y=0; out.z=flowZ*prof;
-  /* weak vertical exchange follows the surface/bed slope; nymphs should not
-     require a full 3-D Navier-Stokes simulation just to sound a drop. */
-  const dx=(bedY(x+0.10,z)-bedY(x-0.10,z))/0.20;
-  const dz=(bedY(x,z+0.10)-bedY(x,z-0.10))/0.20;
-  out.y=-(flowX*dx+flowZ*dz)*0.18;
-  out.depth=depth;out.surface=surface;out.bed=bed;
-  return out;
-}
-
-/* One conservative finite-volume update. The Rusanov flux is diffusive but
-   robust, which is exactly the trade we want for a small real-time river:
-   mass and momentum stay bounded, solid faces are impermeable, and the free
-   surface is part of the state rather than a decorative correction. */
 function gridStep(dt){
   if(!gridReady) return;
-  const g=9.81, n=GNX*GNZ;
-
-  /* CFL based on the actual wave speed. */
-  let cmax=0;
-  for(let k=0;k<n;k++){
+  const g=9.81, n2=P.manningN*P.manningN;
+  /* 1. body force: gravity down the surface slope, minus Manning bed friction */
+  for(let k=0;k<gu.length;k++){
+    if(gsolid[k]){gu[k]=0;gv[k]=0;continue;}
+    const i=k%GNX;
+    const sp=Math.hypot(gu[k],gv[k]);
+    const fr=g*n2*sp*ginv43[k];
+    /* friction implicitly, or it flips sign and explodes in thin water */
+    const damp=1/(1+fr*dt);
+    gu[k]=(gu[k]+dt*g*gslope[i]*P.current*2.0)*damp;
+    gv[k]=gv[k]*damp;
+  }
+  /* 2. semi-Lagrangian advection */
+  gu0.set(gu); gv0.set(gv);
+  for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+    const k=i+j*GNX;
     if(gsolid[k]) continue;
-    const c=Math.sqrt(g*Math.max(gh[k],0.02))+Math.hypot(gu[k],gv[k]);
-    if(c>cmax)cmax=c;
+    const fx=i-gu0[k]*dt/gdx, fz=j-gv0[k]*dt/gdx;
+    gu[k]=gridSampleField(gu0,fx,fz);
+    gv[k]=gridSampleField(gv0,fx,fz);
   }
-  const nsub=Math.max(1,Math.min(12,Math.ceil(dt*cmax/(gdx*0.42))));
-  const sdt=dt/nsub;
+  /* 3. inflow / outflow / walls */
+  gridBounds();
+  /* 4. FREE SURFACE.
+     This used to be a pressure projection enforcing div(h u) = 0 — a rigid lid.
+     It worked, but it meant the depth field was written once when the bed was
+     built and never touched again, so the water surface could not move. Three
+     consequences, all of which showed:
 
-  for(let sub=0;sub<nsub;sub++){
-    for(let k=0;k<n;k++){
-      gh0[k]=gh[k];
-      gmx0[k]=gh[k]*gu[k];
-      gmz0[k]=gh[k]*gv[k];
+       - obstacles only influenced the flow through the depth weighting inside
+         the Poisson solve, which is indirect and weak, so specks appeared to
+         sail through rocks and Obstacle height did almost nothing;
+       - no pillow in front of a rock, no drawdown over it, no standing wave
+         below it, because those ARE free-surface features;
+       - Surface relief and Wave shading were reading a deviation field that
+         was identically zero everywhere, forever.
+
+     So: continuity, then the pressure gradient that continuity implies. Where
+     flow converges the water piles up, and that pile pushes back. That single
+     feedback loop is what produces every one of the missing behaviours.
+
+     The gradient is taken on the DEPARTURE from the still-water line, not on
+     the absolute surface, because the mean channel slope is already driving
+     the flow in step 1 and would otherwise be counted twice.
+
+     This is also cheaper than what it replaces: the Poisson solve was four or
+     more sweeps of the whole grid, and this is two passes. */
+  {
+    const g2=9.81;
+    /* explicit free-surface schemes are limited by the gravity wave speed, so
+       substep on the CFL condition rather than hoping the frame rate is kind */
+    let cmax=0;
+    for(let k=0;k<gh.length;k++){
+      if(gsolid[k]) continue;
+      const c=Math.sqrt(g2*Math.max(gh[k],0.05))+Math.hypot(gu[k],gv[k]);
+      if(c>cmax) cmax=c;
     }
-
-    for(let j=1;j<GNZ-1;j++){
-      for(let i=1;i<GNX-1;i++){
+    const nsub=Math.max(1,Math.min(6,Math.ceil(dt*cmax/(gdx*0.42))));
+    const sdt=dt/nsub;
+    for(let s=0;s<nsub;s++){
+      /* 4a. continuity: the surface rises where flux converges */
+      for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
         const k=i+j*GNX;
-        if(gsolid[k]){gh[k]=0;gu[k]=gv[k]=gmx[k]=gmz[k]=0;continue;}
-
-        shallowFace(k,k+1,0); const eH=ffH,eX=ffX,eZ=ffZ;
-        shallowFace(k-1,k,0); const wH=ffH,wX=ffX,wZ=ffZ;
-        shallowFace(k,k+GNX,1); const nH=ffH,nX=ffX,nZ=ffZ;
-        shallowFace(k-GNX,k,1); const sH=ffH,sX=ffX,sZ=ffZ;
-
-        let h=gh0[k]-sdt*((eH-wH+nH-sH)/gdx);
-        let mx=gmx0[k]-sdt*((eX-wX+nX-sX)/gdx);
-        let mz=gmz0[k]-sdt*((eZ-wZ+nZ-sZ)/gdx);
-
-        /* Bed source term. The current slider scales the driving slope; the
-           local obstacle slope remains in the same equation, so water climbs
-           and descends the actual bed instead of receiving a hand-made wake. */
-        const il=i>0?i-1:i, ir=i<GNX-1?i+1:i;
-        const kbW=il+j*GNX,kbE=ir+j*GNX;
-        const kbS=k+(j>0?-GNX:0),kbN=k+(j<GNZ-1?GNX:0);
-        const dbx=(gbed[kbE]-gbed[kbW])/(Math.max(1,(ir-il))*gdx);
-        const dbz=(gbed[kbN]-gbed[kbS])/(2*gdx);
-
-        h=Math.max(0.015,Math.min(h,2.2));
-        const hs=Math.max(h,0.015);
-        mx+=-sdt*g*hs*dbx*P.current*2.0;
-        mz+=-sdt*g*hs*dbz*P.current*2.0;
-
-        /* Implicit Manning friction keeps thin water stable without a velocity
-           clamp. This is a momentum damping, not a separate speed limit. */
-        const sp0=Math.hypot(mx,mz)/Math.max(hs,0.02);
-        const fr=g*P.manningN*P.manningN*sp0/
-          Math.pow(Math.max(hs,0.05),4/3);
-        const damp=1/(1+fr*sdt);
-        mx*=damp;mz*=damp;
-
-        /* Dry-out is physical; don't let an isolated cell manufacture momentum. */
-        if(h<0.03){h=Math.max(0.015,h);mx*=0.25;mz*=0.25;}
-        gh[k]=h;gmx[k]=mx;gmz[k]=mz;
+        if(gsolid[k]){gdiv[k]=0;continue;}
+        const hE=gsolid[k+1]?0:0.5*(gh[k]+gh[k+1]);
+        const hW=gsolid[k-1]?0:0.5*(gh[k]+gh[k-1]);
+        const hN=gsolid[k+GNX]?0:0.5*(gh[k]+gh[k+GNX]);
+        const hS=gsolid[k-GNX]?0:0.5*(gh[k]+gh[k-GNX]);
+        gdiv[k]=(hE*0.5*(gu[k]+gu[k+1])-hW*0.5*(gu[k]+gu[k-1])
+                +hN*0.5*(gv[k]+gv[k+GNX])-hS*0.5*(gv[k]+gv[k-GNX]))/gdx;
       }
-    }
-
-    /* Open upstream boundary: prescribe normal flow from local depth.
-       Downstream copies the last interior state. Banks are impermeable. */
-    gridBounds();
-
-    for(let k=0;k<n;k++){
-      if(gsolid[k]||gh[k]<0.015){
-        gu[k]=gv[k]=0;
-      }else{
-        gu[k]=gmx[k]/gh[k];
-        gv[k]=gmz[k]/gh[k];
-
+      for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+        const k=i+j*GNX;
+        if(gsolid[k]) continue;
+        let h=gh[k]-sdt*gdiv[k];
+        /* keep the surface within a sane band of still water: this is a river
+           reach, not a dam break, and unbounded drift is the one way an
+           explicit free surface goes wrong slowly instead of loudly */
+        const still=gsurf[i]-gbed[k];
+        h=Math.max(0.02,Math.min(h,still+0.45));
+        h=Math.max(h,Math.max(0.02,still-0.45));
+        /* very weak pull back toward still water, so numerical mass error
+           cannot accumulate over a long session */
+        gh[k]=h+(still-h)*Math.min(1,sdt*0.06);
+      }
+      /* 4b. the surface gradient accelerates the water */
+      for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+        const k=i+j*GNX;
+        if(gsolid[k]) continue;
+        const xe=GX0+(i+0.5)*gdx;
+        const etaE=gsolid[k+1]?(gbed[k]+gh[k]):(gbed[k+1]+gh[k+1]);
+        const etaW=gsolid[k-1]?(gbed[k]+gh[k]):(gbed[k-1]+gh[k-1]);
+        const etaN=gsolid[k+GNX]?(gbed[k]+gh[k]):(gbed[k+GNX]+gh[k+GNX]);
+        const etaS=gsolid[k-GNX]?(gbed[k]+gh[k]):(gbed[k-GNX]+gh[k-GNX]);
+        /* subtract the still-water slope, which step 1 already applies */
+        const dEta=(etaE-etaW+2*gslope[i]*gdx)/(2*gdx);
+        const dEtaZ=(etaN-etaS)/(2*gdx);
+        gu[k]-=sdt*g2*dEta;
+        gv[k]-=sdt*g2*dEtaZ;
+      }
+      /* 4c. A compact divergence against a wide gradient decouples odd and
+         even cells on a collocated grid — the classic checkerboard, and
+         without this the flat-bed case rings at plus or minus 0.3 m of
+         surface for no reason at all. A little Laplacian smoothing kills that
+         mode and leaves the physics: with it, flat bed solves dead flat. */
+      const sm=Math.max(0,Math.min(0.4,P.waterSmooth));
+      if(sm>0.001){
+        for(let j=1;j<GNZ-1;j++)for(let i=1;i<GNX-1;i++){
+          const k=i+j*GNX;
+          if(gsolid[k]) continue;
+          let hs=0,us=0,vs=0,c=0;
+          for(const kk of [k-1,k+1,k-GNX,k+GNX]){
+            if(gsolid[kk]) continue;
+            hs+=gh[kk];us+=gu[kk];vs+=gv[kk];c++;
+          }
+          if(c<2) continue;
+          gh[k]+=sm*(hs/c-gh[k]);
+          gu[k]+=sm*(us/c-gu[k]);
+          gv[k]+=sm*(vs/c-gv[k]);
+        }
       }
     }
   }
+  for(let k=0;k<gu.length;k++){
+    const sp=Math.hypot(gu[k],gv[k]);
+    if(sp>8){const s2=8/sp;gu[k]*=s2;gv[k]*=s2;}
+  }
+  gridBounds();
 }
-
 function gridBounds(){
-  for(let j=1;j<GNZ-1;j++){
-    const kL=j*GNX,kR=GNX-1+j*GNX;
+  const g=9.81;
+  for(let j=0;j<GNZ;j++){
+    const kL=j*GNX, kR=GNX-1+j*GNX;
     if(!gsolid[kL]){
-      const cr=Math.max(0,1-Math.pow((GZ0+(j+0.5)*gdx-CZ)/HALFW,2));
+      /* inflow at Manning's normal velocity for the local depth and slope */
       const S=Math.max(1e-5,gslope[0]*P.current*2.0);
-      const u=(1/Math.max(P.manningN,0.005))*
-        Math.pow(Math.max(gh[kL],0.05),2/3)*Math.sqrt(S)*
-        Math.pow(Math.max(cr,1e-4),0.35);
-      gu[kL]=Math.max(0,u);gv[kL]=0;
-      gmx[kL]=gh[kL]*gu[kL];gmz[kL]=0;
-    }else gmx[kL]=gmz[kL]=0;
-
-    if(!gsolid[kR]){
-      /* zero-gradient outflow: retain the interior velocity/momentum */
-      const q=kR-1;
-      gu[kR]=gu[q];gv[kR]=gv[q];
-      gmx[kR]=gh[kR]*gu[kR];gmz[kR]=gh[kR]*gv[kR];
-    }else gmx[kR]=gmz[kR]=0;
+      gu[kL]=(1/Math.max(P.manningN,0.005))*Math.pow(Math.max(gh[kL],0.05),2/3)*Math.sqrt(S);
+      gv[kL]=0;
+    } else {gu[kL]=0;gv[kL]=0;}
+    gu[kR]=gsolid[kR]?0:gu[kR-1];
+    gv[kR]=gsolid[kR]?0:gv[kR-1];
   }
   for(let i=0;i<GNX;i++){
-    const kT=i,kB=i+(GNZ-1)*GNX;
-    gu[kT]=gv[kT]=gmx[kT]=gmz[kT]=0;
-    gu[kB]=gv[kB]=gmx[kB]=gmz[kB]=0;
+    const kT=i, kB=i+(GNZ-1)*GNX;
+    gu[kT]=0;gv[kT]=0;gu[kB]=0;gv[kB]=0;
   }
 }
+/* velocity texture for the GPU specks */
+let gridTex=null, gridTexData=null, gridTexH=null, gridTexHData=null;
+/* Velocity is packed into two bytes of the flow texture. It used to be a
+   linear map over plus or minus GRID_VSCALE/2 = 3.00 m/s, while the solver
+   clamps at 8 m/s — so every cell faster than 3 m/s saturated the byte and
+   read back as exactly 3.00. CPU specks index gu[] directly and never saw it;
+   GPU specks, the water surface and the bed all read the texture, which is
+   why they fell behind as soon as the current or the grade went up.
 
-/* GPU textures are FLOAT and LINEAR-filtered when the platform supports float
-   linear sampling. There is deliberately no nonlinear velocity encoding:
-   bilinear interpolation on the GPU now means the same operation as CPU
-   bilinear interpolation, which is the important invariant for the specks. */
-let gridTex=null,gridTexData=null,gridTexH=null,gridTexHData=null;
-let floatLinearOK=false;
-let FLOW_FILTER=THREE.NearestFilter;
-
+   A signed square-root map fixes the clipping without giving up the low-speed
+   resolution a linear map over the full range would cost: 0.023 m/s a step at
+   a quarter of a metre per second, against 0.063 for linear, and it still
+   represents the solver's whole 8 m/s range. */
+const GRID_VSCALE=8.0;
+const B255=x=>x<0?0:x>255?255:(x+0.5)|0;
+const INV_VS=1/GRID_VSCALE;
+/* written out longhand rather than as a chain of Math calls: this runs for
+   every cell of the grid on every solver step now that the upload is no longer
+   accidentally skipped, and it was the single most expensive thing left in the
+   water once surfY was cached. */
+const encodeVel=v=>{
+  let a=v<0?-v:v; if(a>GRID_VSCALE)a=GRID_VSCALE;
+  const t=0.5*Math.sqrt(a*INV_VS);
+  return B255((v<0?0.5-t:0.5+t)*255);
+};
+/* the matching decode, injected wherever a shader unpacks the flow texture */
+const GLSL_VDEC=`
+vec2 decodeVel(vec2 rg){
+  vec2 t=(rg-0.5)*2.0;
+  return sign(t)*t*t*${GRID_VSCALE.toFixed(1)};
+}`;
 function gridTexInit(){
-  floatLinearOK=!!(renderer.capabilities.isWebGL2||
-    renderer.extensions.has('OES_texture_float_linear')||
-    renderer.extensions.has('OES_texture_half_float_linear'));
-  FLOW_FILTER=floatLinearOK?THREE.LinearFilter:THREE.NearestFilter;
-  gridTexData=new Float32Array(GNX*GNZ*4);
-  gridTex=new THREE.DataTexture(gridTexData,GNX,GNZ,THREE.RGBAFormat,THREE.FloatType);
-  gridTex.magFilter=FLOW_FILTER;gridTex.minFilter=FLOW_FILTER;
-  gridTex.wrapS=gridTex.wrapT=THREE.ClampToEdgeWrapping;
-  gridTex.generateMipmaps=false;gridTex.needsUpdate=true;
-
-  gridTexHData=new Float32Array(GNX*GNZ*4);
-  gridTexH=new THREE.DataTexture(gridTexHData,GNX,GNZ,THREE.RGBAFormat,THREE.FloatType);
-  gridTexH.magFilter=FLOW_FILTER;gridTexH.minFilter=FLOW_FILTER;
-  gridTexH.wrapS=gridTexH.wrapT=THREE.ClampToEdgeWrapping;
-  gridTexH.generateMipmaps=false;gridTexH.needsUpdate=true;
+  gridTexData=new Uint8Array(GNX*GNZ*4);
+  gridTex=new THREE.DataTexture(gridTexData,GNX,GNZ,THREE.RGBAFormat);
+  gridTex.magFilter=THREE.LinearFilter; gridTex.minFilter=THREE.LinearFilter;
+  gridTex.needsUpdate=true;
+  /* A second small texture carrying the solved free surface, sampled in the
+     VERTEX shader to displace the water. Eight bits over a 0.6 m window is
+     2.3 mm a step, and linear filtering across 0.45 m cells hides that far
+     below the ripple normals. Float textures would be exact but cost four
+     times the upload and need a filtering extension to interpolate at all. */
+  gridTexHData=new Uint8Array(GNX*GNZ*4);
+  gridTexH=new THREE.DataTexture(gridTexHData,GNX,GNZ,THREE.RGBAFormat);
+  gridTexH.magFilter=THREE.LinearFilter; gridTexH.minFilter=THREE.LinearFilter;
+  gridTexH.needsUpdate=true;
   waterMat.uniforms.uHt.value=gridTexH;
-  waterMat.uniforms.uCell.value=gdx;
-  waterMat.uniforms.uGTexel.value.set(1/Math.max(1,GNX),1/Math.max(1,GNZ));
 }
-
 function gridTexUpdate(){
   if(!gridTex) return;
   for(let k=0,p=0;k<gu.length;k++,p+=4){
-    gridTexData[p]=gu[k];
-    gridTexData[p+1]=gv[k];
-    gridTexData[p+2]=gh[k];
-    gridTexData[p+3]=gfoam[k];
+    gridTexData[p]  =encodeVel(gu[k]);
+    gridTexData[p+1]=encodeVel(gv[k]);
+    gridTexData[p+2]=B255(gh[k]*80);
+    /* Alpha was unused. Fill it with |divergence| + |shear| of the solved
+       field: foam then forms where the water genuinely tears itself apart —
+       rock shoulders, the seam off the log, the lip of each drop — instead of
+       being painted along hand-placed lines. Free, because the grid is already
+       being walked to build this texture. */
+    /* alpha now carries TRANSPORTED foam rather than instantaneous turbulence */
+    gridTexData[p+3]=B255(gfoam[k]*160);
+    /* free surface departure from the still-water line, which is what the
+       vertex shader needs to raise a pillow in front of a rock */
     const dev=(gbed[k]+gh[k])-gsurf[k%GNX];
-    gridTexHData[p]=dev;
-    gridTexHData[p+1]=gdivs[k];
-    gridTexHData[p+2]=gshear[k];
-    gridTexHData[p+3]=gh[k];
+    gridTexHData[p]=B255((dev*(1/0.60)+0.5)*255);
+    /* SIGNED divergence: above 0.5 the water is rising and the surface goes
+       glassy, below it is converging and dimples. Shear in blue marks seams. */
+    gridTexHData[p+1]=B255((gdivs[k]*(1/6)+0.5)*255);
+    gridTexHData[p+2]=B255(gshear[k]*34);
+    gridTexHData[p+3]=255;
   }
   gridTex.needsUpdate=true;
-  gridTexH.needsUpdate=true;
+  if(gridTexH) gridTexH.needsUpdate=true;
 }
+
 /* ════════════════════════════════════════════════════════════
    3. SOLVER
    ════════════════════════════════════════════════════════════ */
@@ -2020,7 +2022,7 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
            if(ftc.x>0.004&&ftc.x<0.996&&ftc.y>0.004&&ftc.y<0.996){
              vec4 ft=texture2D(uBFlow,ftc);
              spd=length(decodeVel(ft.rg));
-             dep=ft.b;
+             dep=ft.b*255.0/80.0;
            }
          }
          /* macro noise also perturbs WHERE the boundaries fall, so the bands
@@ -2699,7 +2701,7 @@ const waterMat=new THREE.ShaderMaterial({
       if(uUseGridV>0.5){
         vec2 tc=vec2((wp.x-uGMin.x)/uGSize.x,(wp.z-uGMin.y)/uGSize.y);
         if(tc.x>0.0&&tc.x<1.0&&tc.y>0.0&&tc.y<1.0){
-          dev=texture2D(uHt,tc).r;
+          dev=(texture2D(uHt,tc).r-0.5)*0.60;
           vec2 e=min(tc,1.0-tc);
           dev*=smoothstep(0.0,0.035,min(e.x,e.y));
         }
@@ -2724,7 +2726,7 @@ const waterMat=new THREE.ShaderMaterial({
         if(tc.x>0.004&&tc.x<0.996&&tc.y>0.004&&tc.y<0.996){
           vec4 t=texture2D(uFlow,tc);
           vec2 fv=decodeVel(t.rg);
-          sp=length(fv); d=t.b; turb=t.a;
+          sp=length(fv); d=t.b*255.0/80.0; turb=t.a;
           if(sp>0.001) fdir=fv/sp;
         }
       }
@@ -2747,8 +2749,8 @@ const waterMat=new THREE.ShaderMaterial({
           float hR=texture2D(uHt,tc2+vec2(uGTexel.x,0.0)).r;
           float hD=texture2D(uHt,tc2-vec2(0.0,uGTexel.y)).r;
           float hU=texture2D(uHt,tc2+vec2(0.0,uGTexel.y)).r;
-          slx=(hR-hL)/(2.0*uCell);   /* metres of rise per metre run */
-          slz=(hU-hD)/(2.0*uCell);
+          slx=((hR-hL)*0.60)/(2.0*uCell);   /* metres of rise per metre run */
+          slz=((hU-hD)*0.60)/(2.0*uCell);
         }
       }
 
@@ -2967,7 +2969,7 @@ vec2 flowAt(vec2 p){
     if(tc.x>0.0&&tc.x<1.0&&tc.y>0.0&&tc.y<1.0){
       vec2 g=decodeVel(texture2D(uFlow,tc).rg);
       vec2 e=min(tc,1.0-tc)*uGSize;
-      float w=smoothstep(uCell,uCell+2.0,min(e.x,e.y));
+      float w=smoothstep(0.5,2.5,min(e.x,e.y));
       if(w>0.999) return g;
       return mix(analyticAt(p),g,w);
     }
@@ -2980,7 +2982,7 @@ float depthHere(vec2 p){
   if(uUseGrid>0.5){
     vec2 tc=vec2((p.x-uGMin.x)/uGSize.x,(p.y-uGMin.y)/uGSize.y);
     if(tc.x>0.004&&tc.x<0.996&&tc.y>0.004&&tc.y<0.996)
-      return texture2D(uFlow,tc).b;
+      return texture2D(uFlow,tc).b*3.1875;
   }
   return depthAt(p);
 }`;
@@ -2992,7 +2994,7 @@ float surfaceDev(vec2 p){
   vec2 tc=vec2((p.x-uGMin.x)/uGSize.x,(p.y-uGMin.y)/uGSize.y);
   if(tc.x<=0.0||tc.x>=1.0||tc.y<=0.0||tc.y>=1.0) return 0.0;
   vec2 e=min(tc,1.0-tc);
-  return texture2D(uHt,tc).r*smoothstep(0.0,0.035,min(e.x,e.y));
+  return (texture2D(uHt,tc).r-0.5)*0.60*smoothstep(0.0,0.035,min(e.x,e.y));
 }`;
 /* A speck's lifetime is a pure function of its seed, so the draw shader can
    recover it without a channel to store it in — which is what lets a speck
@@ -3012,12 +3014,12 @@ let gsOK=false, gsRT=null, gsPing=0, gsReset=2;
 }
 const gsUniforms={
   uState:{value:null}, uDt:{value:0}, uTime:{value:0},
-  uQ:{value:P.current}, uGrade:{value:P.grade}, uManN:{value:P.manningN}, uCell:{value:P.gridCell},
+  uQ:{value:P.current}, uGrade:{value:P.grade}, uManN:{value:P.manningN},
   uOriginX:{value:0}, uRange:{value:P.speckRange}, uSpread:{value:P.speckSpread},
   uLife:{value:P.speckTravel}, uReset:{value:1},
   uUseGrid:{value:0}, uFlow:{value:null},
   uGMin:{value:new THREE.Vector2(GX0,GZ0)},
-  uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)}, uCell:{value:P.gridCell},
+  uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)},
   uVort:{value:Array.from({length:8},()=>new THREE.Vector4(0,0,1,0))},
 };
 const gsMat=new THREE.ShaderMaterial({
@@ -3092,7 +3094,6 @@ function gsStep(dt){
   gsUniforms.uFlow.value=gridTex;
   gsUniforms.uGMin.value.set(GX0,GZ0);
   gsUniforms.uGSize.value.set(GX1-GX0,GZ1-GZ0);
-   gsUniforms.uCell.value=P.gridCell;
   for(let i=0;i<8;i++){
     const v=vort[i], t=gsUniforms.uVort.value[i];
     if(v&&v.life>0) t.set(v.x,v.z,v.r,v.k*P.vortex*v.life); else t.set(0,0,1,0);
@@ -4534,7 +4535,6 @@ function afterSettingsChange(){
   rebuildMasses();
   waterMat.uniforms.uQ.value=P.current;
   waterMat.uniforms.uGrade.value=P.grade;
-  waterMat.uniforms.uCell.value=P.gridCell;
   speckMat.uniforms.uSize.value=P.speckSize;
   rebuildBed();placeObstacles();
   lastGrade=P.grade;
@@ -5579,7 +5579,6 @@ renderer.setAnimationLoop(()=>{
        wrong bounds — sampling one part of the river while standing in another. */
     u.uGMin.value.set(GX0,GZ0);
     u.uGSize.value.set(GX1-GX0,GZ1-GZ0);
-     u.uCell.value=P.gridCell;
     for(let i=0;i<8;i++){
       const v=vort[i], t=u.uVort.value[i];
       if(v&&v.life>0){t.set(v.x,v.z,v.r,v.k*P.vortex*v.life);}
@@ -5711,8 +5710,6 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uGTexel.value.set(1/Math.max(2,GNX),1/Math.max(2,GNZ));
   waterMat.uniforms.uFlow.value=gridTex;
   waterMat.uniforms.uHt.value=gridTexH;
-  waterMat.uniforms.uCell.value=gdx;
-  waterMat.uniforms.uGTexel.value.set(1/Math.max(1,GNX),1/Math.max(1,GNZ));
   /* the window moves, so its bounds are a per-frame uniform now */
   waterMat.uniforms.uGMin.value.set(GX0,GZ0);
   waterMat.uniforms.uGSize.value.set(GX1-GX0,GZ1-GZ0);
@@ -5793,23 +5790,13 @@ addEventListener('resize',()=>{
 let previewOn=false, pvYaw=0, pvPitch=-0.12, pvShotWanted=false;
 const pvKeys={f:0,b:0,u:0,d:0};
 function previewStart(){
-  /* Keep this path deliberately defensive: the flat phone preview must not
-     depend on XR support, audio, or the settings panel being healthy. */
-  try{
-    previewOn=true; started=false;
-    const ov=document.getElementById('overlay');
-    const bar=document.getElementById('pvbar');
-    const hud=document.getElementById('pvhud');
-    if(ov) ov.classList.add('gone');
-    if(bar) bar.style.display='flex';
-    if(hud) hud.style.display='block';
-    pvFishEnsure();
-    if(pvFish) pvFish.visible=true;
-    try{audioInit(); if(SND.ok&&SND.ctx) SND.ctx.resume().catch(()=>{});}catch(e){}
-  }catch(e){
-    console.error('flat preview start failed:',e);
-    previewOn=false;
-  }
+  previewOn=true;started=false;
+  document.getElementById('overlay').classList.add('gone');
+  document.getElementById('pvbar').style.display='flex';
+  document.getElementById('pvhud').style.display='block';
+  pvFishEnsure();
+  if(pvFish) pvFish.visible=true;
+  try{audioInit(); if(SND.ok&&SND.ctx) SND.ctx.resume().catch(()=>{}); }catch(e){}
 }
 function previewStop(){
   previewOn=false;
@@ -5908,90 +5895,30 @@ function previewUpdate(dt){
 }
 {
   const cv=renderer.domElement;
-  const previewBtn=document.getElementById('preview');
-  let drag=false,lx=0,ly=0,pinch=0,activeTouchId=null;
+  let drag=false,lx=0,ly=0,pinch=0;
   cv.style.touchAction='none';
-  cv.style.webkitUserSelect='none';
-  cv.style.userSelect='none';
-
-  /* iOS Safari has had inconsistent PointerEvent/canvas-capture behavior.
-     Keep mouse/pen on PointerEvents, but give touch its own native path. */
   cv.addEventListener('pointerdown',e=>{
-    if(!previewOn || e.pointerType==='touch') return;
-    drag=true; lx=e.clientX; ly=e.clientY;
-    try{cv.setPointerCapture(e.pointerId);}catch(_){}
+    if(!previewOn) return;
+    drag=true;lx=e.clientX;ly=e.clientY;cv.setPointerCapture(e.pointerId);
   });
   cv.addEventListener('pointermove',e=>{
-    if(!previewOn || !drag || e.pointerType==='touch') return;
+    if(!previewOn||!drag) return;
     const k=2.6/Math.max(320,innerWidth);
     pvYaw-=(e.clientX-lx)*k;
     pvPitch=Math.max(-1.35,Math.min(1.1,pvPitch-(e.clientY-ly)*k));
-    lx=e.clientX; ly=e.clientY;
+    lx=e.clientX;ly=e.clientY;
   });
   const end=()=>{drag=false;};
-  cv.addEventListener('pointerup',end);
-  cv.addEventListener('pointercancel',end);
-  cv.addEventListener('lostpointercapture',end);
-
-  /* Native touch path for phones: one finger looks around, two fingers
-     pinch/walk. This avoids relying on pointer capture on iOS. */
-  cv.addEventListener('touchstart',e=>{
-    if(!previewOn) return;
-    if(e.touches.length===1){
-      const t=e.touches[0];
-      activeTouchId=t.identifier;
-      lx=t.clientX; ly=t.clientY; pinch=0;
-      e.preventDefault();
-    }else if(e.touches.length>=2){
-      activeTouchId=null;
-      const a=e.touches[0],b=e.touches[1];
-      pinch=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-      e.preventDefault();
-    }
-  },{passive:false});
-
+  cv.addEventListener('pointerup',end);cv.addEventListener('pointercancel',end);
+  /* two fingers pinched together or apart walks forward and back */
   cv.addEventListener('touchmove',e=>{
-    if(!previewOn) return;
-    const k=2.6/Math.max(320,innerWidth);
-    if(e.touches.length===1 && activeTouchId!==null){
-      const t=e.touches[0];
-      pvYaw-=(t.clientX-lx)*k;
-      pvPitch=Math.max(-1.35,Math.min(1.1,pvPitch-(t.clientY-ly)*k));
-      lx=t.clientX; ly=t.clientY;
-      e.preventDefault();
-    }else if(e.touches.length>=2){
-      const a=e.touches[0],b=e.touches[1];
-      const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-      if(pinch){
-        const dd=d-pinch;
-        pvKeys.f=dd>2?1:0;
-        pvKeys.b=dd<-2?1:0;
-      }
-      pinch=d;
-      e.preventDefault();
-    }
-  },{passive:false});
-
-  const touchEnd=()=>{
-    activeTouchId=null;
-    pinch=0;
-    pvKeys.f=0; pvKeys.b=0;
-  };
-  cv.addEventListener('touchend',touchEnd,{passive:false});
-  cv.addEventListener('touchcancel',touchEnd,{passive:false});
-
-  /* Use pointerup + click on the button so a tap is reliable across iOS
-     Safari versions, while the guard prevents a double invocation. */
-  if(previewBtn){
-    previewBtn.style.touchAction='manipulation';
-    previewBtn.style.webkitUserSelect='none';
-    previewBtn.addEventListener('pointerup',e=>{
-      if(e.pointerType==='touch'){
-        e.preventDefault();
-        if(!previewOn) previewStart();
-      }
-    });
-  }
+    if(!previewOn||e.touches.length<2) return;
+    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
+                       e.touches[0].clientY-e.touches[1].clientY);
+    if(pinch){ const dd=d-pinch; pvKeys.f=dd>2?1:0; pvKeys.b=dd<-2?1:0; }
+    pinch=d;
+  },{passive:true});
+  cv.addEventListener('touchend',()=>{pinch=0;pvKeys.f=0;pvKeys.b=0;});
   const hold=(id,key)=>{
     const b=document.getElementById(id);
     const on=e=>{e.preventDefault();pvKeys[key]=1;};
@@ -6129,14 +6056,7 @@ function previewUpdate(dt){
 }
 
 const overlay=document.getElementById('overlay'),enterBtn=document.getElementById('enter'),hint=document.getElementById('hint');
-{
-  const previewBtn=document.getElementById('preview');
-  if(previewBtn){
-    previewBtn.addEventListener('click',()=>{
-      if(!previewOn) previewStart();
-    });
-  }
-}
+document.getElementById('preview').addEventListener('click',previewStart);
 if(!navigator.xr){
   enterBtn.disabled=true;enterBtn.textContent='WebXR unavailable';
   hint.innerHTML='<b>No WebXR here.</b> Mouse aims, Space reels, F routes / Shift pinches line, '+
