@@ -171,6 +171,7 @@ const P = {
   waterSmooth:0.08, gridSpan:80.0, gridFollow:0, surfWave:1.00, bedDetail:1.00,
   foamLife:6.00, boil:1.00, streak:1.00, caustics:1.00, bedVary:1.00,
   waveShade:1.00, froth:1.00, drift:1.00,
+  clarity:1.60, waterOpaque:1.00, tint:0.15, waterSat:1.00, sediment:0.10,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -280,6 +281,12 @@ const MENU=[
   ['Bed detail','bedDetail',0.00,3.00,0.05,'Relief of the cobble and gravel on the riverbed and banks. This is a generated normal map on a surface that was previously flat vertex colours a metre apart, which is why the bed used to read as smooth plastic. It costs one texture lookup on a mesh that is already a single draw call.'],
   ['Fish detail','fishDetail',0.00,2.00,0.05,'Strength of the scale and spot relief on the trout. This is a generated normal map, not extra geometry, so it costs nothing per fish.'],
   ['Wet shine','wetShine',0.00,3.00,0.05,'How much glossier a trout goes the instant it clears the water. A wet fish out of the river is close to a mirror; this is what sells a jump and a landed fish in the hand.'],
+  ['— COLOUR —',null,0,0,0,''],
+  ['Clarity m','clarity',0.20,6.00,0.10,'How deep you can see. This is one number doing two jobs, because in real water they are the same job: it sets how fast light is absorbed by the column, which is both why deep water goes opaque and why it changes hue on the way. Low is a spring melt or a silty tailwater; high is a limestone spring creek where you can count the gravel at four feet.'],
+  ['Water opacity','waterOpaque',0.00,1.50,0.05,'Multiplies the depth-driven opacity without touching the colour. Clarity is the honest control; this is the override for when you want to see more of the bed than the water would really allow, or less. At 0 only the surface reflection and the foam are drawn.'],
+  ['Water tint','tint',0.00,1.00,0.02,'Which colours die first. At 0 red is absorbed fastest and blue and green survive, which is glacial and spring water and reads blue-green. At 1 blue is absorbed fastest, which is what peat and tannin do, and the river reads amber and then brown. Everything in between is a real river somewhere. This also rotates the shallow and deep anchor colours to match, so the hue stays coherent instead of fighting itself.'],
+  ['Water saturation','waterSat',0.00,1.60,0.05,'Chroma of the water column only. At 0 the water is steel grey and still reflects a blue sky through the Fresnel term, which is exactly what an overcast winter river looks like; the reflection and the foam are left alone deliberately. Above 1 pushes it toward postcard.'],
+  ['Sediment','sediment',0.00,1.00,0.02,'Suspended solids scattering light BACK out of the column, rather than absorbing it. This is the difference between deep water that goes dark and deep water that goes pale and milky — glacial flour, a rising river, a spring runoff. It brightens with depth, which absorption never does, and it flattens the contrast between the channel and the bar.'],
   ['— FISH —',null,0,0,0,''],
   ['Show zones','showZones',0,1,1,'Draw the take radius ring and feeding lane for each fish.'],
   ['Show markers','showMarkers',0,1,1,'Draw the post above each fish. Green means feeding.'],
@@ -2668,6 +2675,9 @@ const waterMat=new THREE.ShaderMaterial({
     uUseGrid:{value:0},uFlow:{value:null},
     uNorm:{value:waterNormalTex},uHt:{value:null},
     uUseGridV:{value:0},uWave:{value:P.surfWave},uManN:{value:P.manningN},
+    uExt:{value:new THREE.Vector3(2.55,1.42,1.44)},uSed:{value:P.sediment},
+    uSedC:{value:new THREE.Color(0xa9c0bb)},uSat:{value:P.waterSat},
+    uClarity:{value:P.clarity},uOpaque:{value:P.waterOpaque},
     uStreak:{value:P.streak},uBoil:{value:P.boil},
     uWaveN:{value:P.waveShade},uFroth:{value:P.froth},uDrift:{value:P.drift},
     uGTexel:{value:new THREE.Vector2(1/64,1/64)},uCell:{value:0.45},
@@ -2713,7 +2723,8 @@ const waterMat=new THREE.ShaderMaterial({
   fragmentShader:`
     uniform vec3 uDeep,uShal,uFast,uFoamC,uSkyLo,uSkyHi,uSun,uFogC;
     uniform float uUseGrid,uTime,uDetail,uFoamK,uGlint,uFogD,uStreak,uBoil;
-    uniform float uWaveN,uFroth,uCell,uDrift;
+    uniform float uWaveN,uFroth,uCell,uDrift,uSed,uSat,uClarity,uOpaque;
+    uniform vec3 uExt,uSedC;
     uniform vec2 uGMin,uGSize,uGTexel;
     uniform sampler2D uFlow; uniform sampler2D uNorm; uniform sampler2D uHt;
     varying float vD,vS; varying vec3 vW;
@@ -2821,11 +2832,23 @@ const waterMat=new THREE.ShaderMaterial({
       vec3 sky=mix(uSkyLo,uSkyHi,smoothstep(-0.10,0.70,R.y));
       float glint=pow(max(dot(R,normalize(uSun)),0.0),120.0);
 
-      /* light dies exponentially with the water it passes through, not
-         linearly — which is why a gravel bar under a foot of water still reads
-         as gravel and the channel two feet away reads as green */
-      vec3 c=mix(uShal,uDeep,1.0-exp(-d*1.35));
+      /* Beer-Lambert, PER CHANNEL. A single scalar extinction can only darken
+         water as it deepens. Three of them rotate its hue, which is the actual
+         reason a river goes gravel-brown at your boots, green at your knees and
+         near-black in the channel: red is gone in the first foot and blue and
+         green are still going at a metre. One number, uExt, now carries both
+         the clarity and the tint, and it is the same physics that makes deep
+         ocean blue and a peat burn amber. */
+      vec3 T=exp(-uExt*max(d,0.0));
+      vec3 c=mix(uShal,uDeep,1.0-T);
       c=mix(c,uFast,smoothstep(0.4,1.7,sp)*0.42);
+      /* sediment SCATTERS light back out rather than absorbing it, so unlike
+         everything above it makes deep water brighter, not darker */
+      c=mix(c,uSedC,uSed*(1.0-T.g)*0.70);
+      /* chroma of the column only. The sky reflection below is deliberately
+         left alone: grey water under a blue sky is a real winter river, and
+         desaturating the reflection too just makes it look broken. */
+      c=mix(vec3(dot(c,vec3(0.2126,0.7152,0.0722))),c,uSat);
       c=mix(c,sky,clamp(fres*0.90,0.0,0.72)*(0.35+0.65*uGlint));
       c+=vec3(1.0,0.96,0.86)*glint*0.85*uGlint;
 
@@ -2844,7 +2867,11 @@ const waterMat=new THREE.ShaderMaterial({
 
       /* depth fade: thin water goes transparent so the bed reads through it,
          and a glancing view goes opaque because that is when reflection wins */
-      float a=clamp(0.20+d*0.36+fres*0.34+foam*0.55,0.0,0.94);
+      /* opacity on the same law as the colour, so Clarity means one thing.
+         The old form was linear with a 0.20 floor, which made a millimetre of
+         water a fifth opaque and put a hard edge along every waterline. */
+      float turbA=1.0-exp(-d*1.6/max(uClarity,0.05));
+      float a=clamp((turbA+uSed*0.30*(1.0-T.g))*uOpaque+fres*0.34+foam*0.55,0.0,0.96);
 
       /* haze by hand — a raw ShaderMaterial gets none of three's fog chunks */
       float fd=length(cameraPosition-vW)*uFogD;
@@ -5771,6 +5798,30 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uWaveN.value=P.waveShade;
   waterMat.uniforms.uFroth.value=P.froth;
   waterMat.uniforms.uDrift.value=P.drift;
+  /* --- water colour, derived from Clarity and Tint ------------------------
+     Two anchor palettes and two extinction spectra, lerped by tint. Green is
+     ~1.0 in both spectra, so Clarity always means the same thing in metres
+     however far the tint is pushed; only the ratio of the other two channels
+     moves. The 1.35 keeps green exactly where the old single-scalar version
+     had it at the default clarity, so a default river looks like it always did
+     and everything new is a departure you asked for. */
+  {
+    const t=Math.max(0,Math.min(1,P.tint));
+    const lerp=(a,b,u)=>a+(b-a)*u, SRGB=THREE.SRGBColorSpace;
+    const k=1.35*1.60/Math.max(0.20,P.clarity);
+    waterMat.uniforms.uExt.value.set(
+      (2.10+(0.70-2.10)*t)*k, (1.00+(1.35-1.00)*t)*k, (0.80+(2.60-0.80)*t)*k);
+    waterMat.uniforms.uShal.value.setRGB(
+      lerp(0.325,0.561,t), lerp(0.537,0.486,t), lerp(0.478,0.290,t), SRGB);
+    waterMat.uniforms.uDeep.value.setRGB(
+      lerp(0.114,0.180,t), lerp(0.247,0.125,t), lerp(0.263,0.071,t), SRGB);
+    waterMat.uniforms.uSedC.value.setRGB(
+      lerp(0.663,0.722,t), lerp(0.753,0.635,t), lerp(0.733,0.475,t), SRGB);
+    waterMat.uniforms.uSed.value=P.sediment;
+    waterMat.uniforms.uSat.value=P.waterSat;
+    waterMat.uniforms.uClarity.value=P.clarity;
+    waterMat.uniforms.uOpaque.value=P.waterOpaque;
+  }
   waterMat.uniforms.uManN.value=P.manningN;
   waterMat.uniforms.uCell.value=gdx;
   waterMat.uniforms.uGTexel.value.set(1/Math.max(2,GNX),1/Math.max(2,GNZ));

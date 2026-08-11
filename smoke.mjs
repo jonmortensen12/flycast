@@ -376,4 +376,28 @@ const dist=vm.runInContext(`(()=>{
     'slick <0.25':b[0], '0.25-0.45':b[1], '0.45-0.65':b[2], '0.65-0.85':b[3], 'crest >0.85':b[4]};
 })()`,sandbox);
 console.log('Froude spread at DEFAULTS',dist);
+
+/* colour: the depth response at a few settings, as transmittance per channel */
+const col=vm.runInContext(`(()=>{
+  const rows=[];
+  const probe=(label)=>{
+    const e=waterMat.uniforms.uExt.value;
+    const T=d=>[Math.exp(-e.x*d),Math.exp(-e.y*d),Math.exp(-e.z*d)];
+    const a=d=>Math.min(0.96,(1-Math.exp(-d*1.6/Math.max(P.clarity,0.05)))*P.waterOpaque);
+    const t1=T(0.30), t2=T(1.20);
+    rows.push({setting:label,
+      'ext R/G/B':[e.x,e.y,e.z].map(v=>+v.toFixed(2)).join(' / '),
+      'T@0.3m':t1.map(v=>+v.toFixed(2)).join(' / '),
+      'T@1.2m':t2.map(v=>+v.toFixed(2)).join(' / '),
+      'alpha@0.3':+a(0.30).toFixed(2), 'alpha@1.2':+a(1.20).toFixed(2)});
+  };
+  const loop=renderer._loop;
+  P.clarity=1.60;P.tint=0.15;P.waterOpaque=1.0; loop(); probe('default');
+  P.clarity=4.00;             loop(); probe('clarity 4.0');
+  P.clarity=0.60;             loop(); probe('clarity 0.6');
+  P.clarity=1.60;P.tint=0.90; loop(); probe('tint 0.9 (tannin)');
+  P.tint=0.00;                loop(); probe('tint 0.0 (glacial)');
+  return rows;
+})()`,sandbox);
+console.table(col);
 console.log('OK');

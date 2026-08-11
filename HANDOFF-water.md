@@ -128,6 +128,39 @@ plunging behind a lip. That gives the slow bottom seam and the plunge-pool
 recirculation a nymph actually rides. A true 3D solve buys detail you would
 never see through the surface at roughly twenty times the cost.
 
+**Colour.** Not blue. The anchors are `#53897a` shallow to `#1d3f43` deep — a
+desaturated green-teal — plus `#9ab9b0` mixed in with speed as fake aeration.
+Blue only enters through the sky reflection at the Fresnel term. Five settings
+under the COLOUR tab drive it:
+
+- `clarity` (m) is the honest one. It sets the extinction coefficient, and the
+  same number drives opacity, because in real water absorption and visibility
+  are the same phenomenon.
+- `tint` picks *which channel* is absorbed fastest — red at 0 (glacial, spring,
+  reads blue-green), blue at 1 (peat and tannin, reads amber then brown). Green
+  extinction is ~1.0 in both spectra, so Clarity keeps meaning the same thing in
+  metres however far tint is pushed; only the ratio moves. Tint also rotates the
+  shallow and deep anchors so the hue stays coherent.
+- `sediment` scatters light back out instead of absorbing it, so unlike
+  everything else it makes deep water *brighter*. That is the difference
+  between a channel that goes dark and one that goes pale and milky.
+- `waterSat` is chroma of the column only; the sky reflection and the foam are
+  left alone on purpose, because grey water under a blue sky is a real winter
+  river and desaturating the reflection too just looks broken.
+- `waterOpaque` multiplies opacity without touching colour — the override for
+  when you want more or less bed than the physics allows.
+
+Extinction is applied **per channel** (`vec3 T=exp(-uExt*d)`). A single scalar
+can only darken water as it deepens; three of them rotate its hue, which is why
+a river reads gravel-brown at your boots and green at your knees. Opacity is on
+the same law: it used to be `0.20+d*0.36`, linear with a floor that made a
+millimetre of water a fifth opaque and put a hard edge along every waterline.
+
+Measured at defaults: at 30 cm red transmits 47% against 65% for green and
+blue; at 1.2 m, 5% against 18%. At `tint 0.9` that ordering inverts. If a change
+ever makes all three channels transmit alike, the per-channel mix has been
+collapsed back to a scalar somewhere.
+
 **Cost.** `surfY` costs six smoothsteps and depends only on `x`; it is cached
 per column in `gsurf`, rebuilt with `gslope` whenever the window moves. It was
 previously being called per cell per substep inside the free-surface loop —
