@@ -231,7 +231,7 @@ const code=src.slice(src.indexOf('<script type="module">')+22, src.lastIndexOf('
 
 const seen=new Set();
 const base={THREE,document,console,Math,JSON,Date,Object,Array,Number,String,Boolean,
-  Float32Array,Float64Array,Uint8Array,Uint8ClampedArray,Uint16Array,Uint32Array,Int32Array,
+  Float32Array,Float64Array,Uint8Array,Uint8ClampedArray,Uint16Array,Uint32Array,Int32Array,Int8Array,Int16Array,
   Promise,Error,isNaN,isFinite,parseFloat,parseInt,Set,Map,Symbol,RegExp,
   innerWidth:1280,innerHeight:720,devicePixelRatio:2,
   requestAnimationFrame:()=>0,cancelAnimationFrame(){},
@@ -420,15 +420,31 @@ const rt=vm.runInContext(`(()=>{
     consistent:(GSPECK===GS_W*GS_W)&&(gsRT[0].width===GS_W)
                &&(gSpeckGeo.attributes.aRef.count===GSPECK*3)});
   probe('start');
-  P.speckBudget=256; afterSettingsChange(); renderer._loop(); probe('budget 256');
+  P.speckBudget=256; onSettingChanged('speckBudget'); renderer._loop(); probe('budget 256 via slider');
   const before=gsRT[0];
-  P.speckBudget=256; afterSettingsChange(); probe('same value again');
+  P.speckBudget=256; onSettingChanged('speckBudget'); renderer._loop(); probe('same value again');
   const noRealloc=(gsRT[0]===before);
-  P.speckBudget=48;  afterSettingsChange(); renderer._loop(); probe('budget 48');
-  P.speckBudget=512; afterSettingsChange(); renderer._loop(); probe('budget 512');
-  P.speckBudget=160; afterSettingsChange(); renderer._loop(); probe('back to 160');
+  P.speckBudget=48;  onSettingChanged('speckBudget'); renderer._loop(); probe('budget 48 via slider');
+  P.speckBudget=1024; onSettingChanged('speckBudget'); renderer._loop(); probe('budget 1024 via slider');
+  P.speckBudget=160; onSettingChanged('speckBudget'); renderer._loop(); probe('back to 160');
   return {rows, noReallocOnSameValue:noRealloc};
 })()`,sandbox);
 console.table(rt.rows);
 console.log('no realloc when value unchanged:',rt.noReallocOnSameValue);
+
+/* standing waves must appear where the specks draw crests and nowhere else —
+   same Froude band, so the two cues agree by construction */
+const sw=vm.runInContext(`(()=>{
+  const band=fr=>Math.max(0,Math.min(1,(fr-0.55)/0.50))*(1-Math.max(0,Math.min(1,(fr-1.9)/1.3)));
+  const crest=fr=>Math.max(0,Math.min(1,(fr-0.25)/0.60));   /* speck fragment */
+  const rows=[];
+  for(const fr of [0.2,0.5,0.8,1.0,1.5,2.5,3.5]){
+    const sp=fr*Math.sqrt(9.81*0.5);
+    rows.push({Fr:fr, 'speck crestness':+crest(fr).toFixed(2),
+      'standing wave':+band(fr).toFixed(2),
+      'wavelength m':+Math.max(2*Math.PI*sp*sp/9.81,0.22).toFixed(2)});
+  }
+  return rows;
+})()`,sandbox);
+console.table(sw);
 console.log('OK');

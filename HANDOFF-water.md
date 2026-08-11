@@ -207,6 +207,24 @@ whole cycle out of step. The pattern stops being a continuous field being
 carried along and becomes noise that differs per pixel. This has been tried and
 reverted once; don't try it again.
 
+**Standing waves** (`standWave`) are the one surface cue a scrolled normal map
+cannot produce. Everything else on the surface is a texture dragged downstream,
+so its *shapes* are whatever the noise contains — it can follow direction and
+speed but can never form the shape the specks draw, because nothing in a
+scrolled texture knows about Froude number. That is the structural reason the
+surface could not stand in for the specks, and no combination of the existing
+settings was going to fix it.
+
+The defining property is that a standing wave does not move: the crest sits
+over the bit of bed that makes it while water pours through. **The phase is a
+function of world position only, with no time term at all** — that is the whole
+trick, and adding any time term destroys it. Wavelength comes from
+`L = 2*pi*u^2/g`, clamped to 0.28–2.40 m (the raw relation gives 7 m at Fr 1.5
+and 20 m at Fr 2.5, which across a 14 m channel is a slow tilt, not texture).
+Amplitude is a band around Fr 1, the same band the speck fragment shader uses
+for crestness, so the two cues agree by construction. A second harmonic sharpens
+the crest and flattens the trough; without it the train reads as corrugation.
+
 **Speck budget.** `speckBudget` is the side of the square state texture, so the
 count is its square: 160 -> 25600, 256 -> 65536, 512 -> 262144. `gSpeckResize()`
 reallocates the render targets and rebuilds the point geometry together — they
@@ -215,7 +233,20 @@ that any rewrite must keep: **dispose the old render targets** (otherwise every
 change leaks a pair of float targets until the context dies), and **guard on an
 actual change of `GS_W`**, because it is reached from `afterSettingsChange()`,
 which fires on every slider tick — reallocating 60 times as a thumb slides is
-how you destroy the frame rate the setting exists to protect. What made the last doubling free was removing waste
+how you destroy the frame rate the setting exists to protect — so
+`onSettingChanged` only sets `gsResizeWanted` and the frame loop applies it once
+the trigger is released.
+
+Attribute types carry the count: `position` is never read (the vertex shader
+derives world position from the state texture) but three needs it to know the
+vertex count, so it is `Int8Array`; `aRef` is 16-bit normalised, exact to a
+texel centre up to 2048. That is 9 bytes a vertex against 36 for float32, which
+is most of what makes a million specks affordable.
+
+**A test can pass against the wrong entry point.** The budget resize was
+verified through `afterSettingsChange()` and passed, while the slider path —
+`onSettingChanged()` — had no case for it at all. When a control has two ways
+in, test the one the user's thumb actually touches. What made the last doubling free was removing waste
 from the draw, not spending more: `fieldAt()` returns velocity *and* depth from
 one texel instead of `flowAt()` and `depthHere()` fetching the same texel
 twice, and trail vertices take one RK2 back-step instead of four. Vertex

@@ -175,7 +175,7 @@ const P = {
   watR:0.114, watG:0.247, watB:0.263,
   speckR:1.000, speckG:1.000, speckB:1.000, speckBright:1.00,
   foamR:0.933, foamG:0.957, foamB:0.945, foamBright:1.00, foamDirt:0.00,
-  speckBudget:160,
+  speckBudget:160, standWave:0.00,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -259,7 +259,8 @@ const MENU=[
   ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: 25600 specks living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
   ['Speck life s','speckTravel',2.00,20.0,0.50,'How long a speck lives before it fades out and is reborn upstream. Longer specks trace the whole run of the river past you; shorter ones read as local flow direction. Specks seeded around you live about a third as long as ones drifting down from upstream.'],
   ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter crests behind it, spaced by however far the water actually carried it in this many seconds — so the spacing IS the speed, and the three together read as a short wave train. Zero collapses them onto the head.'],
-  ['GPU speck budget','speckBudget',48,512,16,'The side of the square texture the GPU specks live in, so the count is this number squared: 160 is 25600, 256 is 65536, 512 is 262144. Changing it reallocates the state textures and the point geometry, which takes a moment and restarts every speck, so the field fades back in rather than snapping. Cost is close to linear in the count and the limiting factor is fill rate rather than simulation, so if raising this costs you frames, drop Speck size first — size drives fill quadratically and the count only linearly. Has no effect on the CPU path, which is fixed at 4000.'],
+  ['Standing waves','standWave',0.00,2.00,0.05,'Adds the one thing the scrolling texture cannot produce: crests that sit ACROSS the current and hold still while the water runs through them. That is what a riffle is, and it is exactly what the specks draw, so this is the setting that lets the surface tell you what the specks tell you. Amplitude and wavelength both come from the Froude number, so the crests appear only where the water is genuinely fast and shallow, they pack tighter as it speeds up, and they vanish in a slow pool. Everything else on the surface is a texture being dragged downstream; this is the only part that is locked to the riverbed. Start at 1.00 and turn Specks down to see whether you can still read the water.'],
+  ['GPU speck budget','speckBudget',48,2048,16,'The side of the square texture the GPU specks live in, so the count is this number SQUARED: 160 is 25600, 512 is 262144, 1024 is a million, 2048 is four million. The top of the slider is clamped to the largest texture your device will allocate. There is no meaningful ceiling from the simulation — you will run out of fill rate long before you run out of specks, so if raising this costs frames, drop Speck size FIRST: size costs fill quadratically and the count only linearly. Applies when you let go of the slider, and restarts every speck, so the field fades back in rather than snapping. No effect on the CPU path, which is genuinely fixed at 4000.'],
   ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 25600 on the GPU path. The CPU number is a real ceiling — each of those costs a flow evaluation in JavaScript — but the GPU number is just where the budget was set, so say if you want it higher.'],
   ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck. Size also scales with Froude number on top of this, so riffles stand up and pool slicks stay fine — this sets the baseline.'],
   ['Speck range','speckRange',6.00,45.0,1.00,'How far upstream and downstream specks are kept, in metres. A shorter range packs the same count into less river, so you can read the flow with far fewer of them.'],
@@ -2699,6 +2700,7 @@ const waterMat=new THREE.ShaderMaterial({
     uGTexel:{value:new THREE.Vector2(1/64,1/64)},uCell:{value:0.45},
     uDetail:{value:P.waterDetail},uFoamK:{value:P.foam},uGlint:{value:P.skyGlint},
     uFoamC:{value:new THREE.Color(0xeef4f1)},uFoamB:{value:P.foamBright},
+    uStand:{value:P.standWave},
     uSkyLo:{value:SKY_LO},uSkyHi:{value:SKY_HI},uSun:{value:SUN_DIR},
     uFogC:{value:FOGC},uFogD:{value:0.0070*P.fogAmt},
     uGMin:{value:new THREE.Vector2(GX0,GZ0)},
@@ -2739,7 +2741,7 @@ const waterMat=new THREE.ShaderMaterial({
   fragmentShader:`
     uniform vec3 uDeep,uShal,uFast,uFoamC,uSkyLo,uSkyHi,uSun,uFogC;
     uniform float uUseGrid,uTime,uDetail,uFoamK,uGlint,uFogD,uStreak,uBoil;
-    uniform float uWaveN,uFroth,uCell,uDrift,uSed,uClarity,uOpaque,uFoamB;
+    uniform float uWaveN,uFroth,uCell,uDrift,uSed,uClarity,uOpaque,uFoamB,uStand;
     uniform vec3 uExt,uSedC;
     uniform vec2 uGMin,uGSize,uGTexel;
     uniform sampler2D uFlow; uniform sampler2D uNorm; uniform sampler2D uHt;
@@ -2863,6 +2865,44 @@ const waterMat=new THREE.ShaderMaterial({
       /* chop grows with speed; an upwelling flattens it right out */
       float calm=1.0-clamp(boil,0.0,1.0)*0.80*uBoil;
       vec2 nxz=(nA+nB*0.55)*uDetail*(0.16+min(sp,4.5)*0.42)*calm;
+
+      /* ---- standing waves ------------------------------------------------
+         Everything above is a texture being dragged downstream, so its SHAPES
+         are whatever the noise happens to contain — they can follow the flow's
+         direction and speed, but they can never form the shape the specks draw,
+         because there is nothing in a scrolled normal map that knows about
+         Froude number. That is the structural reason the surface could not
+         stand in for the specks, and no combination of the existing settings
+         was ever going to fix it.
+
+         A standing wave is the missing piece, and it is defined by not moving:
+         the crest sits still over the bit of bed that makes it while water
+         pours through. So the phase is a function of WORLD POSITION ONLY, with
+         no time term at all — that is the whole trick.
+
+         Wavelength from the shallow-water relation L = 2*pi*u^2/g at the
+         critical point, which is why crests pack tighter as the water speeds
+         up, and amplitude from how close Fr gets to 1, which is why they
+         appear on the fast shallow tongue and nowhere else. */
+      float fr=sp/sqrt(9.81*max(d,0.03));
+      float stand=smoothstep(0.55,1.05,fr)*(1.0-smoothstep(1.9,3.2,fr));
+      if(uStand>0.001&&stand>0.001){
+        /* clamped, and it matters: the raw relation gives 7 m at Fr 1.5 and
+           20 m at Fr 2.5, which across a 14 m channel is not a wave train at
+           all, just a slow tilt you would never read as texture. Real riffle
+           crests run a hand's width to a couple of metres apart. */
+        float L=clamp(6.2831853*sp*sp/9.81,0.28,2.40);
+        float ph=sAlong*6.2831853/L;
+        /* trains fade out downstream of whatever raised them, and a real one is
+           not a pure sine — the second harmonic sharpens the crest and flattens
+           the trough, which is what makes it read as water and not corrugation */
+        float w=sin(ph)+0.34*sin(2.0*ph+0.9);
+        float dw=(cos(ph)+0.68*cos(2.0*ph+0.9))*6.2831853/L;
+        /* across-stream coherence: a crest is a line, not a dot, but it still
+           has to break up over a few metres or it looks machined */
+        float coh=0.75+0.25*sin(sAcross*0.9+w*0.6);
+        nxz+=vec2(dw,dw*0.16)*0.11*uStand*stand*coh*calm;
+      }
       /* the solved surface slope goes in alongside the ripple, so a standing
          wave is lit as a standing wave rather than as flat water */
       vec3 N=normalize(vec3(nxz.x-slx*uWaveN*2.6,1.0,nxz.y-slz*uWaveN*2.6));
@@ -3232,7 +3272,7 @@ float speckLife(float sd,float spread,float life){
 }`;
 
 /* ---- the advection pass -------------------------------------------------- */
-let gsOK=false, gsRT=null, gsPing=0, gsReset=2;
+let gsOK=false, gsRT=null, gsPing=0, gsReset=2, gsResizeWanted=false;
 {
   const ext=renderer.extensions;
   gsOK=!!(ext.has('EXT_color_buffer_float')||ext.has('WEBGL_color_buffer_float'));
@@ -3350,19 +3390,36 @@ const gSpeckGeo=new THREE.BufferGeometry();
 /* three vertices per speck: the head, and two ghosts of where it was a moment
    ago. Laid out head-then-trails so that trimming the draw range for the
    density slider drops whole specks rather than beheading them. */
+/* The hard ceiling is the largest square float texture the device will give us;
+   in practice you run out of fill rate long before you reach it. */
+function gsMaxW(){
+  const cap=(renderer.capabilities&&renderer.capabilities.maxTextureSize)||2048;
+  return Math.max(64,Math.min(2048,cap));
+}
 function gSpeckBuild(){
   const N=GSPECK*3;
-  const ref=new Float32Array(N*2), vert=new Float32Array(N);
+  /* Attribute types matter now that this can be millions of vertices.
+     `position` is never read — the vertex shader computes world position from
+     the state texture — but three needs it to know how many vertices there are,
+     so it is one byte per component instead of four. aRef is the texel to read;
+     16-bit normalised gives an exact texel centre up to 2048 and halves the
+     buffer. Float32 throughout used to cost 36 bytes a vertex; this is 9, which
+     is most of what makes a million specks affordable. */
+  const ref=new Uint16Array(N*2), vert=new Uint8Array(N);
   for(let i=0;i<GSPECK;i++){
-    const u=((i%GS_W)+0.5)/GS_W, v=((Math.floor(i/GS_W))+0.5)/GS_W;
+    const u=Math.round(((i%GS_W)+0.5)/GS_W*65535);
+    const v=Math.round(((i/GS_W|0)+0.5)/GS_W*65535);
     for(let k=0;k<3;k++){
       const j=i*3+k;
       ref[j*2]=u; ref[j*2+1]=v; vert[j]=k;
     }
   }
-  gSpeckGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(N*3),3));
-  gSpeckGeo.setAttribute('aRef',new THREE.BufferAttribute(ref,2));
-  gSpeckGeo.setAttribute('aVert',new THREE.BufferAttribute(vert,1));
+  const posAttr=new THREE.BufferAttribute(new Int8Array(N*3),3);
+  const refAttr=new THREE.BufferAttribute(ref,2); refAttr.normalized=true;
+  const vrtAttr=new THREE.BufferAttribute(vert,1);
+  gSpeckGeo.setAttribute('position',posAttr);
+  gSpeckGeo.setAttribute('aRef',refAttr);
+  gSpeckGeo.setAttribute('aVert',vrtAttr);
   gSpeckGeo.boundingSphere=new THREE.Sphere(new THREE.Vector3(),500);
 }
 gSpeckBuild();
@@ -3371,7 +3428,7 @@ gSpeckBuild();
    reallocating a pair of float targets 60 times as a thumb slides across the
    track is how you drop the frame rate the setting exists to protect. */
 function gSpeckResize(){
-  const w=Math.max(16,Math.min(1024,Math.round(P.speckBudget)));
+  const w=Math.max(16,Math.min(gsMaxW(),Math.round(P.speckBudget)));
   if(w===GS_W) return;
   GS_W=w; GSPECK=GS_W*GS_W;
   gsAlloc();
@@ -5239,6 +5296,16 @@ function onSettingChanged(key){
   if(key==='treeRange'||key==='sceneTris'){placeTrees();placeRocks();}
   if(key==='assetOn')applyAssetToggle();
   if(key==='speckSize'){speckMat.uniforms.uSize.value=P.speckSize;gSpeckMat.uniforms.uSize.value=P.speckSize;}
+  /* Deferred, not immediate. onSettingChanged fires on EVERY tick of a drag,
+     and each tick of this one is a real change of GS_W, so resizing here would
+     reallocate a pair of float render targets and three vertex buffers dozens
+     of times as the thumb crosses the track. The frame loop applies it once the
+     trigger is released. (This row was simply missing before, which is why the
+     budget slider moved and nothing happened: the setting changed, the
+     allocation never did. afterSettingsChange() did call gSpeckResize, which is
+     why presets and the URL worked and the slider did not — and why the test
+     that exercised afterSettingsChange passed while the real path was broken.) */
+  if(key==='speckBudget') gsResizeWanted=true;
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
   if(key==='hudScale')hud.mesh.scale.setScalar(P.hudScale);
 }
@@ -5816,6 +5883,7 @@ renderer.setAnimationLoop(()=>{
     v.life-=dt*0.30;
   }
 
+  if(gsResizeWanted&&!dragKey){ gsResizeWanted=false; gSpeckResize(); }
   const useGPU=P.speckGPU>0.5&&gsOK;
   specks.visible=!useGPU&&P.specks>0.005;
   gSpecks.visible=useGPU&&P.specks>0.005;
@@ -5969,6 +6037,7 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uBoil.value=P.boil;
   waterMat.uniforms.uWaveN.value=P.waveShade;
   waterMat.uniforms.uFroth.value=P.froth;
+  waterMat.uniforms.uStand.value=P.standWave;
   waterMat.uniforms.uDrift.value=P.drift;
   /* --- water colour, derived from Clarity and Tint ------------------------
      Two anchor palettes and two extinction spectra, lerped by tint. Green is
