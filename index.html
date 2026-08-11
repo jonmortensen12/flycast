@@ -5793,13 +5793,23 @@ addEventListener('resize',()=>{
 let previewOn=false, pvYaw=0, pvPitch=-0.12, pvShotWanted=false;
 const pvKeys={f:0,b:0,u:0,d:0};
 function previewStart(){
-  previewOn=true;started=false;
-  document.getElementById('overlay').classList.add('gone');
-  document.getElementById('pvbar').style.display='flex';
-  document.getElementById('pvhud').style.display='block';
-  pvFishEnsure();
-  if(pvFish) pvFish.visible=true;
-  try{audioInit(); if(SND.ok&&SND.ctx) SND.ctx.resume().catch(()=>{}); }catch(e){}
+  /* Keep this path deliberately defensive: the flat phone preview must not
+     depend on XR support, audio, or the settings panel being healthy. */
+  try{
+    previewOn=true; started=false;
+    const ov=document.getElementById('overlay');
+    const bar=document.getElementById('pvbar');
+    const hud=document.getElementById('pvhud');
+    if(ov) ov.classList.add('gone');
+    if(bar) bar.style.display='flex';
+    if(hud) hud.style.display='block';
+    pvFishEnsure();
+    if(pvFish) pvFish.visible=true;
+    try{audioInit(); if(SND.ok&&SND.ctx) SND.ctx.resume().catch(()=>{});}catch(e){}
+  }catch(e){
+    console.error('flat preview start failed:',e);
+    previewOn=false;
+  }
 }
 function previewStop(){
   previewOn=false;
@@ -5898,30 +5908,90 @@ function previewUpdate(dt){
 }
 {
   const cv=renderer.domElement;
-  let drag=false,lx=0,ly=0,pinch=0;
+  const previewBtn=document.getElementById('preview');
+  let drag=false,lx=0,ly=0,pinch=0,activeTouchId=null;
   cv.style.touchAction='none';
+  cv.style.webkitUserSelect='none';
+  cv.style.userSelect='none';
+
+  /* iOS Safari has had inconsistent PointerEvent/canvas-capture behavior.
+     Keep mouse/pen on PointerEvents, but give touch its own native path. */
   cv.addEventListener('pointerdown',e=>{
-    if(!previewOn) return;
-    drag=true;lx=e.clientX;ly=e.clientY;cv.setPointerCapture(e.pointerId);
+    if(!previewOn || e.pointerType==='touch') return;
+    drag=true; lx=e.clientX; ly=e.clientY;
+    try{cv.setPointerCapture(e.pointerId);}catch(_){}
   });
   cv.addEventListener('pointermove',e=>{
-    if(!previewOn||!drag) return;
+    if(!previewOn || !drag || e.pointerType==='touch') return;
     const k=2.6/Math.max(320,innerWidth);
     pvYaw-=(e.clientX-lx)*k;
     pvPitch=Math.max(-1.35,Math.min(1.1,pvPitch-(e.clientY-ly)*k));
-    lx=e.clientX;ly=e.clientY;
+    lx=e.clientX; ly=e.clientY;
   });
   const end=()=>{drag=false;};
-  cv.addEventListener('pointerup',end);cv.addEventListener('pointercancel',end);
-  /* two fingers pinched together or apart walks forward and back */
+  cv.addEventListener('pointerup',end);
+  cv.addEventListener('pointercancel',end);
+  cv.addEventListener('lostpointercapture',end);
+
+  /* Native touch path for phones: one finger looks around, two fingers
+     pinch/walk. This avoids relying on pointer capture on iOS. */
+  cv.addEventListener('touchstart',e=>{
+    if(!previewOn) return;
+    if(e.touches.length===1){
+      const t=e.touches[0];
+      activeTouchId=t.identifier;
+      lx=t.clientX; ly=t.clientY; pinch=0;
+      e.preventDefault();
+    }else if(e.touches.length>=2){
+      activeTouchId=null;
+      const a=e.touches[0],b=e.touches[1];
+      pinch=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+      e.preventDefault();
+    }
+  },{passive:false});
+
   cv.addEventListener('touchmove',e=>{
-    if(!previewOn||e.touches.length<2) return;
-    const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,
-                       e.touches[0].clientY-e.touches[1].clientY);
-    if(pinch){ const dd=d-pinch; pvKeys.f=dd>2?1:0; pvKeys.b=dd<-2?1:0; }
-    pinch=d;
-  },{passive:true});
-  cv.addEventListener('touchend',()=>{pinch=0;pvKeys.f=0;pvKeys.b=0;});
+    if(!previewOn) return;
+    const k=2.6/Math.max(320,innerWidth);
+    if(e.touches.length===1 && activeTouchId!==null){
+      const t=e.touches[0];
+      pvYaw-=(t.clientX-lx)*k;
+      pvPitch=Math.max(-1.35,Math.min(1.1,pvPitch-(t.clientY-ly)*k));
+      lx=t.clientX; ly=t.clientY;
+      e.preventDefault();
+    }else if(e.touches.length>=2){
+      const a=e.touches[0],b=e.touches[1];
+      const d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+      if(pinch){
+        const dd=d-pinch;
+        pvKeys.f=dd>2?1:0;
+        pvKeys.b=dd<-2?1:0;
+      }
+      pinch=d;
+      e.preventDefault();
+    }
+  },{passive:false});
+
+  const touchEnd=()=>{
+    activeTouchId=null;
+    pinch=0;
+    pvKeys.f=0; pvKeys.b=0;
+  };
+  cv.addEventListener('touchend',touchEnd,{passive:false});
+  cv.addEventListener('touchcancel',touchEnd,{passive:false});
+
+  /* Use pointerup + click on the button so a tap is reliable across iOS
+     Safari versions, while the guard prevents a double invocation. */
+  if(previewBtn){
+    previewBtn.style.touchAction='manipulation';
+    previewBtn.style.webkitUserSelect='none';
+    previewBtn.addEventListener('pointerup',e=>{
+      if(e.pointerType==='touch'){
+        e.preventDefault();
+        if(!previewOn) previewStart();
+      }
+    });
+  }
   const hold=(id,key)=>{
     const b=document.getElementById(id);
     const on=e=>{e.preventDefault();pvKeys[key]=1;};
@@ -6059,7 +6129,14 @@ function previewUpdate(dt){
 }
 
 const overlay=document.getElementById('overlay'),enterBtn=document.getElementById('enter'),hint=document.getElementById('hint');
-document.getElementById('preview').addEventListener('click',previewStart);
+{
+  const previewBtn=document.getElementById('preview');
+  if(previewBtn){
+    previewBtn.addEventListener('click',()=>{
+      if(!previewOn) previewStart();
+    });
+  }
+}
 if(!navigator.xr){
   enterBtn.disabled=true;enterBtn.textContent='WebXR unavailable';
   hint.innerHTML='<b>No WebXR here.</b> Mouse aims, Space reels, F routes / Shift pinches line, '+
