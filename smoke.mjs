@@ -123,7 +123,8 @@ const THREE={
   Float32BufferAttribute:function(a,i){return attr(Float32Array.from(a),i);},
   InstancedBufferAttribute:function(a,i){return attr(a,i);},
   Color:class{constructor(c){this.r=1;this.g=1;this.b=1;this._h=c;}
-    set(){return this;}setHex(){return this;}setRGB(){return this;}setHSL(){return this;}
+    set(){return this;}setHex(){return this;}setHSL(){return this;}
+    setRGB(r,g,b){this.r=r;this.g=g;this.b=b;return this;}
     clone(){return new THREE.Color();}lerp(){return this;}copy(){return this;}
     getHex(){return 0;}convertSRGBToLinear(){return this;}multiplyScalar(){return this;}},
   Sphere:class{constructor(c,r){this.center=c;this.radius=r;}},
@@ -469,9 +470,18 @@ const rip=vm.runInContext(`(()=>{
   const stillOn=waterMat.uniforms.uRipAmt.value>0.5;
   /* and off when the setting is off */
   P.ripple=0.0; loop();
-  const off=waterMat.uniforms.uRipAmt.value===0;
+  const off=waterMat.uniforms.uRipAmt.value===0&&waterMat.uniforms.uRipO.value===0;
   P.ripple=1.0; P.specks=0.5; P.speckBright=1.0;
+  /* the tint must follow the water when stained and hold when not */
+  P.ripple=1.0; P.ripOpacity=0.8; P.ripR=1;P.ripG=1;P.ripB=1;
+  P.ripStain=0.0; P.watR=0.6;P.watG=0.1;P.watB=0.1; loop();
+  const unstained=[waterMat.uniforms.uRipC.value.r,waterMat.uniforms.uRipC.value.b];
+  P.ripStain=1.0; loop();
+  const stained=[waterMat.uniforms.uRipC.value.r,waterMat.uniforms.uRipC.value.b];
+  P.ripStain=0.35; P.watR=0.114;P.watG=0.247;P.watB=0.263; P.ripOpacity=0.0;
   return {mapBound:a.bound, ripAmt:a.amt, visibleDrawRange:a.drawAfter,
+          tintHoldsAtStain0:Math.abs(unstained[0]-unstained[1])<0.02,
+          tintFollowsWaterAtStain1:stained[0]>stained[1]+0.05,
           followsCamera:moved, texelSnapped:snapped,
           worksWithSpecksHidden:stillOn, offWhenZero:off};
 })()`,sandbox);

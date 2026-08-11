@@ -232,6 +232,20 @@ wavelets sum into a continuous field, which is the difference between water and
 a scatter of discrete blobs. If the surface looks blobby, there are too few
 specks for `rippleScale` — raise the budget or shrink the wavelet.
 
+The map's blue channel carries **coverage** — how much wavelet is stacked on a
+bit of water — which is a different question from the gradient in red and
+green. The gradient says which way the surface is tilted and cancels where a
+crest meets a trough; coverage never cancels, so it is the channel that can be
+tinted (`ripR`/`ripG`/`ripB`) or made opaque (`ripOpacity`). Without a separate
+coverage channel, "more visible ripples" could only ever mean "steeper ones".
+
+At `ripOpacity` 0 a ripple is pure surface tilt — visible only because it
+catches the sky at a different angle, which is how real water works and why
+ripples can vanish under a flat grey sky. The tint is painted **after** the sky
+reflection (a deliberately tinted ripple should not then be half-replaced by
+sky) and **before** the foam (foam is a physical thing floating on top).
+`ripStain` bleeds the water colour in on the same rule as `foamDirt`.
+
 The map is snapped to whole texels as it follows you, or walking upstream
 shimmers it. Its state pass runs whenever the map is wanted even if the specks
 are invisible — that is the whole point of being able to set Speck brightness

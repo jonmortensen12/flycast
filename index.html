@@ -177,6 +177,7 @@ const P = {
   foamR:0.933, foamG:0.957, foamB:0.945, foamBright:1.00, foamDirt:0.00,
   speckBudget:160, standWave:0.00,
   ripple:1.00, rippleSpan:44, rippleScale:1.00,
+  ripOpacity:0.00, ripR:0.980, ripG:0.995, ripB:1.000, ripStain:0.35,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -262,6 +263,11 @@ const MENU=[
   ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter crests behind it, spaced by however far the water actually carried it in this many seconds — so the spacing IS the speed, and the three together read as a short wave train. Zero collapses them onto the head.'],
   ['Ripples from specks','ripple',0.00,2.50,0.05,'The surface detail drawn from the specks themselves rather than from a scrolling texture. Each speck splats a small wavelet into a top-down map and the water reads that map as its surface shape, so the detail is CAUSED by the flow instead of imitating it: it packs where the specks pack, curls into the eddy behind a rock because the specks do, and holds still in a standing wave because the specks do. This is the setting that lets you turn Speck brightness to zero and still read the water. Raise Speck density and GPU speck budget together with this — a sparse field of specks makes a sparse, blobby surface.'],
   ['Ripple size m','rippleScale',0.25,3.00,0.05,'How big each speck\'s wavelet is. Small and numerous reads as fine wind chop; large and few reads as a slow heavy swell. If the surface looks like separate blobs rather than water, this is too large for the number of specks you have — either raise it slightly so they overlap, or raise the speck budget.'],
+  ['Ripple opacity','ripOpacity',0.00,1.50,0.02,'How much the ripples are PAINTED on rather than merely shaped. At 0 a ripple is pure surface tilt — you see it only because it catches the sky at a different angle, which is how real water works and why it can vanish under a flat grey sky. Raising this lays the ripple colour over the water in proportion to how much wavelet is stacked there, so riffles read as texture even in bad light and from a low angle. Past about 0.6 it stops looking like water and starts looking like paint, which is sometimes exactly what you want for reading the current.'],
+  ['Ripple red','ripR',0.00,1.00,0.01,'Red channel of the ripple colour, used only when Ripple opacity is above zero. Near-white on all three is aerated water; drop them together for dark ripples, which reads as a wind-riffled surface on an overcast day.'],
+  ['Ripple green','ripG',0.00,1.00,0.01,'Green channel of the ripple colour.'],
+  ['Ripple blue','ripB',0.00,1.00,0.01,'Blue channel of the ripple colour.'],
+  ['Ripple stain','ripStain',0.00,1.00,0.02,'How much the water colour bleeds into the ripple colour, the same way Foam stain works. At 0 the ripples are exactly the colour you set no matter what the river is doing; higher keeps them tied to the water so changing the water colour carries the ripples with it instead of leaving them looking pasted on.'],
   ['Ripple map span m','rippleSpan',16,120,4,'How much river the ripple map covers. It is a fixed 512 pixels square that follows you, so a smaller span means finer detail near you and no detail beyond the edge, and a larger span covers more water more coarsely. Around 40 m keeps roughly a hand-span of river per pixel, which is about the size of a real ripple.'],
   ['Standing waves','standWave',0.00,2.00,0.05,'Adds the one thing the scrolling texture cannot produce: crests that sit ACROSS the current and hold still while the water runs through them. That is what a riffle is, and it is exactly what the specks draw, so this is the setting that lets the surface tell you what the specks tell you. Amplitude and wavelength both come from the Froude number, so the crests appear only where the water is genuinely fast and shallow, they pack tighter as it speeds up, and they vanish in a slow pool. Everything else on the surface is a texture being dragged downstream; this is the only part that is locked to the riverbed. Start at 1.00 and turn Specks down to see whether you can still read the water.'],
   ['GPU speck budget','speckBudget',48,2048,16,'The side of the square texture the GPU specks live in, so the count is this number SQUARED: 160 is 25600, 512 is 262144, 1024 is a million, 2048 is four million. The top of the slider is clamped to the largest texture your device will allocate. There is no meaningful ceiling from the simulation — you will run out of fill rate long before you run out of specks, so if raising this costs frames, drop Speck size FIRST: size costs fill quadratically and the count only linearly. Applies when you let go of the slider, and restarts every speck, so the field fades back in rather than snapping. No effect on the CPU path, which is genuinely fixed at 4000.'],
@@ -2696,6 +2702,7 @@ const waterMat=new THREE.ShaderMaterial({
     uUseGrid:{value:0},uFlow:{value:null},
     uNorm:{value:waterNormalTex},uHt:{value:null},
     uRipple:{value:null},uRipAmt:{value:P.ripple},
+    uRipO:{value:P.ripOpacity},uRipC:{value:new THREE.Color(1,1,1)},
     uRipMin:{value:new THREE.Vector2(-24,-24)},uRipSize:{value:new THREE.Vector2(48,48)},
     uUseGridV:{value:0},uWave:{value:P.surfWave},uManN:{value:P.manningN},
     uExt:{value:new THREE.Vector3(2.55,1.42,1.44)},uSed:{value:P.sediment},
@@ -2751,7 +2758,8 @@ const waterMat=new THREE.ShaderMaterial({
     uniform vec3 uExt,uSedC;
     uniform vec2 uGMin,uGSize,uGTexel;
     uniform sampler2D uFlow; uniform sampler2D uNorm; uniform sampler2D uHt;
-    uniform sampler2D uRipple; uniform float uRipAmt; uniform vec2 uRipMin,uRipSize;
+    uniform sampler2D uRipple; uniform float uRipAmt,uRipO; uniform vec2 uRipMin,uRipSize;
+    uniform vec3 uRipC;
     varying float vD,vS; varying vec3 vW;
     ${GLSL_VDEC}
     void main(){
@@ -2868,6 +2876,7 @@ const waterMat=new THREE.ShaderMaterial({
       /* chop grows with speed; an upwelling flattens it right out */
       float calm=1.0-clamp(boil,0.0,1.0)*0.80*uBoil;
       vec2 nxz=(nA+nB*0.55)*uDetail*(0.16+min(sp,4.5)*0.42)*calm;
+      float ripCov=0.0;
 
       /* the speck-splatted wavelet field, faded out at the edge of its map so
          the boundary is not a visible line across the river */
@@ -2876,7 +2885,9 @@ const waterMat=new THREE.ShaderMaterial({
         if(rtc.x>0.0&&rtc.x<1.0&&rtc.y>0.0&&rtc.y<1.0){
           vec2 ed=min(rtc,1.0-rtc);
           float rw=smoothstep(0.0,0.09,min(ed.x,ed.y));
-          nxz+=texture2D(uRipple,rtc).xy*uRipAmt*rw*calm;
+          vec3 rip=texture2D(uRipple,rtc).xyz;
+          nxz+=rip.xy*uRipAmt*rw*calm;
+          ripCov=rip.z*rw*calm;
         }
       }
 
@@ -2956,6 +2967,12 @@ const waterMat=new THREE.ShaderMaterial({
          works, which was the only reason that pass existed. */
       c=mix(c,sky,clamp(fres*0.90,0.0,0.72)*(0.35+0.65*uGlint));
       c+=vec3(1.0,0.96,0.86)*glint*0.85*uGlint;
+
+      /* Ripple colour goes on AFTER the sky reflection and before the foam.
+         After, because a ripple you have deliberately tinted should not then be
+         half-replaced by sky; before, because foam is a physical thing floating
+         on the water and still has to sit on top of everything. */
+      if(uRipO>0.001) c=mix(c,uRipC,clamp(ripCov*uRipO,0.0,1.0));
 
       /* foam has been carried here from wherever it was torn loose, plus the
          water that is white because it is genuinely supercritical */
@@ -3040,6 +3057,12 @@ function updateWaterColour(){
     .map((v,i)=>v*(1-st)+v*(C[i]+(1-C[i])*0.45)*st);
   waterMat.uniforms.uFoamC.value.setRGB(FM[0],FM[1],FM[2],SRGB);
   waterMat.uniforms.uFoamB.value=P.foamBright;
+  /* ripple tint, stained toward the water on the same rule as the foam */
+  const rs=cl01(P.ripStain);
+  const RP=[cl01(P.ripR),cl01(P.ripG),cl01(P.ripB)]
+    .map((v,i)=>v*(1-rs)+v*(C[i]+(1-C[i])*0.55)*rs);
+  waterMat.uniforms.uRipC.value.setRGB(RP[0],RP[1],RP[2],SRGB);
+  waterMat.uniforms.uRipO.value=P.ripOpacity;
   /* specks */
   for(const m2 of [speckMat,gSpeckMat]){
     m2.uniforms.uSpeckC.value.setRGB(cl01(P.speckR),cl01(P.speckG),cl01(P.speckB),SRGB);
@@ -3628,7 +3651,13 @@ const ripMat=new THREE.ShaderMaterial({
       float dfy=env*(-4.4*f.y*sn);
       /* back out of the flow frame into world axes */
       vec2 g=vec2(dfx*vDir.x-dfy*vDir.y, dfx*vDir.y+dfy*vDir.x);
-      gl_FragColor=vec4(g*vAmp*0.16/max(vRad,0.05),0.0,1.0);
+      /* Blue carries COVERAGE — how much wavelet is stacked on this bit of
+         water — which is a different question from the gradient in red and
+         green. The gradient says which way the surface is tilted and cancels
+         where a crest meets a trough; coverage never cancels, so it is the
+         channel that can be tinted or made opaque. Without it, asking for
+         "more visible ripples" could only mean steeper ones. */
+      gl_FragColor=vec4(g*vAmp*0.16/max(vRad,0.05),env*vAmp*0.55,1.0);
     }`});
 const ripScene=new THREE.Scene();
 ripScene.add(new THREE.Points(gSpeckGeo,ripMat));
@@ -6060,7 +6089,7 @@ renderer.setAnimationLoop(()=>{
      the density slider, so it leaves the range wide open behind it. */
   if(useGPU||wantRip) gsStep(dt);
   if(wantRip) ripStep();
-  else waterMat.uniforms.uRipAmt.value=0;
+  else { waterMat.uniforms.uRipAmt.value=0; waterMat.uniforms.uRipO.value=0; }
   specks.visible=!useGPU&&P.specks>0.005;
   gSpecks.visible=useGPU&&P.specks>0.005;
   if(useGPU){
@@ -6214,6 +6243,7 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uFroth.value=P.froth;
   waterMat.uniforms.uStand.value=P.standWave;
   waterMat.uniforms.uRipAmt.value=ripOK?P.ripple:0;
+  if(!ripOK) waterMat.uniforms.uRipO.value=0;
   waterMat.uniforms.uDrift.value=P.drift;
   /* --- water colour, derived from Clarity and Tint ------------------------
      Two anchor palettes and two extinction spectra, lerped by tint. Green is
