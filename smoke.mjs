@@ -377,26 +377,21 @@ const dist=vm.runInContext(`(()=>{
 })()`,sandbox);
 console.log('Froude spread at DEFAULTS',dist);
 
-/* colour: the depth response at a few settings, as transmittance per channel */
+/* colour: every named look, checked for a sane spectrum and a distinct hue */
 const col=vm.runInContext(`(()=>{
   const rows=[];
-  const probe=(label)=>{
-    const e=waterMat.uniforms.uExt.value;
+  for(let i=0;i<WATER_LOOKS.length;i++){
+    const [name,vals]=WATER_LOOKS[i];
+    applyPreset(vals); renderer._loop();
+    const e=waterMat.uniforms.uExt.value, D=waterMat.uniforms.uDeep.value;
     const T=d=>[Math.exp(-e.x*d),Math.exp(-e.y*d),Math.exp(-e.z*d)];
     const a=d=>Math.min(0.96,(1-Math.exp(-d*1.6/Math.max(P.clarity,0.05)))*P.waterOpaque);
-    const t1=T(0.30), t2=T(1.20);
-    rows.push({setting:label,
+    rows.push({look:name,
       'ext R/G/B':[e.x,e.y,e.z].map(v=>+v.toFixed(2)).join(' / '),
-      'T@0.3m':t1.map(v=>+v.toFixed(2)).join(' / '),
-      'T@1.2m':t2.map(v=>+v.toFixed(2)).join(' / '),
-      'alpha@0.3':+a(0.30).toFixed(2), 'alpha@1.2':+a(1.20).toFixed(2)});
-  };
-  const loop=renderer._loop;
-  P.clarity=1.60;P.tint=0.15;P.waterOpaque=1.0; loop(); probe('default');
-  P.clarity=4.00;             loop(); probe('clarity 4.0');
-  P.clarity=0.60;             loop(); probe('clarity 0.6');
-  P.clarity=1.60;P.tint=0.90; loop(); probe('tint 0.9 (tannin)');
-  P.tint=0.00;                loop(); probe('tint 0.0 (glacial)');
+      'meanExt':+(((e.x+e.y+e.z)/3)*Math.max(P.clarity,0.2)).toFixed(2),
+      'T@1.2m':T(1.2).map(v=>+v.toFixed(2)).join(' / '),
+      'alpha@1.2':+a(1.2).toFixed(2)});
+  }
   return rows;
 })()`,sandbox);
 console.table(col);

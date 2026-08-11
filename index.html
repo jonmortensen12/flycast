@@ -171,7 +171,9 @@ const P = {
   waterSmooth:0.08, gridSpan:80.0, gridFollow:0, surfWave:1.00, bedDetail:1.00,
   foamLife:6.00, boil:1.00, streak:1.00, caustics:1.00, bedVary:1.00,
   waveShade:1.00, froth:1.00, drift:1.00,
-  clarity:1.60, waterOpaque:1.00, tint:0.15, waterSat:1.00, sediment:0.10,
+  clarity:1.60, waterOpaque:1.00, sediment:0.10,
+  watHue:0.47, watSat:0.42, watLight:0.26,
+  speckHue:0.50, speckSat:0.10, speckBright:1.00,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -282,11 +284,16 @@ const MENU=[
   ['Fish detail','fishDetail',0.00,2.00,0.05,'Strength of the scale and spot relief on the trout. This is a generated normal map, not extra geometry, so it costs nothing per fish.'],
   ['Wet shine','wetShine',0.00,3.00,0.05,'How much glossier a trout goes the instant it clears the water. A wet fish out of the river is close to a mirror; this is what sells a jump and a landed fish in the hand.'],
   ['— COLOUR —',null,0,0,0,''],
-  ['Clarity m','clarity',0.20,6.00,0.10,'How deep you can see. This is one number doing two jobs, because in real water they are the same job: it sets how fast light is absorbed by the column, which is both why deep water goes opaque and why it changes hue on the way. Low is a spring melt or a silty tailwater; high is a limestone spring creek where you can count the gravel at four feet.'],
-  ['Water opacity','waterOpaque',0.00,1.50,0.05,'Multiplies the depth-driven opacity without touching the colour. Clarity is the honest control; this is the override for when you want to see more of the bed than the water would really allow, or less. At 0 only the surface reflection and the foam are drawn.'],
-  ['Water tint','tint',0.00,1.00,0.02,'Which colours die first. At 0 red is absorbed fastest and blue and green survive, which is glacial and spring water and reads blue-green. At 1 blue is absorbed fastest, which is what peat and tannin do, and the river reads amber and then brown. Everything in between is a real river somewhere. This also rotates the shallow and deep anchor colours to match, so the hue stays coherent instead of fighting itself.'],
-  ['Water saturation','waterSat',0.00,1.60,0.05,'Chroma of the water column only. At 0 the water is steel grey and still reflects a blue sky through the Fresnel term, which is exactly what an overcast winter river looks like; the reflection and the foam are left alone deliberately. Above 1 pushes it toward postcard.'],
-  ['Sediment','sediment',0.00,1.00,0.02,'Suspended solids scattering light BACK out of the column, rather than absorbing it. This is the difference between deep water that goes dark and deep water that goes pale and milky — glacial flour, a rising river, a spring runoff. It brightens with depth, which absorption never does, and it flattens the contrast between the channel and the bar.'],
+  ['Water looks','!waterlook',0,0,0,'Push right to step through named water: mountain freestone, tannic, glacial melt, chalk stream, overcast steel, and ink. Each one sets hue, saturation, lightness, clarity and sediment together, which is the quickest way to find the neighbourhood you want before tuning it by hand.'],
+  ['Water hue','watHue',0.00,1.00,0.01,'Hue of the water itself, all the way round the wheel: 0 red, 0.33 green, 0.50 cyan, 0.62 blue, 0.92 magenta. This is the colour DEEP water tends toward, and the absorption spectrum is derived from it rather than set separately — the channels you did not pick are the channels that get absorbed, which is the actual physics and the reason the two can no longer disagree with each other. Shallow water is the same hue, paler.'],
+  ['Water saturation','watSat',0.00,1.00,0.02,'How much colour. At 0 the water is neutral grey and still reflects a blue sky through the Fresnel term, which is exactly what an overcast winter river looks like. The sky reflection and the foam are deliberately left alone.'],
+  ['Water lightness','watLight',0.00,1.00,0.02,'How bright the deep water is. Low is where you get a dark channel, a deep blue-black pool, or with saturation at zero, water that simply goes to black. High reads as a bright shallow flat even where it is not.'],
+  ['Clarity m','clarity',0.20,6.00,0.10,'How deep you can see. One number doing two jobs, because in real water they are the same job: it sets how fast light is absorbed, which is both why deep water goes opaque and why it saturates toward the hue on the way. Low is a spring melt or a silty tailwater; high is a limestone spring creek where you can count the gravel at four feet.'],
+  ['Sediment','sediment',0.00,1.00,0.02,'Suspended solids scattering light BACK out of the column rather than absorbing it. This is the difference between deep water that goes dark and deep water that goes pale and milky — glacial flour, a rising river, spring runoff. It brightens with depth, which absorption never does, and it flattens the contrast between the channel and the bar.'],
+  ['Water opacity','waterOpaque',0.00,1.50,0.05,'Multiplies the depth-driven opacity without touching the colour. Clarity is the honest control; this is the override for when you want to see more of the bed than the water really allows, or less. At 0 only the surface reflection and the foam are drawn.'],
+  ['Speck hue','speckHue',0.00,1.00,0.01,'Hue of the specks, round the same wheel. They default near-white with a faint cool cast, which is what wind-ruffled water and a broken crest actually are; push the saturation up first or this will do nothing visible.'],
+  ['Speck saturation','speckSat',0.00,1.00,0.02,'How much colour the specks carry. Zero is white. This is worth raising well above anything realistic while you are tuning the flow, because coloured specks against green water are far easier to follow than white ones.'],
+  ['Speck brightness','speckBright',0.00,2.00,0.05,'Overall brightness of the specks, on top of the fade with age and depth. Turn it down to let the surface texture do the reading and keep the specks as a faint confirmation, or up to make them the primary cue.'],
   ['— FISH —',null,0,0,0,''],
   ['Show zones','showZones',0,1,1,'Draw the take radius ring and feeding lane for each fish.'],
   ['Show markers','showMarkers',0,1,1,'Draw the post above each fish. Green means feeding.'],
@@ -2803,21 +2810,33 @@ const waterMat=new THREE.ShaderMaterial({
          travelled from the world coordinate and let the same scale apply to
          both, and the surface moves at exactly tsp m/s at every scale, every
          stretch and every speed. */
-      float cyc=0.55;
-      float ph1=fract(uTime*cyc), ph2=fract(uTime*cyc+0.5);
-      float blend=abs(1.0-2.0*ph1);
       float tsp=sp*uDrift+(sp-cel)*(1.0-uDrift)*0.35;
-      float uvA=0.42/st, uvAcr=0.42*(0.55+0.45/st);
-      vec2 fA1=vec2((sAlong-tsp*ph1/cyc)*uvA, sAcross*uvAcr);
-      vec2 fA2=vec2((sAlong-tsp*ph2/cyc)*uvA, sAcross*uvAcr);
+      float uvA=0.42/st, uvAcr=0.42*(0.55+0.45/st), uvB=1.55/st;
+      /* The crossfade rate has to come from each scale's OWN wavelength.
+         It used to be a flat 0.55 Hz for both, which meant the two half-offset
+         copies sat tsp*0.909 metres apart — about a quarter of a wavelength for
+         the coarse scale, which is tolerable, and MORE THAN A FULL WAVELENGTH
+         for the fine one, which is total decorrelation. The fine layer, which
+         is the one carrying the detail you actually read the current off, was
+         therefore blurred into mush at any real speed while the coarse layer
+         moved correctly. That is the residual mismatch.
+
+         Working in tiles instead of seconds fixes it and is shorter: travel
+         TILE tiles per cycle, so the two copies are always TILE/2 of a tile
+         apart at every scale, every stretch and every speed, and the pattern's
+         UV velocity is TILE*rate = tsp*uv, which is the water speed exactly. */
+      const float TILE=0.36;
+      float rA=tsp*uvA/TILE, rB=tsp*uvB/TILE;
+      float a1=fract(uTime*rA), a2=fract(uTime*rA+0.5);
+      float blend=abs(1.0-2.0*a1);
+      vec2 fA1=vec2(sAlong*uvA-TILE*a1, sAcross*uvAcr);
+      vec2 fA2=vec2(sAlong*uvA-TILE*a2, sAcross*uvAcr);
       vec2 nA=mix(texture2D(uNorm,fA1).xy,texture2D(uNorm,fA2).xy,blend)*2.0-1.0;
       /* second scale, offset in phase so the two never reset together */
-      float cycB=cyc*0.73;
-      float qh1=fract(uTime*cycB+0.31), qh2=fract(uTime*cycB+0.81);
-      float qblend=abs(1.0-2.0*qh1);
-      float uvB=1.55/st;
-      vec2 fB1=vec2((sAlong-tsp*qh1/cycB)*uvB, sAcross*1.55);
-      vec2 fB2=vec2((sAlong-tsp*qh2/cycB)*uvB, sAcross*1.55);
+      float b1=fract(uTime*rB+0.31), b2=fract(uTime*rB+0.81);
+      float qblend=abs(1.0-2.0*b1);
+      vec2 fB1=vec2(sAlong*uvB-TILE*b1, sAcross*1.55);
+      vec2 fB2=vec2(sAlong*uvB-TILE*b2, sAcross*1.55);
       vec2 nB=mix(texture2D(uNorm,fB1).xy,texture2D(uNorm,fB2).xy,qblend)*2.0-1.0;
       /* chop grows with speed; an upwelling flattens it right out */
       float calm=1.0-clamp(boil,0.0,1.0)*0.80*uBoil;
@@ -2886,6 +2905,74 @@ const waterMat=new THREE.ShaderMaterial({
   const w=new THREE.Mesh(g,waterMat);w.renderOrder=0;w.frustumCulled=false;scene.add(w);
 }
 
+/* ---- water colour ---------------------------------------------------------
+   The old control was a single "tint" axis that lerped between two hand-picked
+   palettes AND between two absorption spectra at the same time. Sweeping it
+   walked through hues nobody chose — cyan to green to red — because the mix was
+   travelling through the middle of a colour space diagonally, and there was no
+   way to ask for a dark blue, a brown, or black.
+
+   So the control is now the colour itself, and the physics is derived FROM it.
+   You pick the colour deep water should be; the absorption spectrum is its
+   complement, because the channels you did not pick are precisely the channels
+   the water is absorbing. That is not a convenient fudge, it is the definition:
+   deep ocean is blue because water absorbs red, and a peat burn is amber
+   because it absorbs blue. Doing it this way means the appearance and the
+   physics cannot drift apart, which is exactly what they were doing.
+
+   Absorption is renormalised to a constant mean, so Clarity keeps meaning the
+   same thing in metres wherever you put the hue. -------------------------- */
+function hsv2rgb(h,s,v){
+  h=(h%1+1)%1*6; const i=Math.floor(h), f=h-i;
+  const p=v*(1-s), q=v*(1-s*f), t=v*(1-s*(1-f));
+  switch(i%6){
+    case 0: return [v,t,p]; case 1: return [q,v,p]; case 2: return [p,v,t];
+    case 3: return [p,q,v]; case 4: return [t,p,v]; default: return [v,p,q];
+  }
+}
+function updateWaterColour(){
+  const SRGB=THREE.SRGBColorSpace;
+  const C=hsv2rgb(P.watHue,P.watSat,Math.max(0.02,P.watLight));
+  const mx=Math.max(C[0],C[1],C[2],1e-4);
+  /* complement of the picked colour, floored so no channel is perfectly
+     transparent, then renormalised so the mean is 1 and Clarity is absolute */
+  const m=[0,1,2].map(i=>0.12+0.88*(1-C[i]/mx));
+  const mean=(m[0]+m[1]+m[2])/3;
+  const k=1.35*1.60/Math.max(0.20,P.clarity)/Math.max(mean,1e-3);
+  waterMat.uniforms.uExt.value.set(m[0]*k,m[1]*k,m[2]*k);
+  waterMat.uniforms.uDeep.value.setRGB(C[0],C[1],C[2],SRGB);
+  /* shallow is the same hue, paler and less saturated — thin water carries
+     less of everything, including its own colour */
+  const S=hsv2rgb(P.watHue,P.watSat*0.55,Math.min(1,Math.max(0.02,P.watLight)*2.05));
+  waterMat.uniforms.uShal.value.setRGB(S[0],S[1],S[2],SRGB);
+  /* aeration and suspended solids are near-neutral, but keep a trace of the
+     water's own hue or pale water reads as a grey film laid over the river */
+  const F=hsv2rgb(P.watHue,P.watSat*0.22,Math.min(1,Math.max(0.02,P.watLight)*2.9));
+  waterMat.uniforms.uFast.value.setRGB(F[0],F[1],F[2],SRGB);
+  const D=hsv2rgb(P.watHue,P.watSat*0.30,Math.min(1,0.55+P.watLight*0.6));
+  waterMat.uniforms.uSedC.value.setRGB(D[0],D[1],D[2],SRGB);
+  waterMat.uniforms.uSed.value=P.sediment;
+  waterMat.uniforms.uClarity.value=P.clarity;
+  waterMat.uniforms.uOpaque.value=P.waterOpaque;
+  /* specks */
+  const K=hsv2rgb(P.speckHue,P.speckSat,1.0);
+  for(const m2 of [speckMat,gSpeckMat]){
+    m2.uniforms.uSpeckC.value.setRGB(K[0],K[1],K[2],SRGB);
+    m2.uniforms.uSpeckB.value=P.speckBright;
+  }
+}
+/* named water, because six numbers is a lot to guess at from a standing start */
+const WATER_LOOKS=[
+  ['mountain freestone',{watHue:0.47,watSat:0.42,watLight:0.26,clarity:1.60,sediment:0.10,waterOpaque:1.00}],
+  ['tannic',            {watHue:0.09,watSat:0.62,watLight:0.20,clarity:0.85,sediment:0.06,waterOpaque:1.00}],
+  ['glacial melt',      {watHue:0.50,watSat:0.55,watLight:0.52,clarity:0.70,sediment:0.85,waterOpaque:1.10}],
+  ['chalk stream',      {watHue:0.42,watSat:0.30,watLight:0.38,clarity:4.20,sediment:0.05,waterOpaque:0.85}],
+  ['overcast steel',    {watHue:0.58,watSat:0.10,watLight:0.24,clarity:1.30,sediment:0.14,waterOpaque:1.05}],
+  ['deep blue',         {watHue:0.61,watSat:0.70,watLight:0.16,clarity:2.40,sediment:0.02,waterOpaque:1.00}],
+  ['ink',               {watHue:0.60,watSat:0.25,watLight:0.03,clarity:1.10,sediment:0.00,waterOpaque:1.25}],
+];
+let waterLook=0;
+
 /* ---- how a speck is drawn -------------------------------------------------
    A speck is not a fleck of foam. What you actually see on a river is a train
    of small standing crests where the water is fast and shallow, and long thin
@@ -2914,6 +3001,7 @@ float riffleGrow(float fr){ return 0.60+1.60*smoothstep(0.15,1.05,fr); }
 float riffleAlpha(float fr){ return 0.45+0.55*smoothstep(0.20,0.90,fr); }`;
 const GLSL_RIFFLE_FRAG=`
     varying float vA,vFr; varying vec2 vDir;
+    uniform vec3 uSpeckC; uniform float uSpeckB;
     void main(){
       vec2 d=gl_PointCoord-0.5;
       /* into the flow frame: x along the current, y across it */
@@ -2923,7 +3011,11 @@ const GLSL_RIFFLE_FRAG=`
       float r=dot(g,g);
       if(r>0.25) discard;
       float a=(1.0-smoothstep(0.03,0.25,r))*vA;
-      gl_FragColor=vec4(mix(vec3(0.78,0.87,0.90),vec3(1.00,1.00,0.97),crest),a);
+      /* the base is cool-white for a slick and warm-white for a crest, which is
+         what broken water actually is; the tint multiplies that rather than
+         replacing it, so at zero saturation nothing changes */
+      vec3 base=mix(vec3(0.78,0.87,0.90),vec3(1.00,1.00,0.97),crest);
+      gl_FragColor=vec4(base*uSpeckC,clamp(a*uSpeckB,0.0,1.0));
     }`;
 
 /* specks */
@@ -2960,7 +3052,8 @@ speckGeo.setAttribute('alpha',new THREE.BufferAttribute(spAlpha,1));
 speckGeo.setAttribute('aFlow',new THREE.BufferAttribute(spFlow,3));
 const speckMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,
-  uniforms:{uSize:{value:P.speckSize}},
+  uniforms:{uSize:{value:P.speckSize},
+    uSpeckC:{value:new THREE.Color(1,1,1)},uSpeckB:{value:P.speckBright}},
   vertexShader:`
     attribute float alpha; attribute vec3 aFlow;
     uniform float uSize;
@@ -3223,6 +3316,7 @@ const gSpeckMat=new THREE.ShaderMaterial({
     uState:{value:null},
     uSize:{value:P.speckSize}, uQ:{value:P.current}, uGrade:{value:P.grade},
     uManN:{value:P.manningN},
+    uSpeckC:{value:new THREE.Color(1,1,1)}, uSpeckB:{value:P.speckBright},
     uTrail:{value:P.speckTrail}, uSpread:{value:P.speckSpread}, uLife:{value:P.speckTravel},
     uUseGrid:{value:0}, uFlow:{value:null},
     uUseGridV:{value:0}, uHt:{value:null}, uWave:{value:P.surfWave},
@@ -4626,6 +4720,7 @@ function afterSettingsChange(){
   waterMat.uniforms.uQ.value=P.current;
   waterMat.uniforms.uGrade.value=P.grade;
   speckMat.uniforms.uSize.value=P.speckSize;
+  updateWaterColour();
   rebuildBed();placeObstacles();
   lastGrade=P.grade;
   lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft, lastTaper=P.rodTaper, lastCell=P.gridCell, lastObst=P.obstHeight;
@@ -4640,7 +4735,12 @@ function copySettings(){
   } else copyState='in the URL bar — copy from there';
 }
 function runAction(key){
-  if(key==='!physical'){applyPreset(PHYSICAL);say('physical defaults loaded');}
+  if(key==='!waterlook'){
+    waterLook=(waterLook+1)%WATER_LOOKS.length;
+    const [name,vals]=WATER_LOOKS[waterLook];
+    applyPreset(vals); say(name);
+  }
+  else if(key==='!physical'){applyPreset(PHYSICAL);say('physical defaults loaded');}
   else if(key==='!classicrod'){applyPreset(CLASSIC);say('classic tackle loaded');}
   else if(key==='!save'){userDefault=Object.assign({},P);say('saved as your default');}
   else if(key==='!mydefault'){
@@ -5805,23 +5905,7 @@ renderer.setAnimationLoop(()=>{
      moves. The 1.35 keeps green exactly where the old single-scalar version
      had it at the default clarity, so a default river looks like it always did
      and everything new is a departure you asked for. */
-  {
-    const t=Math.max(0,Math.min(1,P.tint));
-    const lerp=(a,b,u)=>a+(b-a)*u, SRGB=THREE.SRGBColorSpace;
-    const k=1.35*1.60/Math.max(0.20,P.clarity);
-    waterMat.uniforms.uExt.value.set(
-      (2.10+(0.70-2.10)*t)*k, (1.00+(1.35-1.00)*t)*k, (0.80+(2.60-0.80)*t)*k);
-    waterMat.uniforms.uShal.value.setRGB(
-      lerp(0.325,0.561,t), lerp(0.537,0.486,t), lerp(0.478,0.290,t), SRGB);
-    waterMat.uniforms.uDeep.value.setRGB(
-      lerp(0.114,0.180,t), lerp(0.247,0.125,t), lerp(0.263,0.071,t), SRGB);
-    waterMat.uniforms.uSedC.value.setRGB(
-      lerp(0.663,0.722,t), lerp(0.753,0.635,t), lerp(0.733,0.475,t), SRGB);
-    waterMat.uniforms.uSed.value=P.sediment;
-    waterMat.uniforms.uSat.value=P.waterSat;
-    waterMat.uniforms.uClarity.value=P.clarity;
-    waterMat.uniforms.uOpaque.value=P.waterOpaque;
-  }
+  updateWaterColour();
   waterMat.uniforms.uManN.value=P.manningN;
   waterMat.uniforms.uCell.value=gdx;
   waterMat.uniforms.uGTexel.value.set(1/Math.max(2,GNX),1/Math.max(2,GNZ));

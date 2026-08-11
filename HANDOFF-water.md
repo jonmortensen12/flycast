@@ -128,38 +128,62 @@ plunging behind a lip. That gives the slow bottom seam and the plunge-pool
 recirculation a nymph actually rides. A true 3D solve buys detail you would
 never see through the surface at roughly twenty times the cost.
 
-**Colour.** Not blue. The anchors are `#53897a` shallow to `#1d3f43` deep — a
-desaturated green-teal — plus `#9ab9b0` mixed in with speed as fake aeration.
-Blue only enters through the sky reflection at the Fresnel term. Five settings
-under the COLOUR tab drive it:
+**Colour.** The control is the colour itself, and the physics is derived from
+it. You pick what deep water should be (`watHue` / `watSat` / `watLight`); the
+absorption spectrum is that colour's complement, floored so no channel is
+perfectly transparent and renormalised to a constant mean so `clarity` keeps
+meaning the same thing in metres wherever the hue goes. That is not a fudge —
+deep ocean is blue *because* water absorbs red, and a peat burn is amber
+because it absorbs blue. Appearance and physics cannot drift apart when one is
+computed from the other.
 
-- `clarity` (m) is the honest one. It sets the extinction coefficient, and the
-  same number drives opacity, because in real water absorption and visibility
-  are the same phenomenon.
-- `tint` picks *which channel* is absorbed fastest — red at 0 (glacial, spring,
-  reads blue-green), blue at 1 (peat and tannin, reads amber then brown). Green
-  extinction is ~1.0 in both spectra, so Clarity keeps meaning the same thing in
-  metres however far tint is pushed; only the ratio moves. Tint also rotates the
-  shallow and deep anchors so the hue stays coherent.
-- `sediment` scatters light back out instead of absorbing it, so unlike
-  everything else it makes deep water *brighter*. That is the difference
-  between a channel that goes dark and one that goes pale and milky.
-- `waterSat` is chroma of the column only; the sky reflection and the foam are
-  left alone on purpose, because grey water under a blue sky is a real winter
-  river and desaturating the reflection too just looks broken.
-- `waterOpaque` multiplies opacity without touching colour — the override for
-  when you want more or less bed than the physics allows.
+This replaced a single `tint` axis that lerped two hand-picked palettes AND two
+absorption spectra at once. Sweeping it walked diagonally through a colour
+space and produced hues nobody chose — cyan, then green, then red — and there
+was no route to a dark blue, a brown, or black.
+
+`sediment` scatters light back out instead of absorbing it, so unlike
+everything else it makes deep water *brighter*: the difference between a
+channel that goes dark and one that goes pale and milky. `waterOpaque`
+multiplies opacity without touching colour.
 
 Extinction is applied **per channel** (`vec3 T=exp(-uExt*d)`). A single scalar
-can only darken water as it deepens; three of them rotate its hue, which is why
-a river reads gravel-brown at your boots and green at your knees. Opacity is on
-the same law: it used to be `0.20+d*0.36`, linear with a floor that made a
+can only darken water as it deepens; three rotate its hue, which is why a river
+reads gravel-brown at your boots and green at your knees. Opacity is on the
+same law: it used to be `0.20+d*0.36`, linear with a floor that made a
 millimetre of water a fifth opaque and put a hard edge along every waterline.
 
-Measured at defaults: at 30 cm red transmits 47% against 65% for green and
-blue; at 1.2 m, 5% against 18%. At `tint 0.9` that ordering inverts. If a change
-ever makes all three channels transmit alike, the per-channel mix has been
-collapsed back to a scalar somewhere.
+`WATER_LOOKS` holds seven named settings behind the `!waterlook` action row.
+Regression check: `meanExt x clarity` must come out **identical for every look**
+(2.16 at present). If it doesn't, the renormalisation has been broken and
+Clarity has stopped being absolute.
+
+**Surface pattern advection.** Two things had to be fixed and they are
+independent.
+
+1. The offset must be applied **in metres before the UV scale**, or the pattern
+   does not travel at the speed you asked for. `sAlong*0.42/st - tsp*ph*1.5`
+   scaled the coordinate by `0.42/st` and the offset by a flat `1.5`, so the
+   pattern moved at `1.96*st` times the water speed — and `st` grows with
+   speed, so the error grew with the current.
+2. The crossfade rate must come from **each scale's own wavelength**. A flat
+   0.55 Hz for both put the two half-offset copies `tsp*0.909` metres apart:
+   about a quarter of a wavelength for the coarse scale, tolerable, and *more
+   than a full wavelength* for the fine one — total decorrelation. The fine
+   layer, which is the one carrying the detail you read the current off, was
+   blurred to mush at any real speed while the coarse layer moved correctly.
+
+Both are solved by working in **tiles, not seconds**: travel `TILE` (0.36)
+tiles per cycle, so the copies are always `TILE/2` of a tile apart at every
+scale, stretch and speed, and the UV velocity is `TILE*rate = tsp*uv`, which is
+the water speed by construction. If the surface ever looks like it is sliding
+at the wrong rate again, check that no constant has crept back in between the
+coordinate and its offset.
+
+**Speck colour** is `uSpeckC` / `uSpeckB`, shared by both speck materials and
+set from `speckHue`/`speckSat`/`speckBright` in `updateWaterColour()`. The tint
+multiplies the cool-white slick / warm-white crest base rather than replacing
+it, so saturation 0 is exactly the old look.
 
 **Cost.** `surfY` costs six smoothsteps and depends only on `x`; it is cached
 per column in `gsurf`, rebuilt with `gslope` whenever the window moves. It was
