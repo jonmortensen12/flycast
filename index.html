@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Flycast — v8 one line — build 2026-08-08t</title>
+<title>Flycast — v8 one line — build 2026-08-08u</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -98,7 +98,7 @@
 
 <div id="overlay">
   <div>
-    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08t</p>
+    <p class="eyebrow">Test rig 08 · spool to fly, one chain · build 2026-08-08u</p>
     <h1>Flycast<br><em>one line</em></h1>
   </div>
 
@@ -937,7 +937,26 @@ function gridBounds(){
 }
 /* velocity texture for the GPU specks */
 let gridTex=null, gridTexData=null, gridTexH=null, gridTexHData=null;
-const GRID_VSCALE=6.0;
+/* Velocity is packed into two bytes of the flow texture. It used to be a
+   linear map over plus or minus GRID_VSCALE/2 = 3.00 m/s, while the solver
+   clamps at 8 m/s — so every cell faster than 3 m/s saturated the byte and
+   read back as exactly 3.00. CPU specks index gu[] directly and never saw it;
+   GPU specks, the water surface and the bed all read the texture, which is
+   why they fell behind as soon as the current or the grade went up.
+
+   A signed square-root map fixes the clipping without giving up the low-speed
+   resolution a linear map over the full range would cost: 0.023 m/s a step at
+   a quarter of a metre per second, against 0.063 for linear, and it still
+   represents the solver's whole 8 m/s range. */
+const GRID_VSCALE=8.0;
+const encodeVel=v=>Math.max(0,Math.min(255,Math.round(
+  (0.5+0.5*Math.sign(v)*Math.sqrt(Math.min(Math.abs(v),GRID_VSCALE)/GRID_VSCALE))*255)));
+/* the matching decode, injected wherever a shader unpacks the flow texture */
+const GLSL_VDEC=`
+vec2 decodeVel(vec2 rg){
+  vec2 t=(rg-0.5)*2.0;
+  return sign(t)*t*t*${GRID_VSCALE.toFixed(1)};
+}`;
 function gridTexInit(){
   gridTexData=new Uint8Array(GNX*GNZ*4);
   gridTex=new THREE.DataTexture(gridTexData,GNX,GNZ,THREE.RGBAFormat);
@@ -957,8 +976,8 @@ function gridTexInit(){
 function gridTexUpdate(){
   if(!gridTex) return;
   for(let k=0,p=0;k<gu.length;k++,p+=4){
-    gridTexData[p]  =Math.max(0,Math.min(255,Math.round((gu[k]/GRID_VSCALE+0.5)*255)));
-    gridTexData[p+1]=Math.max(0,Math.min(255,Math.round((gv[k]/GRID_VSCALE+0.5)*255)));
+    gridTexData[p]  =encodeVel(gu[k]);
+    gridTexData[p+1]=encodeVel(gv[k]);
     gridTexData[p+2]=Math.max(0,Math.min(255,Math.round(gh[k]*80)));
     /* Alpha was unused. Fill it with |divergence| + |shear| of the solved
        field: foam then forms where the water genuinely tears itself apart —
@@ -1900,6 +1919,7 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
         `#include <common>
          uniform sampler2D uGravel,uSand,uSoil,uMacro,uRip,uBFlow;
          uniform sampler2D uGravelN,uSandN,uSoilN;
+         ${GLSL_VDEC}
          uniform float uBedT,uVary,uCaus,uBUse;
          uniform vec2 uBMin,uBSize;
          varying vec3 vBedW;`)
@@ -1943,7 +1963,7 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
            vec2 ftc=vec2((vBedW.x-uBMin.x)/uBSize.x,(vBedW.z-uBMin.y)/uBSize.y);
            if(ftc.x>0.004&&ftc.x<0.996&&ftc.y>0.004&&ftc.y<0.996){
              vec4 ft=texture2D(uBFlow,ftc);
-             spd=length((ft.rg-0.5)*${GRID_VSCALE.toFixed(1)});
+             spd=length(decodeVel(ft.rg));
              dep=ft.b*255.0/80.0;
            }
          }
@@ -2639,6 +2659,7 @@ const waterMat=new THREE.ShaderMaterial({
     uniform vec2 uGMin,uGSize,uGTexel;
     uniform sampler2D uFlow; uniform sampler2D uNorm; uniform sampler2D uHt;
     varying float vD,vS; varying vec3 vW;
+    ${GLSL_VDEC}
     void main(){
       float d=vD, sp=vS, turb=0.0;
       vec2 fdir=vec2(1.0,0.0);
@@ -2646,7 +2667,7 @@ const waterMat=new THREE.ShaderMaterial({
         vec2 tc=vec2((vW.x-uGMin.x)/uGSize.x,(vW.z-uGMin.y)/uGSize.y);
         if(tc.x>0.004&&tc.x<0.996&&tc.y>0.004&&tc.y<0.996){
           vec4 t=texture2D(uFlow,tc);
-          vec2 fv=(t.rg-0.5)*${GRID_VSCALE.toFixed(1)};
+          vec2 fv=decodeVel(t.rg);
           sp=length(fv); d=t.b*255.0/80.0; turb=t.a;
           if(sp>0.001) fdir=fv/sp;
         }
@@ -2690,7 +2711,9 @@ const waterMat=new THREE.ShaderMaterial({
          read a river at a glance. This is what should make the specks optional. */
       vec2 fperp=vec2(-fdir.y,fdir.x);
       float sAlong=dot(vW.xz,fdir), sAcross=dot(vW.xz,fperp);
-      float st=1.0+uStreak*min(sp,2.2)*1.30;
+      /* the streak stretch was capped at 2.2 m/s, which meant fast water
+         stopped looking any faster than moderate water */
+      float st=1.0+uStreak*min(sp,4.5)*1.10;
       /* FLOW-MAP ADVECTION. Scrolling a texture at a constant rate cannot show
          a varying velocity field: the pattern shears without bound and ends up
          indicating nothing. Instead carry it in two half-cycle-offset phases
@@ -2716,7 +2739,7 @@ const waterMat=new THREE.ShaderMaterial({
       vec2 nB=mix(texture2D(uNorm,fB1).xy,texture2D(uNorm,fB2).xy,qblend)*2.0-1.0;
       /* chop grows with speed; an upwelling flattens it right out */
       float calm=1.0-clamp(boil,0.0,1.0)*0.80*uBoil;
-      vec2 nxz=(nA+nB*0.55)*uDetail*(0.16+sp*0.42)*calm;
+      vec2 nxz=(nA+nB*0.55)*uDetail*(0.16+min(sp,4.5)*0.42)*calm;
       /* the solved surface slope goes in alongside the ripple, so a standing
          wave is lit as a standing wave rather than as flat water */
       vec3 N=normalize(vec3(nxz.x-slx*uWaveN*2.6,1.0,nxz.y-slz*uWaveN*2.6));
@@ -2823,6 +2846,7 @@ specks.frustumCulled=false;specks.renderOrder=2;scene.add(specks);
    cannot drift out of step with computeFlow(). --------------------------------*/
 const GSPECK=20000;
 const GLSL_FLOW=`
+${GLSL_VDEC}
 ${OBST.map((o,i)=>`const vec4 OB${i}=vec4(${o.x.toFixed(2)},${o.z.toFixed(2)},${o.r.toFixed(3)},${o.kind==='log'?'1.0':'0.0'});`).join('\n')}
 float depthAt(vec2 p){
   float u=(p.y-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
@@ -2846,7 +2870,7 @@ vec2 flowAt(vec2 p){
     vec2 tc=vec2((p.x-uGMin.x)/uGSize.x,(p.y-uGMin.y)/uGSize.y);
     if(tc.x>0.004&&tc.x<0.996&&tc.y>0.004&&tc.y<0.996){
       vec4 t=texture2D(uFlow,tc);
-      return (t.rg-0.5)*${GRID_VSCALE.toFixed(1)};
+      return decodeVel(t.rg);
     }
   }
   float u=(p.y-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
