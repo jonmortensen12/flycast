@@ -219,6 +219,31 @@ backtick in prose ends the string and truncates the shader mid-function. Both
 are invisible in a diff and neither is a JS error, so the smoke harness passes
 straight through them.
 
+**Ripples from specks** (`ripple`) is the surface detail that is actually
+caused by the river. The specks are drawn a second time, top down, into a
+512x512 half-float world-space map that follows the angler; each splats the
+GRADIENT of a Gabor wavelet — a gaussian envelope times a wave, which is what a
+small ripple is: a crest with a trough either side, not a bump — and the water
+shader adds that map straight into its surface normal with one fetch.
+
+Why gradient and not height: a height map would cost the water shader four taps
+and a difference to recover the same thing. Why additive blending: overlapping
+wavelets sum into a continuous field, which is the difference between water and
+a scatter of discrete blobs. If the surface looks blobby, there are too few
+specks for `rippleScale` — raise the budget or shrink the wavelet.
+
+The map is snapped to whole texels as it follows you, or walking upstream
+shimmers it. Its state pass runs whenever the map is wanted even if the specks
+are invisible — that is the whole point of being able to set Speck brightness
+to zero and still read the water — and `ripStep` opens the draw range to every
+speck, so the visible draw range must be set *after* it in the frame loop.
+
+This replaced the approach of trying to make a scrolled noise texture imitate
+the flow. That could be given the right direction and speed but its *shapes*
+were whatever the noise contained; they were not caused by the river, so they
+never belonged to it, and no amount of tuning was going to fix that because the
+information was not in the texture.
+
 **Standing waves** (`standWave`) are the one surface cue a scrolled normal map
 cannot produce. Everything else on the surface is a texture dragged downstream,
 so its *shapes* are whatever the noise contains — it can follow direction and

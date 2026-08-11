@@ -183,6 +183,7 @@ const THREE={
     render(){this._rendered=(this._rendered||0)+1;}
     setRenderTarget(t){this._rt=t;}getRenderTarget(){return this._rt;}
     getContext(){return {};}compile(){}dispose(){}setClearColor(){}
+    getClearAlpha(){return 1;}clear(){this._clears=(this._clears||0)+1;}
   },
   SRGBColorSpace:'srgb',LinearSRGBColorSpace:'lsrgb',ACESFilmicToneMapping:1,
   RGBAFormat:1023,RedFormat:1,RGFormat:2,UnsignedByteType:1009,FloatType:1015,HalfFloatType:1016,
@@ -447,4 +448,32 @@ const sw=vm.runInContext(`(()=>{
   return rows;
 })()`,sandbox);
 console.table(sw);
+
+/* the ripple map: does the pass run, follow the camera, snap to texels, and
+   leave the visible draw range alone? */
+const rip=vm.runInContext(`(()=>{
+  P.ripple=1.0; P.specks=0.5; P.speckGPU=1;
+  const loop=renderer._loop; loop();
+  const a={min:[ripUni.uMin.value.x,ripUni.uMin.value.y],
+           size:ripUni.uSize.value.x,
+           drawAfter:gSpeckGeo.drawRange.count,
+           bound:waterMat.uniforms.uRipple.value!==null,
+           amt:waterMat.uniforms.uRipAmt.value};
+  /* walk downstream and confirm the map follows and stays texel-snapped */
+  camera.position.x+=7.3; loop();   /* _camW is refreshed from the camera each frame */
+  const tex=P.rippleSpan/512;
+  const snapped=Math.abs(ripUni.uMin.value.x/tex-Math.round(ripUni.uMin.value.x/tex))<1e-3;
+  const moved=Math.abs(ripUni.uMin.value.x-a.min[0])>1.0;
+  /* specks hidden entirely: the map must still be produced */
+  P.specks=0.0; P.speckBright=0.0; loop();
+  const stillOn=waterMat.uniforms.uRipAmt.value>0.5;
+  /* and off when the setting is off */
+  P.ripple=0.0; loop();
+  const off=waterMat.uniforms.uRipAmt.value===0;
+  P.ripple=1.0; P.specks=0.5; P.speckBright=1.0;
+  return {mapBound:a.bound, ripAmt:a.amt, visibleDrawRange:a.drawAfter,
+          followsCamera:moved, texelSnapped:snapped,
+          worksWithSpecksHidden:stillOn, offWhenZero:off};
+})()`,sandbox);
+console.log('ripple map',rip);
 console.log('OK');
