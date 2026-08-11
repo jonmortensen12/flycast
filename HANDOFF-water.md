@@ -128,19 +128,39 @@ plunging behind a lip. That gives the slow bottom seam and the plunge-pool
 recirculation a nymph actually rides. A true 3D solve buys detail you would
 never see through the surface at roughly twenty times the cost.
 
-**Colour.** The control is the colour itself, and the physics is derived from
-it. You pick what deep water should be (`watHue` / `watSat` / `watLight`); the
-absorption spectrum is that colour's complement, floored so no channel is
-perfectly transparent and renormalised to a constant mean so `clarity` keeps
-meaning the same thing in metres wherever the hue goes. That is not a fudge —
-deep ocean is blue *because* water absorbs red, and a peat burn is amber
-because it absorbs blue. Appearance and physics cannot drift apart when one is
-computed from the other.
+**Colour.** The controls are the RGB channels of deep water (`watR`/`watG`/
+`watB`) and the physics is derived from them. The absorption spectrum is that
+colour's complement, floored so no channel is perfectly transparent and
+renormalised to a constant mean so `clarity` keeps meaning the same thing in
+metres wherever the colour goes. That is not a fudge — deep ocean is blue
+*because* water absorbs red, and a peat burn is amber because it absorbs blue.
+Appearance and physics cannot drift apart when one is computed from the other.
 
-This replaced a single `tint` axis that lerped two hand-picked palettes AND two
-absorption spectra at once. Sweeping it walked diagonally through a colour
-space and produced hues nobody chose — cyan, then green, then red — and there
-was no route to a dark blue, a brown, or black.
+Shallow water, the aeration tint and the sediment tint are all the same colour
+lifted toward white by different amounts (0.42, 0.72, 0.58), not independent
+colours. Thin water carries less of everything including its own colour, and
+deriving them means they cannot end up fighting each other.
+
+This went through an HSV version first, which was worse: hue/saturation/
+lightness cannot reach an arbitrary colour without the user reasoning about a
+colour space, and there was no obvious route to "dark blue" or "black". Before
+that it was a single `tint` axis lerping two hand-picked palettes AND two
+spectra at once, which swept diagonally through colour space and produced hues
+nobody chose.
+
+**A renamed setting once left a dead uniform behind and cost a whole round of
+debugging.** `waterSat` became `watSat`, but a `uSat:{value:P.waterSat}` line
+survived; the key no longer existed, so it uploaded `undefined` as 0 and forced
+the water to full greyscale every frame. Hue and saturation were computed
+correctly and flattened one line later. **When renaming anything in `P`, grep
+for the old key across the whole file, uniforms included.**
+
+**Foam** has its own RGB (`foamR`/`foamG`/`foamB`), a brightness and a stain.
+`foamBright` scales the *coverage* rather than the colour, so at 0 the foam
+pattern still roughens the surface and still drives opacity — the water goes
+flat and opaque where it churns without being painted white. `foamDirt` mixes
+the foam toward a lifted version of the water colour, so a tannic river gets
+tea-coloured foam automatically instead of needing to be set twice.
 
 `sediment` scatters light back out instead of absorbing it, so unlike
 everything else it makes deep water *brighter*: the difference between a
@@ -187,9 +207,15 @@ whole cycle out of step. The pattern stops being a continuous field being
 carried along and becomes noise that differs per pixel. This has been tried and
 reverted once; don't try it again.
 
-**Speck budget.** 25600 specks, three vertices each. There is no fixed ceiling
-— it is `GS_W`, and raising it costs one more row and column of the update pass
-plus three more points. What made the last doubling free was removing waste
+**Speck budget.** `speckBudget` is the side of the square state texture, so the
+count is its square: 160 -> 25600, 256 -> 65536, 512 -> 262144. `gSpeckResize()`
+reallocates the render targets and rebuilds the point geometry together — they
+are both sized from `GS_W` and must never disagree. Two rules it enforces and
+that any rewrite must keep: **dispose the old render targets** (otherwise every
+change leaks a pair of float targets until the context dies), and **guard on an
+actual change of `GS_W`**, because it is reached from `afterSettingsChange()`,
+which fires on every slider tick — reallocating 60 times as a thumb slides is
+how you destroy the frame rate the setting exists to protect. What made the last doubling free was removing waste
 from the draw, not spending more: `fieldAt()` returns velocity *and* depth from
 one texel instead of `flowAt()` and `depthHere()` fetching the same texel
 twice, and trail vertices take one RK2 back-step instead of four. Vertex

@@ -408,4 +408,27 @@ const budget=vm.runInContext(`(()=>{
     drawRange:gSpeckGeo.drawRange};
 })()`,sandbox);
 console.log('speck draw budget',budget);
+
+/* the budget is a setting now: change it, tick, confirm everything resized
+   together and that a no-op change does NOT reallocate */
+const rt=vm.runInContext(`(()=>{
+  const rows=[]; let allocs=0;
+  const realDispose=gsRT[0].dispose;
+  const probe=(label)=>rows.push({step:label, GS_W, GSPECK,
+    rtW:gsRT[0].width, refCount:gSpeckGeo.attributes.aRef.count,
+    drawCount:gSpeckGeo.drawRange.count,
+    consistent:(GSPECK===GS_W*GS_W)&&(gsRT[0].width===GS_W)
+               &&(gSpeckGeo.attributes.aRef.count===GSPECK*3)});
+  probe('start');
+  P.speckBudget=256; afterSettingsChange(); renderer._loop(); probe('budget 256');
+  const before=gsRT[0];
+  P.speckBudget=256; afterSettingsChange(); probe('same value again');
+  const noRealloc=(gsRT[0]===before);
+  P.speckBudget=48;  afterSettingsChange(); renderer._loop(); probe('budget 48');
+  P.speckBudget=512; afterSettingsChange(); renderer._loop(); probe('budget 512');
+  P.speckBudget=160; afterSettingsChange(); renderer._loop(); probe('back to 160');
+  return {rows, noReallocOnSameValue:noRealloc};
+})()`,sandbox);
+console.table(rt.rows);
+console.log('no realloc when value unchanged:',rt.noReallocOnSameValue);
 console.log('OK');

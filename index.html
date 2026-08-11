@@ -172,8 +172,10 @@ const P = {
   foamLife:6.00, boil:1.00, streak:1.00, caustics:1.00, bedVary:1.00,
   waveShade:1.00, froth:1.00, drift:1.00,
   clarity:1.60, waterOpaque:1.00, sediment:0.10,
-  watHue:0.47, watSat:0.42, watLight:0.26,
-  speckHue:0.50, speckSat:0.10, speckBright:1.00,
+  watR:0.114, watG:0.247, watB:0.263,
+  speckR:1.000, speckG:1.000, speckB:1.000, speckBright:1.00,
+  foamR:0.933, foamG:0.957, foamB:0.945, foamBright:1.00, foamDirt:0.00,
+  speckBudget:160,
   riseAggro:0.35, wetShine:1.00, fishDetail:1.00,
   showZones:1, showMarkers:1,
   takeRadius:0.70, maxSlip:0.32, latTol:1.20, upMax:6.00,
@@ -257,6 +259,7 @@ const MENU=[
   ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: 25600 specks living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
   ['Speck life s','speckTravel',2.00,20.0,0.50,'How long a speck lives before it fades out and is reborn upstream. Longer specks trace the whole run of the river past you; shorter ones read as local flow direction. Specks seeded around you live about a third as long as ones drifting down from upstream.'],
   ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter crests behind it, spaced by however far the water actually carried it in this many seconds — so the spacing IS the speed, and the three together read as a short wave train. Zero collapses them onto the head.'],
+  ['GPU speck budget','speckBudget',48,512,16,'The side of the square texture the GPU specks live in, so the count is this number squared: 160 is 25600, 256 is 65536, 512 is 262144. Changing it reallocates the state textures and the point geometry, which takes a moment and restarts every speck, so the field fades back in rather than snapping. Cost is close to linear in the count and the limiting factor is fill rate rather than simulation, so if raising this costs you frames, drop Speck size first — size drives fill quadratically and the count only linearly. Has no effect on the CPU path, which is fixed at 4000.'],
   ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 25600 on the GPU path. The CPU number is a real ceiling — each of those costs a flow evaluation in JavaScript — but the GPU number is just where the budget was set, so say if you want it higher.'],
   ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck. Size also scales with Froude number on top of this, so riffles stand up and pool slicks stay fine — this sets the baseline.'],
   ['Speck range','speckRange',6.00,45.0,1.00,'How far upstream and downstream specks are kept, in metres. A shorter range packs the same count into less river, so you can read the flow with far fewer of them.'],
@@ -285,15 +288,21 @@ const MENU=[
   ['Wet shine','wetShine',0.00,3.00,0.05,'How much glossier a trout goes the instant it clears the water. A wet fish out of the river is close to a mirror; this is what sells a jump and a landed fish in the hand.'],
   ['— COLOUR —',null,0,0,0,''],
   ['Water looks','!waterlook',0,0,0,'Push right to step through named water: mountain freestone, tannic, glacial melt, chalk stream, overcast steel, and ink. Each one sets hue, saturation, lightness, clarity and sediment together, which is the quickest way to find the neighbourhood you want before tuning it by hand.'],
-  ['Water hue','watHue',0.00,1.00,0.01,'Hue of the water itself, all the way round the wheel: 0 red, 0.33 green, 0.50 cyan, 0.62 blue, 0.92 magenta. This is the colour DEEP water tends toward, and the absorption spectrum is derived from it rather than set separately — the channels you did not pick are the channels that get absorbed, which is the actual physics and the reason the two can no longer disagree with each other. Shallow water is the same hue, paler.'],
-  ['Water saturation','watSat',0.00,1.00,0.02,'How much colour. At 0 the water is neutral grey and still reflects a blue sky through the Fresnel term, which is exactly what an overcast winter river looks like. The sky reflection and the foam are deliberately left alone.'],
-  ['Water lightness','watLight',0.00,1.00,0.02,'How bright the deep water is. Low is where you get a dark channel, a deep blue-black pool, or with saturation at zero, water that simply goes to black. High reads as a bright shallow flat even where it is not.'],
+  ['Water red','watR',0.00,1.00,0.01,'Red channel of DEEP water, 0 to 1. These three are the colour itself, so any colour you can name is reachable: all three low is black, all three equal is grey, 0.11/0.25/0.26 is the default green-teal. The absorption spectrum is derived from whatever you set here rather than being a separate control — the channels you did NOT pick are the channels the water absorbs, which is both the real physics and the reason the look and the depth behaviour can no longer disagree. Shallow water is the same colour, paler.'],
+  ['Water green','watG',0.00,1.00,0.01,'Green channel of deep water. Green is the channel real water absorbs least, so this one has the most say in how far you can see before the colour takes over.'],
+  ['Water blue','watB',0.00,1.00,0.01,'Blue channel of deep water. Raise this with red and green low for a deep blue pool; drop it with red up for tannin and peat.'],
   ['Clarity m','clarity',0.20,6.00,0.10,'How deep you can see. One number doing two jobs, because in real water they are the same job: it sets how fast light is absorbed, which is both why deep water goes opaque and why it saturates toward the hue on the way. Low is a spring melt or a silty tailwater; high is a limestone spring creek where you can count the gravel at four feet.'],
   ['Sediment','sediment',0.00,1.00,0.02,'Suspended solids scattering light BACK out of the column rather than absorbing it. This is the difference between deep water that goes dark and deep water that goes pale and milky — glacial flour, a rising river, spring runoff. It brightens with depth, which absorption never does, and it flattens the contrast between the channel and the bar.'],
   ['Water opacity','waterOpaque',0.00,1.50,0.05,'Multiplies the depth-driven opacity without touching the colour. Clarity is the honest control; this is the override for when you want to see more of the bed than the water really allows, or less. At 0 only the surface reflection and the foam are drawn.'],
-  ['Speck hue','speckHue',0.00,1.00,0.01,'Hue of the specks, round the same wheel. They default near-white with a faint cool cast, which is what wind-ruffled water and a broken crest actually are; push the saturation up first or this will do nothing visible.'],
-  ['Speck saturation','speckSat',0.00,1.00,0.02,'How much colour the specks carry. Zero is white. This is worth raising well above anything realistic while you are tuning the flow, because coloured specks against green water are far easier to follow than white ones.'],
+  ['Speck red','speckR',0.00,1.00,0.01,'Red channel of the specks. All three at 1 is the natural near-white; drop two of them and the specks become a tracer colour of your choosing, which is worth doing while tuning the flow even though no river looks like that.'],
+  ['Speck green','speckG',0.00,1.00,0.01,'Green channel of the specks.'],
+  ['Speck blue','speckB',0.00,1.00,0.01,'Blue channel of the specks.'],
   ['Speck brightness','speckBright',0.00,2.00,0.05,'Overall brightness of the specks, on top of the fade with age and depth. Turn it down to let the surface texture do the reading and keep the specks as a faint confirmation, or up to make them the primary cue.'],
+  ['Foam red','foamR',0.00,1.00,0.01,'Red channel of the foam. Real foam is never pure white — it is off-white with whatever the river is carrying in it, so the default sits just under 1 on all three.'],
+  ['Foam green','foamG',0.00,1.00,0.01,'Green channel of the foam.'],
+  ['Foam blue','foamB',0.00,1.00,0.01,'Blue channel of the foam. Dropping this alone is the quickest route to the cream-coloured foam of a tannic river.'],
+  ['Foam brightness','foamBright',0.00,2.00,0.05,'How strongly foam covers the water under it. At 0 the foam pattern still drives the surface roughness and the opacity, so the water still goes flat and opaque where it churns — it just is not painted white. Above 1 it covers completely and reads as heavier aeration.'],
+  ['Foam stain','foamDirt',0.00,1.00,0.02,'How much of the water colour bleeds into the foam. Real foam picks up what the river carries: on a tannic river it is tea-coloured, on a glacial one it is grey. At 0 the foam is exactly the colour you set above regardless of the water; at 1 it is strongly stained by it, so changing the water colour drags the foam along with it automatically.'],
   ['— FISH —',null,0,0,0,''],
   ['Show zones','showZones',0,1,1,'Draw the take radius ring and feeding lane for each fish.'],
   ['Show markers','showMarkers',0,1,1,'Draw the post above each fish. Green means feeding.'],
@@ -2689,7 +2698,7 @@ const waterMat=new THREE.ShaderMaterial({
     uWaveN:{value:P.waveShade},uFroth:{value:P.froth},uDrift:{value:P.drift},
     uGTexel:{value:new THREE.Vector2(1/64,1/64)},uCell:{value:0.45},
     uDetail:{value:P.waterDetail},uFoamK:{value:P.foam},uGlint:{value:P.skyGlint},
-    uFoamC:{value:new THREE.Color(0xeef4f1)},
+    uFoamC:{value:new THREE.Color(0xeef4f1)},uFoamB:{value:P.foamBright},
     uSkyLo:{value:SKY_LO},uSkyHi:{value:SKY_HI},uSun:{value:SUN_DIR},
     uFogC:{value:FOGC},uFogD:{value:0.0070*P.fogAmt},
     uGMin:{value:new THREE.Vector2(GX0,GZ0)},
@@ -2730,7 +2739,7 @@ const waterMat=new THREE.ShaderMaterial({
   fragmentShader:`
     uniform vec3 uDeep,uShal,uFast,uFoamC,uSkyLo,uSkyHi,uSun,uFogC;
     uniform float uUseGrid,uTime,uDetail,uFoamK,uGlint,uFogD,uStreak,uBoil;
-    uniform float uWaveN,uFroth,uCell,uDrift,uSed,uClarity,uOpaque;
+    uniform float uWaveN,uFroth,uCell,uDrift,uSed,uClarity,uOpaque,uFoamB;
     uniform vec3 uExt,uSedC;
     uniform vec2 uGMin,uGSize,uGTexel;
     uniform sampler2D uFlow; uniform sampler2D uNorm; uniform sampler2D uHt;
@@ -2898,7 +2907,7 @@ const waterMat=new THREE.ShaderMaterial({
       c*=1.0-clamp(-boil,0.0,1.0)*0.10*uBoil;
       /* shear seams draw a faint line down the join between two speeds */
       c*=1.0-clamp(seam,0.0,1.0)*0.13;
-      c=mix(c,uFoamC,foam*0.85);
+      c=mix(c,uFoamC,clamp(foam*0.85*uFoamB,0.0,1.0));
 
       /* depth fade: thin water goes transparent so the bed reads through it,
          and a glancing view goes opaque because that is when reflection wins */
@@ -2938,17 +2947,10 @@ const waterMat=new THREE.ShaderMaterial({
 
    Absorption is renormalised to a constant mean, so Clarity keeps meaning the
    same thing in metres wherever you put the hue. -------------------------- */
-function hsv2rgb(h,s,v){
-  h=(h%1+1)%1*6; const i=Math.floor(h), f=h-i;
-  const p=v*(1-s), q=v*(1-s*f), t=v*(1-s*(1-f));
-  switch(i%6){
-    case 0: return [v,t,p]; case 1: return [q,v,p]; case 2: return [p,v,t];
-    case 3: return [p,q,v]; case 4: return [t,p,v]; default: return [v,p,q];
-  }
-}
+const cl01=v=>v<0?0:v>1?1:v;
 function updateWaterColour(){
   const SRGB=THREE.SRGBColorSpace;
-  const C=hsv2rgb(P.watHue,P.watSat,Math.max(0.02,P.watLight));
+  const C=[cl01(P.watR),cl01(P.watG),cl01(P.watB)];
   const mx=Math.max(C[0],C[1],C[2],1e-4);
   /* complement of the picked colour, floored so no channel is perfectly
      transparent, then renormalised so the mean is 1 and Clarity is absolute */
@@ -2957,35 +2959,41 @@ function updateWaterColour(){
   const k=1.35*1.60/Math.max(0.20,P.clarity)/Math.max(mean,1e-3);
   waterMat.uniforms.uExt.value.set(m[0]*k,m[1]*k,m[2]*k);
   waterMat.uniforms.uDeep.value.setRGB(C[0],C[1],C[2],SRGB);
-  /* shallow is the same hue, paler and less saturated — thin water carries
-     less of everything, including its own colour */
-  const S=hsv2rgb(P.watHue,P.watSat*0.55,Math.min(1,Math.max(0.02,P.watLight)*2.05));
+  /* Shallow, aeration and sediment are all the SAME colour lifted toward
+     white by different amounts, rather than three independent colours. Thin
+     water carries less of everything, including its own colour, so it moves
+     toward white without changing which colour it is — and because they are
+     all derived from one pick, they cannot end up fighting each other, which
+     is what a set of separate colour controls would eventually do. */
+  const lift=(f)=>C.map(v=>v+(1-v)*f);
+  const S=lift(0.42), F=lift(0.72), D=lift(0.58);
   waterMat.uniforms.uShal.value.setRGB(S[0],S[1],S[2],SRGB);
-  /* aeration and suspended solids are near-neutral, but keep a trace of the
-     water's own hue or pale water reads as a grey film laid over the river */
-  const F=hsv2rgb(P.watHue,P.watSat*0.22,Math.min(1,Math.max(0.02,P.watLight)*2.9));
   waterMat.uniforms.uFast.value.setRGB(F[0],F[1],F[2],SRGB);
-  const D=hsv2rgb(P.watHue,P.watSat*0.30,Math.min(1,0.55+P.watLight*0.6));
   waterMat.uniforms.uSedC.value.setRGB(D[0],D[1],D[2],SRGB);
   waterMat.uniforms.uSed.value=P.sediment;
   waterMat.uniforms.uClarity.value=P.clarity;
   waterMat.uniforms.uOpaque.value=P.waterOpaque;
+  /* foam, stained by the water it is floating in */
+  const st=cl01(P.foamDirt);
+  const FM=[cl01(P.foamR),cl01(P.foamG),cl01(P.foamB)]
+    .map((v,i)=>v*(1-st)+v*(C[i]+(1-C[i])*0.45)*st);
+  waterMat.uniforms.uFoamC.value.setRGB(FM[0],FM[1],FM[2],SRGB);
+  waterMat.uniforms.uFoamB.value=P.foamBright;
   /* specks */
-  const K=hsv2rgb(P.speckHue,P.speckSat,1.0);
   for(const m2 of [speckMat,gSpeckMat]){
-    m2.uniforms.uSpeckC.value.setRGB(K[0],K[1],K[2],SRGB);
+    m2.uniforms.uSpeckC.value.setRGB(cl01(P.speckR),cl01(P.speckG),cl01(P.speckB),SRGB);
     m2.uniforms.uSpeckB.value=P.speckBright;
   }
 }
 /* named water, because six numbers is a lot to guess at from a standing start */
 const WATER_LOOKS=[
-  ['mountain freestone',{watHue:0.47,watSat:0.42,watLight:0.26,clarity:1.60,sediment:0.10,waterOpaque:1.00}],
-  ['tannic',            {watHue:0.09,watSat:0.62,watLight:0.20,clarity:0.85,sediment:0.06,waterOpaque:1.00}],
-  ['glacial melt',      {watHue:0.50,watSat:0.55,watLight:0.52,clarity:0.70,sediment:0.85,waterOpaque:1.10}],
-  ['chalk stream',      {watHue:0.42,watSat:0.30,watLight:0.38,clarity:4.20,sediment:0.05,waterOpaque:0.85}],
-  ['overcast steel',    {watHue:0.58,watSat:0.10,watLight:0.24,clarity:1.30,sediment:0.14,waterOpaque:1.05}],
-  ['deep blue',         {watHue:0.61,watSat:0.70,watLight:0.16,clarity:2.40,sediment:0.02,waterOpaque:1.00}],
-  ['ink',               {watHue:0.60,watSat:0.25,watLight:0.03,clarity:1.10,sediment:0.00,waterOpaque:1.25}],
+  ['mountain freestone',{watR:0.114,watG:0.247,watB:0.263,clarity:1.60,sediment:0.10,waterOpaque:1.00,foamR:0.933,foamG:0.957,foamB:0.945,foamDirt:0.00}],
+  ['tannic',            {watR:0.235,watG:0.110,watB:0.035,clarity:0.85,sediment:0.06,waterOpaque:1.00,foamR:0.902,foamG:0.831,foamB:0.686,foamDirt:0.45}],
+  ['glacial melt',      {watR:0.310,watG:0.510,watB:0.530,clarity:0.70,sediment:0.85,waterOpaque:1.10,foamR:0.949,foamG:0.965,foamB:0.969,foamDirt:0.20}],
+  ['chalk stream',      {watR:0.180,watG:0.380,watB:0.310,clarity:4.20,sediment:0.05,waterOpaque:0.85,foamR:0.945,foamG:0.961,foamB:0.941,foamDirt:0.10}],
+  ['overcast steel',    {watR:0.200,watG:0.228,watB:0.245,clarity:1.30,sediment:0.14,waterOpaque:1.05,foamR:0.914,foamG:0.925,foamB:0.933,foamDirt:0.25}],
+  ['deep blue',         {watR:0.035,watG:0.090,watB:0.290,clarity:2.40,sediment:0.02,waterOpaque:1.00,foamR:0.925,foamG:0.945,foamB:0.973,foamDirt:0.15}],
+  ['ink',               {watR:0.020,watG:0.026,watB:0.032,clarity:1.10,sediment:0.00,waterOpaque:1.25,foamR:0.800,foamG:0.812,foamB:0.824,foamDirt:0.30}],
 ];
 let waterLook=0;
 
@@ -3120,7 +3128,7 @@ specks.frustumCulled=false;specks.renderOrder=2;scene.add(specks);
    and depth instead of two, and one back-integration step per trail vertex
    instead of four. The draw is cheaper per vertex than it was at half the
    count. `Speck density` still trims from here if you want fewer. */
-const GS_W=160, GSPECK=GS_W*GS_W;
+let GS_W=Math.max(16,Math.round(P.speckBudget)), GSPECK=GS_W*GS_W;
 const GLSL_FLOW=`
 ${GLSL_VDEC}
 ${OBST.map((o,i)=>`const vec4 OB${i}=vec4(${o.x.toFixed(2)},${o.z.toFixed(2)},${o.r.toFixed(3)},${o.kind==='log'?'1.0':'0.0'});`).join('\n')}
@@ -3283,13 +3291,23 @@ const gsMat=new THREE.ShaderMaterial({
 const gsScene=new THREE.Scene();
 const gsCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
 gsScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),gsMat));
-if(gsOK){
+/* Allocation is in a function because the budget is a setting now. Both the
+   state textures and the point geometry are sized from GS_W, so they have to be
+   rebuilt together — and the old ones disposed, or every change leaks a pair of
+   float render targets and a vertex buffer until the context dies. */
+function gsAlloc(){
+  if(!gsOK) return;
   const opt={type:THREE.FloatType,format:THREE.RGBAFormat,
     minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter,
     depthBuffer:false,stencilBuffer:false,generateMipmaps:false};
+  if(gsRT){ gsRT[0].dispose(); gsRT[1].dispose(); }
   gsRT=[new THREE.WebGLRenderTarget(GS_W,GS_W,opt),
         new THREE.WebGLRenderTarget(GS_W,GS_W,opt)];
+  gsPing=0;
+  /* two frames of reset: the first pass has no valid previous state to read */
+  gsReset=2;
 }
+gsAlloc();
 /* XR has to be switched off around an offscreen pass or Three substitutes the
    stereo array camera and the quad is drawn once per eye — which would advect
    the field twice on every frame you were in the headset and once on the
@@ -3329,10 +3347,10 @@ function gsStep(dt){
 }
 
 const gSpeckGeo=new THREE.BufferGeometry();
-{
-  /* three vertices per speck: the head, and two ghosts of where it was a
-     moment ago. Laid out head-then-trails so that trimming the draw range for
-     the density slider drops whole specks rather than beheading them. */
+/* three vertices per speck: the head, and two ghosts of where it was a moment
+   ago. Laid out head-then-trails so that trimming the draw range for the
+   density slider drops whole specks rather than beheading them. */
+function gSpeckBuild(){
   const N=GSPECK*3;
   const ref=new Float32Array(N*2), vert=new Float32Array(N);
   for(let i=0;i<GSPECK;i++){
@@ -3346,6 +3364,19 @@ const gSpeckGeo=new THREE.BufferGeometry();
   gSpeckGeo.setAttribute('aRef',new THREE.BufferAttribute(ref,2));
   gSpeckGeo.setAttribute('aVert',new THREE.BufferAttribute(vert,1));
   gSpeckGeo.boundingSphere=new THREE.Sphere(new THREE.Vector3(),500);
+}
+gSpeckBuild();
+/* Rebuild on demand. Guarded on an actual change of GS_W, because this is
+   reached from afterSettingsChange(), which fires on every slider tick — and
+   reallocating a pair of float targets 60 times as a thumb slides across the
+   track is how you drop the frame rate the setting exists to protect. */
+function gSpeckResize(){
+  const w=Math.max(16,Math.min(1024,Math.round(P.speckBudget)));
+  if(w===GS_W) return;
+  GS_W=w; GSPECK=GS_W*GS_W;
+  gsAlloc();
+  gSpeckBuild();
+  gSpeckGeo.setDrawRange(0,Math.floor(GSPECK*Math.max(0,Math.min(1,P.specks)))*3);
 }
 const gSpeckMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,
@@ -4760,6 +4791,7 @@ function afterSettingsChange(){
   waterMat.uniforms.uQ.value=P.current;
   waterMat.uniforms.uGrade.value=P.grade;
   speckMat.uniforms.uSize.value=P.speckSize;
+  gSpeckResize();
   updateWaterColour();
   rebuildBed();placeObstacles();
   lastGrade=P.grade;
