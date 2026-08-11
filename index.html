@@ -251,10 +251,10 @@ const MENU=[
   ['Manning n','manningN',0.015,0.120,0.005,'Bed roughness. Gravel trout streams run about 0.035-0.06. This is what sets the actual current speed, together with slope and depth — deeper water runs faster for the same slope, and riffles are fast because they are steep, not because they are shallow.'],
   ['Current','current',0.10,1.40,0.05,'Master flow multiplier. On the grid model it scales the driving slope; on the analytic model it is discharge per unit width.'],
   ['River grade','grade',0.00,2.50,0.10,'Steepness of the reach and the size of the drops between pools. Rebuilds the bed live.'],
-  ['GPU specks','speckGPU',0,1,1,'0 runs the original CPU specks — real particles carried by the flow, capped at 4000 because each one costs a flow evaluation in JavaScript. 1 moves the whole thing into a shader: each speck re-integrates its own short streamline every frame, up to 20000 of them, for no CPU cost at all. Toggle freely; nothing else changes.'],
-  ['Speck travel s','speckTravel',2.00,20.0,0.50,'GPU specks only. How many seconds of drift each speck traces before fading out and starting again. Longer reads as transport down the river; shorter reads as local flow direction.'],
+  ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: 12544 specks living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
+  ['Speck life s','speckTravel',2.00,20.0,0.50,'How long a speck lives before it fades out and is reborn upstream. Longer specks trace the whole run of the river past you; shorter ones read as local flow direction. Specks seeded around you live about a third as long as ones drifting down from upstream.'],
   ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter dots showing where it was a moment ago, which makes direction and speed readable at a glance. This is the gap between them in seconds. Zero collapses them onto the head.'],
-  ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 20000 on the GPU path.'],
+  ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 12544 on the GPU path.'],
   ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck.'],
   ['Speck range','speckRange',6.00,45.0,1.00,'How far upstream and downstream specks are kept, in metres. A shorter range packs the same count into less river, so you can read the flow with far fewer of them.'],
   ['Speck spread','speckSpread',0.00,1.00,0.05,'Share of specks respawning on a grid around you rather than drifting from upstream. Raise it to see flow in dead water.'],
@@ -344,7 +344,7 @@ const MIN_SLACK=0.25, MIN_OUT=4.0;
 let hooked=null;
 
 /* ---- river ---- */
-const CZ=-9.0, HALFW=7.0, MAXDEPTH=1.5, VMAX=2.2;
+const CZ=-9.0, HALFW=7.0, MAXDEPTH=1.5;
 const DROPS=[{x:-46,h:0.20,w:1.8},{x:-25,h:0.16,w:1.5},{x:-6,h:0.22,w:1.2},
              {x:15,h:0.18,w:2.0},{x:38,h:0.21,w:1.6},{x:60,h:0.17,w:1.4}];
 const smoothstep=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
@@ -366,7 +366,8 @@ function bedY(x,z){
 }
 const ripple=(x,z,t)=>
   (Math.sin(x*1.7+t*2.3)*0.011+Math.sin(x*0.7+z*0.9+t*1.5)*0.017+Math.sin(z*2.4-t*1.1)*0.008)*0.55;
-const filmY=(x,z,t)=>surfY(x)+ripple(x,z,t);
+
+/* filmY and solvedDev live with the grid, below — they read its arrays. */
 
 /* heights are measured off the bed. The old values left every rock half a metre
    under water, which the grid solver correctly flowed straight over — no wake,
@@ -382,21 +383,48 @@ for(let i=0;i<NV;i++) vort.push({x:0,z:0,r:1,k:0,life:0});
 let vNext=0;
 
 let flowX=0,flowZ=0;
+/* Inside the solved window you get the solver; outside it you get the analytic
+   field; and across two metres at the edge you get a blend of the two. The old
+   code switched. A pool the solver has backed up runs at half the speed the
+   analytic reach thinks it should, so switching put a hard step in the current
+   right where the window ends — invisible at the default eighty-metre span
+   because you never reach it, and glaring the moment you shrink the span to
+   put more resolution where you are fishing, which is exactly what the setting
+   invites you to do. */
 function computeFlow(x,z){
   if(P.waterModel>0.5&&gridReady&&x>GX0+gdx&&x<GX1-gdx&&z>GZ0+gdx&&z<GZ1-gdx){
     const fx=(x-GX0)/gdx-0.5, fz=(z-GZ0)/gdx-0.5;
-    flowX=gridSampleField(gu,fx,fz);
-    flowZ=gridSampleField(gv,fx,fz);
+    const gx=gridSampleField(gu,fx,fz), gz=gridSampleField(gv,fx,fz);
+    const edge=Math.min(Math.min(x-GX0,GX1-x),Math.min(z-GZ0,GZ1-z));
+    const w=smoothstep(gdx,gdx+2.0,edge);
+    if(w>0.999){flowX=gx;flowZ=gz;return;}
+    analyticFlow(x,z);
+    flowX+=(gx-flowX)*w; flowZ+=(gz-flowZ)*w;
     return;
   }
   return analyticFlow(x,z);
 }
+/* Manning's normal velocity, from the same surface slope, the same roughness
+   and the same current multiplier the grid solver uses. The old form was
+   discharge over depth with a hard 2.2 m/s ceiling, which got two things
+   wrong: thin water came out fast and deep water slow, the exact opposite of
+   what the solver produces, and the analytic reach flatly refused to exceed
+   2.2 m/s however far you pushed the current or the grade. Now both models
+   answer the same question the same way, so the join at the edge of the solved
+   window is a seam you have to go looking for. */
 function analyticFlow(x,z){
   const u=(z-CZ)/HALFW,cross=Math.max(0,1-u*u);
   if(cross<=0.001){flowX=0;flowZ=0;return;}
-  const d=Math.max(bedDepth(x,z),0.12);
-  const slope=Math.max(0,(surfY(x-0.9)-surfY(x+0.9))/1.8);
-  const s=Math.min(VMAX,(P.current/d)*(1+slope*7.0))*Math.pow(cross,0.35);
+  const d=Math.max(bedDepth(x,z),0.08);
+  /* the slope is read over a five-metre baseline, not the old ninety
+     centimetres. Manning's is a statement about UNIFORM flow, and the lip of a
+     drop is the least uniform place in the reach: measured tight, a lip reads
+     as a 20% grade and the formula happily returns eight metres a second,
+     because nothing in it knows about the inertia and continuity that stop
+     that happening. Averaged over five metres it answers for the reach, which
+     is the only thing this fallback was ever entitled to answer for. */
+  const S=Math.max(1e-5,((surfY(x-2.5)-surfY(x+2.5))/5.0)*P.current*2.0);
+  const s=Math.min(8,(1/Math.max(P.manningN,0.005))*Math.pow(d,2/3)*Math.sqrt(S))*Math.pow(cross,0.35);
   let vx=s,vz=0;
   for(let i=0;i<OBST.length;i++){
     const o=OBST[i],dx=x-o.x,dz=z-o.z,dd=Math.hypot(dx,dz)||1e-4;
@@ -652,7 +680,7 @@ const GZ0=CZ-HALFW-0.6, GZ1=CZ+HALFW+0.6;
 let gridCentre=0;
 let gdx=0.40, GNX=1, GNZ=1, gridReady=false, gbed=null;
 let gfoam=null, gfoam0=null, gdivs=null, gshear=null;
-let gu,gv,gu0,gv0,gp,gdiv,gh,ginv43,gsolid,gslope;
+let gu,gv,gu0,gv0,gp,gdiv,gh,ginv43,gsolid,gslope,gsurf;
 function gridAlloc(){
   gdx=Math.max(0.10,P.gridCell);
   const span=Math.max(10,P.gridSpan);
@@ -671,14 +699,19 @@ function gridAlloc(){
      the flow tears itself apart and then carried away by that same flow */
   gfoam=new Float32Array(n); gfoam0=new Float32Array(n);
   gdivs=new Float32Array(n); gshear=new Float32Array(n);
-  gsolid=new Uint8Array(n); gslope=new Float32Array(GNX);
+  gsolid=new Uint8Array(n); gslope=new Float32Array(GNX); gsurf=new Float32Array(GNX);
   gridBuildBed();
   gridReady=true;
 }
 function gridBuildBed(i0,i1,seed){
   i0=i0===undefined?0:i0; i1=i1===undefined?GNX:i1;
+  /* surfY costs six smoothsteps and depends only on x, and it was being called
+     per cell per substep inside the free-surface loop — a quarter of a million
+     smoothsteps a solver step, for a column of eighty numbers. Cached here
+     alongside the slope, which is rebuilt whenever the window moves anyway. */
   for(let i=0;i<GNX;i++){
     const x=GX0+(i+0.5)*gdx;
+    gsurf[i]=surfY(x);
     gslope[i]=(surfY(x-gdx)-surfY(x+gdx))/(2*gdx);   /* +ve downstream */
   }
   for(let j=0;j<GNZ;j++){
@@ -694,7 +727,7 @@ function gridBuildBed(i0,i1,seed){
           if(top>bed) bed=top;
         }
       }
-      const h=surfY(x)-bed;
+      const h=gsurf[i]-bed;
       gbed[k]=bed;
       gh[k]=Math.max(h,0);
       gsolid[k]=(h<0.05)?1:0;
@@ -786,6 +819,23 @@ function gridSampleField(F,fx,fz){
   const tx=fx-i, tz=fz-j, k=i+j*GNX;
   return F[k]*(1-tx)*(1-tz)+F[k+1]*tx*(1-tz)+F[k+GNX]*(1-tx)*tz+F[k+GNX+1]*tx*tz;
 }
+/* Departure of the SOLVED free surface from the still-water line. The solver
+   has computed this all along and the water mesh has been displaced by it since
+   `surfWave` landed — but nothing else was. The film the line rides on, the
+   height the specks are drawn at and the surface the fish rise through were all
+   still the flat still-water line, so a fly could sit visibly buried in the
+   pillow in front of a rock or hang in the air over a drawdown. One function,
+   used everywhere, so the water you see and the water the line feels are the
+   same water. surfWave 0 restores the old flat behaviour exactly. */
+function solvedDev(x,z){
+  if(!(P.waterModel>0.5&&gridReady&&gbed)) return 0;
+  if(!(x>GX0+gdx&&x<GX1-gdx&&z>GZ0+gdx&&z<GZ1-gdx)) return 0;
+  const fx=(x-GX0)/gdx-0.5, fz=(z-GZ0)/gdx-0.5;
+  return (gridSampleField(gbed,fx,fz)+gridSampleField(gh,fx,fz))-surfY(x);
+}
+const filmY=(x,z,t)=>
+  surfY(x)+ripple(x,z,t)*(1-0.6*P.surfWave)+solvedDev(x,z)*P.surfWave;
+
 function gridStep(dt){
   if(!gridReady) return;
   const g=9.81, n2=P.manningN*P.manningN;
@@ -866,7 +916,7 @@ function gridStep(dt){
         /* keep the surface within a sane band of still water: this is a river
            reach, not a dam break, and unbounded drift is the one way an
            explicit free surface goes wrong slowly instead of loudly */
-        const still=surfY(GX0+(i+0.5)*gdx)-gbed[k];
+        const still=gsurf[i]-gbed[k];
         h=Math.max(0.02,Math.min(h,still+0.45));
         h=Math.max(h,Math.max(0.02,still-0.45));
         /* very weak pull back toward still water, so numerical mass error
@@ -949,8 +999,17 @@ let gridTex=null, gridTexData=null, gridTexH=null, gridTexHData=null;
    a quarter of a metre per second, against 0.063 for linear, and it still
    represents the solver's whole 8 m/s range. */
 const GRID_VSCALE=8.0;
-const encodeVel=v=>Math.max(0,Math.min(255,Math.round(
-  (0.5+0.5*Math.sign(v)*Math.sqrt(Math.min(Math.abs(v),GRID_VSCALE)/GRID_VSCALE))*255)));
+const B255=x=>x<0?0:x>255?255:(x+0.5)|0;
+const INV_VS=1/GRID_VSCALE;
+/* written out longhand rather than as a chain of Math calls: this runs for
+   every cell of the grid on every solver step now that the upload is no longer
+   accidentally skipped, and it was the single most expensive thing left in the
+   water once surfY was cached. */
+const encodeVel=v=>{
+  let a=v<0?-v:v; if(a>GRID_VSCALE)a=GRID_VSCALE;
+  const t=0.5*Math.sqrt(a*INV_VS);
+  return B255((v<0?0.5-t:0.5+t)*255);
+};
 /* the matching decode, injected wherever a shader unpacks the flow texture */
 const GLSL_VDEC=`
 vec2 decodeVel(vec2 rg){
@@ -978,23 +1037,22 @@ function gridTexUpdate(){
   for(let k=0,p=0;k<gu.length;k++,p+=4){
     gridTexData[p]  =encodeVel(gu[k]);
     gridTexData[p+1]=encodeVel(gv[k]);
-    gridTexData[p+2]=Math.max(0,Math.min(255,Math.round(gh[k]*80)));
+    gridTexData[p+2]=B255(gh[k]*80);
     /* Alpha was unused. Fill it with |divergence| + |shear| of the solved
        field: foam then forms where the water genuinely tears itself apart —
        rock shoulders, the seam off the log, the lip of each drop — instead of
        being painted along hand-placed lines. Free, because the grid is already
        being walked to build this texture. */
     /* alpha now carries TRANSPORTED foam rather than instantaneous turbulence */
-    gridTexData[p+3]=Math.max(0,Math.min(255,Math.round(gfoam[k]*160)));
+    gridTexData[p+3]=B255(gfoam[k]*160);
     /* free surface departure from the still-water line, which is what the
        vertex shader needs to raise a pillow in front of a rock */
-    const xk=GX0+((k%GNX)+0.5)*gdx;
-    const dev=(gbed[k]+gh[k])-surfY(xk);
-    gridTexHData[p]=Math.max(0,Math.min(255,Math.round((dev/0.60+0.5)*255)));
+    const dev=(gbed[k]+gh[k])-gsurf[k%GNX];
+    gridTexHData[p]=B255((dev*(1/0.60)+0.5)*255);
     /* SIGNED divergence: above 0.5 the water is rising and the surface goes
        glassy, below it is converging and dimples. Shear in blue marks seams. */
-    gridTexHData[p+1]=Math.max(0,Math.min(255,Math.round((gdivs[k]/6+0.5)*255)));
-    gridTexHData[p+2]=Math.max(0,Math.min(255,Math.round(gshear[k]*34)));
+    gridTexHData[p+1]=B255((gdivs[k]*(1/6)+0.5)*255);
+    gridTexHData[p+2]=B255(gshear[k]*34);
     gridTexHData[p+3]=255;
   }
   gridTex.needsUpdate=true;
@@ -2609,7 +2667,7 @@ const waterMat=new THREE.ShaderMaterial({
     uFast:{value:new THREE.Color(0x9ab9b0)},
     uUseGrid:{value:0},uFlow:{value:null},
     uNorm:{value:waterNormalTex},uHt:{value:null},
-    uUseGridV:{value:0},uWave:{value:P.surfWave},
+    uUseGridV:{value:0},uWave:{value:P.surfWave},uManN:{value:P.manningN},
     uStreak:{value:P.streak},uBoil:{value:P.boil},
     uWaveN:{value:P.waveShade},uFroth:{value:P.froth},uDrift:{value:P.drift},
     uGTexel:{value:new THREE.Vector2(1/64,1/64)},uCell:{value:0.45},
@@ -2620,7 +2678,7 @@ const waterMat=new THREE.ShaderMaterial({
     uGMin:{value:new THREE.Vector2(GX0,GZ0)},
     uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)}},
   vertexShader:`
-    uniform float uTime,uQ,uGrade,uUseGridV,uWave;
+    uniform float uTime,uQ,uGrade,uUseGridV,uWave,uManN;
     uniform vec2 uGMin,uGSize; uniform sampler2D uHt;
     varying float vD,vS; varying vec3 vW;
     ${GLSL_SURF}
@@ -2629,8 +2687,8 @@ const waterMat=new THREE.ShaderMaterial({
       float u=(wp.z-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
       float cross=max(0.0,1.0-u*u);
       float d=${MAXDEPTH.toFixed(2)}*cross*(0.55+0.45*sin(wp.x*0.13+1.3));
-      float slope=max(0.0,(surfY(wp.x-0.9)-surfY(wp.x+0.9))/1.8);
-      float s=min(${VMAX.toFixed(1)},(uQ/max(d,0.12))*(1.0+slope*7.0))*pow(max(cross,0.0001),0.35);
+      float S=max(1e-5,((surfY(wp.x-2.5)-surfY(wp.x+2.5))/5.0)*uQ*2.0);
+      float s=min(8.0,(1.0/max(uManN,0.005))*pow(max(d,0.08),0.6666667)*sqrt(S))*pow(max(cross,0.0001),0.35);
       float h=(sin(wp.x*1.7+uTime*2.3)*0.011
               +sin(wp.x*0.7+wp.z*0.9+uTime*1.5)*0.017
               +sin(wp.z*2.4-uTime*1.1)*0.008)*0.55;
@@ -2836,15 +2894,32 @@ const specks=new THREE.Points(speckGeo,speckMat);
 specks.frustumCulled=false;specks.renderOrder=2;scene.add(specks);
 
 
-/* ---- GPU specks ----------------------------------------------------------
-   Stateless: nothing is stored per particle and nothing is updated on the CPU.
-   Each vertex knows a seed point and a phase offset, and every frame the vertex
-   shader re-integrates that seed forward through the same analytic flow field
-   the physics uses, for `age` seconds. Deterministic, so the motion is smooth
-   frame to frame, and it costs the CPU exactly zero.
-   The flow function below is generated from the same JS obstacle list, so it
-   cannot drift out of step with computeFlow(). --------------------------------*/
-const GSPECK=20000;
+/* ---- GPU specks: stateful advection on the GPU ---------------------------
+   The previous version was stateless. Nothing was stored per particle; every
+   frame the vertex shader re-integrated a fixed seed point forward through the
+   flow for up to `travel` seconds, using 24 forward-Euler steps. Two things
+   were wrong with that.
+
+   Forward Euler samples the velocity at the START of each step. At the default
+   seven seconds of travel a step is 0.29 s, which at two metres a second is
+   0.58 m — wider than a grid cell and most of the way across a rock. In water
+   that is speeding up, every step therefore moved the speck at the slower
+   velocity it had already left behind, and the error compounded over 24 of
+   them. Raise the current or the grade and the step length and the velocity
+   gradient grow together, so the shortfall grows faster than the flow does.
+
+   And the seeds were fixed points, so the field read as a static lattice
+   smeared downstream rather than water going past you, and `speckSpread` did
+   nothing whatsoever on this path.
+
+   Now a speck is real state — position, age, seed — living in a float texture
+   advanced once per frame by a single fullscreen pass, with RK2 and the actual
+   frame dt. Same field, same timestep as the CPU path, so the two agree by
+   construction, and a speck can sit in an eddy and go round, which is the
+   entire point of drawing flow around a rock. The draw also got cheaper: the
+   vertex shader does one state fetch instead of twenty-five field
+   evaluations. ------------------------------------------------------------ */
+const GS_W=112, GSPECK=GS_W*GS_W;      /* 12544 real specks, 3 vertices each */
 const GLSL_FLOW=`
 ${GLSL_VDEC}
 ${OBST.map((o,i)=>`const vec4 OB${i}=vec4(${o.x.toFixed(2)},${o.z.toFixed(2)},${o.r.toFixed(3)},${o.kind==='log'?'1.0':'0.0'});`).join('\n')}
@@ -2865,20 +2940,13 @@ vec2 obstacle(vec2 p, vec4 o, vec2 v, float s){
   } else v.x*=1.0+0.45*infl;
   return v;
 }
-vec2 flowAt(vec2 p){
-  if(uUseGrid>0.5){
-    vec2 tc=vec2((p.x-uGMin.x)/uGSize.x,(p.y-uGMin.y)/uGSize.y);
-    if(tc.x>0.004&&tc.x<0.996&&tc.y>0.004&&tc.y<0.996){
-      vec4 t=texture2D(uFlow,tc);
-      return decodeVel(t.rg);
-    }
-  }
+vec2 analyticAt(vec2 p){
   float u=(p.y-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
   float cr=max(0.0,1.0-u*u);
   if(cr<=0.001) return vec2(0.0);
-  float d=max(depthAt(p),0.12);
-  float slope=max(0.0,(surfY(p.x-0.9)-surfY(p.x+0.9))/1.8);
-  float s=min(${VMAX.toFixed(1)},(uQ/d)*(1.0+slope*7.0))*pow(max(cr,1e-4),0.35);
+  float d=max(depthAt(p),0.08);
+  float S=max(1e-5,((surfY(p.x-2.5)-surfY(p.x+2.5))/5.0)*uQ*2.0);
+  float s=min(8.0,(1.0/max(uManN,0.005))*pow(d,0.6666667)*sqrt(S))*pow(max(cr,1e-4),0.35);
   vec2 v=vec2(s,0.0);
   v=obstacle(p,OB0,v,s); v=obstacle(p,OB1,v,s);
   v=obstacle(p,OB2,v,s); v=obstacle(p,OB3,v,s);
@@ -2892,70 +2960,227 @@ vec2 flowAt(vec2 p){
     v+=vec2(-dd.y,dd.x)*f;
   }
   return v;
-}`;
-const gSpeckGeo=new THREE.BufferGeometry();
-{
-  const seed=new Float32Array(GSPECK*2), misc=new Float32Array(GSPECK*3);
-  for(let i=0;i<GSPECK;i+=3){
-    const sx=Math.random()*2-1, sz=Math.random()*2-1;
-    const ph=Math.random(), dep=Math.random()<0.55?0:-Math.random()*0.35;
-    for(let k=0;k<3&&i+k<GSPECK;k++){
-      const j=i+k;
-      seed[j*2]=sx; seed[j*2+1]=sz;
-      misc[j*3]=ph; misc[j*3+1]=dep; misc[j*3+2]=k;   /* 0 = head, 1-2 = trail */
+}
+/* solved inside, analytic outside, blended across two metres at the seam —
+   the GLSL twin of computeFlow() above */
+vec2 flowAt(vec2 p){
+  if(uUseGrid>0.5){
+    vec2 tc=vec2((p.x-uGMin.x)/uGSize.x,(p.y-uGMin.y)/uGSize.y);
+    if(tc.x>0.0&&tc.x<1.0&&tc.y>0.0&&tc.y<1.0){
+      vec2 g=decodeVel(texture2D(uFlow,tc).rg);
+      vec2 e=min(tc,1.0-tc)*uGSize;
+      float w=smoothstep(0.5,2.5,min(e.x,e.y));
+      if(w>0.999) return g;
+      return mix(analyticAt(p),g,w);
     }
   }
-  gSpeckGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(GSPECK*3),3));
-  gSpeckGeo.setAttribute('aSeed',new THREE.BufferAttribute(seed,2));
-  gSpeckGeo.setAttribute('aMisc',new THREE.BufferAttribute(misc,3));
+  return analyticAt(p);
+}
+/* depth, from the solved grid where there is one. Blue of the flow texture is
+   gh*80 packed into a byte, so the decode is *255/80. */
+float depthHere(vec2 p){
+  if(uUseGrid>0.5){
+    vec2 tc=vec2((p.x-uGMin.x)/uGSize.x,(p.y-uGMin.y)/uGSize.y);
+    if(tc.x>0.004&&tc.x<0.996&&tc.y>0.004&&tc.y<0.996)
+      return texture2D(uFlow,tc).b*3.1875;
+  }
+  return depthAt(p);
+}`;
+/* the solved free-surface departure, so specks are drawn ON the water the
+   renderer actually draws rather than on the flat still-water line */
+const GLSL_SDEV=`
+float surfaceDev(vec2 p){
+  if(uUseGridV<0.5) return 0.0;
+  vec2 tc=vec2((p.x-uGMin.x)/uGSize.x,(p.y-uGMin.y)/uGSize.y);
+  if(tc.x<=0.0||tc.x>=1.0||tc.y<=0.0||tc.y>=1.0) return 0.0;
+  vec2 e=min(tc,1.0-tc);
+  return (texture2D(uHt,tc).r-0.5)*0.60*smoothstep(0.0,0.035,min(e.x,e.y));
+}`;
+/* A speck's lifetime is a pure function of its seed, so the draw shader can
+   recover it without a channel to store it in — which is what lets a speck
+   fade in as well as out instead of popping into existence. */
+const GLSL_HASH=`
+float hsh(float n){ return fract(sin(n*12.9898)*43758.5453123); }
+float speckLife(float sd,float spread,float life){
+  float r2=hsh(sd*181.7+1.3), r3=hsh(sd*53.3+7.7);
+  return (r3<spread)? life*(0.5+r2) : life*(1.5+r2*2.0);
+}`;
+
+/* ---- the advection pass -------------------------------------------------- */
+let gsOK=false, gsRT=null, gsPing=0, gsReset=2;
+{
+  const ext=renderer.extensions;
+  gsOK=!!(ext.has('EXT_color_buffer_float')||ext.has('WEBGL_color_buffer_float'));
+}
+const gsUniforms={
+  uState:{value:null}, uDt:{value:0}, uTime:{value:0},
+  uQ:{value:P.current}, uGrade:{value:P.grade}, uManN:{value:P.manningN},
+  uOriginX:{value:0}, uRange:{value:P.speckRange}, uSpread:{value:P.speckSpread},
+  uLife:{value:P.speckTravel}, uReset:{value:1},
+  uUseGrid:{value:0}, uFlow:{value:null},
+  uGMin:{value:new THREE.Vector2(GX0,GZ0)},
+  uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)},
+  uVort:{value:Array.from({length:8},()=>new THREE.Vector4(0,0,1,0))},
+};
+const gsMat=new THREE.ShaderMaterial({
+  depthTest:false, depthWrite:false,
+  uniforms:gsUniforms,
+  vertexShader:`
+    varying vec2 vUv;
+    void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`,
+  fragmentShader:`
+    uniform sampler2D uState,uFlow;
+    uniform float uDt,uTime,uQ,uGrade,uOriginX,uRange,uSpread,uLife,uReset,uUseGrid,uManN;
+    uniform vec2 uGMin,uGSize;
+    uniform vec4 uVort[8];
+    varying vec2 vUv;
+    ${GLSL_SURF}
+    ${GLSL_FLOW}
+    ${GLSL_HASH}
+    void main(){
+      vec4 s=texture2D(uState,vUv);
+      vec2 p=s.xy; float age=s.z; float sd=s.w;
+      if(uReset>0.5){ age=-1.0; sd=hsh(vUv.x*311.7+vUv.y*719.3+0.13); }
+      else{
+        /* RK2 (midpoint-style Heun) at the real frame dt. Second order, so the
+           error no longer grows with the velocity gradient the way Euler's
+           did, and the speck arrives where the water would have taken it. */
+        vec2 k1=flowAt(p);
+        vec2 k2=flowAt(p+k1*uDt);
+        p+=0.5*(k1+k2)*uDt;
+        /* slack water drains life fast, or specks pile up in the dead spots —
+           the same rule the CPU path has always used */
+        age-=uDt*(length(k1)<0.055?9.0:1.0);
+      }
+      float dep=depthHere(p);
+      if(age<=0.0||p.x>uOriginX+uRange*1.15||p.x<uOriginX-uRange*1.5||dep<0.10){
+        sd=fract(sd+0.6180339887+uTime*0.017);
+        float r1=hsh(sd*97.1), r3=hsh(sd*53.3+7.7);
+        age=speckLife(sd,uSpread,uLife);
+        if(r3<uSpread) p.x=uOriginX+(r1*2.0-1.0)*uRange;   /* spread around you */
+        else           p.x=uOriginX-uRange*0.45-r1*uRange*0.85;  /* from upstream */
+        p.y=${CZ.toFixed(1)}+(hsh(sd*263.1+3.1)*2.0-1.0)*${(HALFW*0.92).toFixed(2)};
+      }
+      gl_FragColor=vec4(p,age,sd);
+    }`});
+const gsScene=new THREE.Scene();
+const gsCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+gsScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),gsMat));
+if(gsOK){
+  const opt={type:THREE.FloatType,format:THREE.RGBAFormat,
+    minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter,
+    depthBuffer:false,stencilBuffer:false,generateMipmaps:false};
+  gsRT=[new THREE.WebGLRenderTarget(GS_W,GS_W,opt),
+        new THREE.WebGLRenderTarget(GS_W,GS_W,opt)];
+}
+/* XR has to be switched off around an offscreen pass or Three substitutes the
+   stereo array camera and the quad is drawn once per eye — which would advect
+   the field twice on every frame you were in the headset and once on the
+   phone, quietly making the specks run 2x fast in VR only. */
+function gsStep(dt){
+  if(!gsOK||!gsRT) return;
+  const src=gsRT[gsPing], dst=gsRT[gsPing^1];
+  gsUniforms.uState.value=src.texture;
+  gsUniforms.uDt.value=Math.min(dt,0.05);
+  gsUniforms.uTime.value=simTime;
+  gsUniforms.uQ.value=P.current;
+  gsUniforms.uGrade.value=P.grade;
+  gsUniforms.uManN.value=P.manningN;
+  gsUniforms.uRange.value=P.speckRange;
+  gsUniforms.uSpread.value=P.speckSpread;
+  gsUniforms.uLife.value=Math.max(1,P.speckTravel);
+  gsUniforms.uOriginX.value=_camW.x;
+  gsUniforms.uUseGrid.value=(P.waterModel>0.5&&gridTex)?1:0;
+  gsUniforms.uFlow.value=gridTex;
+  gsUniforms.uGMin.value.set(GX0,GZ0);
+  gsUniforms.uGSize.value.set(GX1-GX0,GZ1-GZ0);
+  for(let i=0;i<8;i++){
+    const v=vort[i], t=gsUniforms.uVort.value[i];
+    if(v&&v.life>0) t.set(v.x,v.z,v.r,v.k*P.vortex*v.life); else t.set(0,0,1,0);
+  }
+  gsUniforms.uReset.value=gsReset>0?1:0;
+  if(gsReset>0) gsReset--;
+  const wasXR=renderer.xr.enabled;
+  renderer.xr.enabled=false;
+  const prev=renderer.getRenderTarget();
+  renderer.setRenderTarget(dst);
+  renderer.render(gsScene,gsCam);
+  renderer.xr.enabled=wasXR;
+  renderer.setRenderTarget(prev);   /* prev, not null: in XR that IS the eye buffer */
+  gsPing^=1;
+  gSpeckMat.uniforms.uState.value=dst.texture;
+}
+
+const gSpeckGeo=new THREE.BufferGeometry();
+{
+  /* three vertices per speck: the head, and two ghosts of where it was a
+     moment ago. Laid out head-then-trails so that trimming the draw range for
+     the density slider drops whole specks rather than beheading them. */
+  const N=GSPECK*3;
+  const ref=new Float32Array(N*2), vert=new Float32Array(N);
+  for(let i=0;i<GSPECK;i++){
+    const u=((i%GS_W)+0.5)/GS_W, v=((Math.floor(i/GS_W))+0.5)/GS_W;
+    for(let k=0;k<3;k++){
+      const j=i*3+k;
+      ref[j*2]=u; ref[j*2+1]=v; vert[j]=k;
+    }
+  }
+  gSpeckGeo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(N*3),3));
+  gSpeckGeo.setAttribute('aRef',new THREE.BufferAttribute(ref,2));
+  gSpeckGeo.setAttribute('aVert',new THREE.BufferAttribute(vert,1));
   gSpeckGeo.boundingSphere=new THREE.Sphere(new THREE.Vector3(),500);
 }
 const gSpeckMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,
   uniforms:{
-    uTime:{value:0}, uSize:{value:P.speckSize}, uQ:{value:P.current}, uGrade:{value:P.grade},
-    uOriginX:{value:0}, uRange:{value:P.speckRange}, uTravel:{value:P.speckTravel},
-    uTrail:{value:P.speckTrail},
+    uState:{value:null},
+    uSize:{value:P.speckSize}, uQ:{value:P.current}, uGrade:{value:P.grade},
+    uManN:{value:P.manningN},
+    uTrail:{value:P.speckTrail}, uSpread:{value:P.speckSpread}, uLife:{value:P.speckTravel},
     uUseGrid:{value:0}, uFlow:{value:null},
+    uUseGridV:{value:0}, uHt:{value:null}, uWave:{value:P.surfWave},
     uGMin:{value:new THREE.Vector2(GX0,GZ0)},
     uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)},
     uVort:{value:Array.from({length:8},()=>new THREE.Vector4(0,0,1,0))},
   },
   vertexShader:`
-    attribute vec2 aSeed; attribute vec3 aMisc;
-    uniform float uTime,uSize,uQ,uGrade,uOriginX,uRange,uTravel,uTrail,uUseGrid;
+    attribute vec2 aRef; attribute float aVert;
+    uniform float uSize,uQ,uGrade,uTrail,uSpread,uLife,uUseGrid,uUseGridV,uWave,uManN;
     uniform vec2 uGMin,uGSize;
-    uniform sampler2D uFlow;
+    uniform sampler2D uFlow,uState,uHt;
     uniform vec4 uVort[8];
     varying float vA;
     ${GLSL_SURF}
     ${GLSL_FLOW}
+    ${GLSL_SDEV}
+    ${GLSL_HASH}
     void main(){
-      vec2 p=vec2(uOriginX+aSeed.x*uRange, ${CZ.toFixed(1)}+aSeed.y*${(HALFW*0.92).toFixed(2)});
-      float ph=fract(uTime/uTravel+aMisc.x);
-      /* trail points are the same speck a moment earlier */
-      float tIdx=aMisc.z;
-      float age=ph*uTravel-tIdx*uTrail;
-      if(age<0.0) age+=uTravel;
-      /* Take whole steps then a PARTIAL final step. Stepping only in whole dt
-         made the speck teleport dt-worth of travel at a time, which read as a
-         static dotted field rather than moving water. */
-      float dt=uTravel/24.0;
-      float rem=age;
-      for(int i=0;i<24;i++){
-        float st=min(dt,rem);
-        if(st<=0.0) break;
-        p+=flowAt(p)*st;
-        rem-=st;
+      vec4 s=texture2D(uState,aRef);
+      vec2 p=s.xy; float age=s.z, sd=s.w;
+      /* A trail dot is this speck a moment ago, so walk the flow BACKWARDS
+         from where it actually is. Four RK2 steps over at most two thirds of a
+         second is plenty, and unlike the old scheme the head it hangs off is
+         already in the right place. */
+      float back=aVert*uTrail;
+      if(back>0.0){
+        float h=back*0.25;
+        for(int i=0;i<4;i++){
+          vec2 k1=flowAt(p);
+          vec2 k2=flowAt(p-k1*h);
+          p-=0.5*(k1+k2)*h;
+        }
       }
-      float d=depthAt(p);
+      float dep=depthHere(p);
       float sp=length(flowAt(p));
-      /* fade in and out so recycling is invisible, and hide anything beached */
-      float fade=smoothstep(0.0,0.10,ph)*(1.0-smoothstep(0.80,1.0,ph));
-      vA=fade*smoothstep(0.06,0.16,d)*(0.55+0.45*step(0.02,sp))*(1.0-0.30*tIdx);
-      vec3 wp=vec3(p.x, surfY(p.x)+0.014+aMisc.y, p.y);
+      float life=speckLife(sd,uSpread,uLife);
+      float dz=(hsh(sd*17.3)<0.55)?0.0:-hsh(sd*29.7)*0.35;
+      float fade=smoothstep(0.0,0.8,age)*(1.0-smoothstep(life-0.7,life,age));
+      vA=fade*smoothstep(0.06,0.16,dep)*(0.55+0.45*step(0.02,sp))*(1.0-0.30*aVert);
+      /* drawn on the SOLVED surface, so a speck riding the pillow in front of
+         a rock rides it rather than sinking through it */
+      vec3 wp=vec3(p.x, surfY(p.x)+surfaceDev(p)*uWave+0.014+dz, p.y);
       vec4 mv=modelViewMatrix*vec4(wp,1.0);
-      gl_PointSize=clamp(260.0*uSize*(1.0-0.20*tIdx)/max(-mv.z,0.4),1.0,26.0*uSize);
+      gl_PointSize=clamp(260.0*uSize*(1.0-0.20*aVert)/max(-mv.z,0.4),1.0,26.0*uSize);
       gl_Position=projectionMatrix*mv;
     }`,
   fragmentShader:`
@@ -4257,7 +4482,7 @@ function drawHUD(){
   const rows=[
     ['FPS',M.fps.toFixed(0)+'   NODES '+nAct+'  IT '+ITER],
     ['WATER',(P.waterModel>0.5?'GRID '+GNX+'x'+GNZ+'  '+gridMs.toFixed(1)+'ms':'ANALYTIC')],
-    ['SPECKS',(P.speckGPU>0.5?'GPU ':'CPU ')+Math.floor((P.speckGPU>0.5?GSPECK:SPECK)*P.specks)],
+    ['SPECKS',(P.speckGPU>0.5&&gsOK?'GPU ':'CPU ')+Math.floor((P.speckGPU>0.5&&gsOK?GSPECK:SPECK)*P.specks)],
     ['NODE LEN',(nodeLen*100).toFixed(0)+' cm'],
     ['LINE OUT',lineOut.toFixed(2)+' m'],
     ['SLACK',slack.toFixed(2)+' m'],
@@ -4975,10 +5200,23 @@ renderer.setAnimationLoop(()=>{
     gridFollowUpdate(_camW.x);
     gridAccum+=dt;
     const step=1/Math.max(2,P.gridRate);
-    let guard=0;
+    /* This used to read `while(gridAccum>=step&&guard++<3)` with the texture
+       upload gated on `guard>1`. Post-increment means one solver step leaves
+       guard at 1, so the gate was false on every ordinary frame: at 72 Hz
+       against a 20 Hz solver the loop runs exactly once each time it runs at
+       all. The flow texture was therefore uploaded once at startup and then
+       essentially never again.
+       Everything that reads the texture — GPU specks, water colour, foam,
+       the solved surface displacement — was showing the field as it stood
+       after the settling loop, frozen, while the CPU specks and the line read
+       the live gu/gv arrays. That is the whole of "GPU specks don't keep up
+       when I raise flow and grade": they were not lagging the river, they
+       were looking at a photograph of it taken before you touched the dial. */
+    let steps=0;
     const t0=nowMs();
-    while(gridAccum>=step&&guard++<3){ gridStep(step); gridFoam(step); gridAccum-=step; }
-    if(guard>1){ gridMs+=((nowMs()-t0)-gridMs)*0.15; gridTexUpdate(); }
+    while(gridAccum>=step&&steps<3){ gridStep(step); gridFoam(step); gridAccum-=step; steps++; }
+    if(gridAccum>step*3) gridAccum=step*3;   /* never build up unpayable debt */
+    if(steps>0){ gridTexUpdate(); gridMs+=((nowMs()-t0)-gridMs)*0.15; }
   }
   M.fps+=(1/Math.max(dt,1e-4)-M.fps)*0.06;
   const t=simTime;
@@ -5316,29 +5554,37 @@ renderer.setAnimationLoop(()=>{
     v.life-=dt*0.30;
   }
 
-  const useGPU=P.speckGPU>0.5;
+  const useGPU=P.speckGPU>0.5&&gsOK;
   specks.visible=!useGPU&&P.specks>0.005;
   gSpecks.visible=useGPU&&P.specks>0.005;
   if(useGPU){
+    gsStep(dt);                       /* advance the field, then draw it */
     const u=gSpeckMat.uniforms;
-    u.uTime.value=simTime;
     u.uSize.value=P.speckSize;
     u.uQ.value=P.current;
     u.uGrade.value=P.grade;
-    u.uRange.value=P.speckRange;
-    u.uTravel.value=Math.max(1,P.speckTravel);
+    u.uManN.value=P.manningN;
     u.uTrail.value=P.speckTrail;
+    u.uSpread.value=P.speckSpread;
+    u.uLife.value=Math.max(1,P.speckTravel);
+    u.uWave.value=P.surfWave;
     u.uUseGrid.value=(P.waterModel>0.5&&gridTex)?1:0;
+    u.uUseGridV.value=(P.waterModel>0.5&&gridTexH)?1:0;
     u.uFlow.value=gridTex;
-    /* the seed field only re-snaps when you have walked most of its width, so
-       the jump is rare and mostly hidden by the fade */
-    if(Math.abs(_camW.x-u.uOriginX.value)>P.speckRange*0.6) u.uOriginX.value=_camW.x;
+    u.uHt.value=gridTexH;
+    /* the solver window slides when it follows you and its span is a setting,
+       so these have to be refreshed every frame. They were set once at
+       construction, which meant that the moment you changed the span or turned
+       following on, the GPU specks were reading the flow texture against the
+       wrong bounds — sampling one part of the river while standing in another. */
+    u.uGMin.value.set(GX0,GZ0);
+    u.uGSize.value.set(GX1-GX0,GZ1-GZ0);
     for(let i=0;i<8;i++){
       const v=vort[i], t=u.uVort.value[i];
       if(v&&v.life>0){t.set(v.x,v.z,v.r,v.k*P.vortex*v.life);}
       else t.set(0,0,1,0);
     }
-    gSpeckGeo.setDrawRange(0,Math.floor(GSPECK*Math.max(0,Math.min(1,P.specks))));
+    gSpeckGeo.setDrawRange(0,Math.floor(GSPECK*Math.max(0,Math.min(1,P.specks)))*3);
   } else {
     const visible=Math.floor(SPECK*Math.max(0,Math.min(1,P.specks)));
     speckGeo.setDrawRange(0,visible);
@@ -5459,6 +5705,7 @@ renderer.setAnimationLoop(()=>{
   waterMat.uniforms.uWaveN.value=P.waveShade;
   waterMat.uniforms.uFroth.value=P.froth;
   waterMat.uniforms.uDrift.value=P.drift;
+  waterMat.uniforms.uManN.value=P.manningN;
   waterMat.uniforms.uCell.value=gdx;
   waterMat.uniforms.uGTexel.value.set(1/Math.max(2,GNX),1/Math.max(2,GNZ));
   waterMat.uniforms.uFlow.value=gridTex;
