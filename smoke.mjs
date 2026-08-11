@@ -338,4 +338,42 @@ const perf=vm.runInContext(`(()=>{
   return {cells:GNX*GNZ, stepMs:+tStep.toFixed(3), foamMs:+tFoam.toFixed(3), texMs:+tTex.toFixed(3)};
 })()`,sandbox);
 console.log('per solver step (desktop)',perf);
+
+/* the CPU speck path must now be shaded from the same numbers as the GPU one */
+const cpu=vm.runInContext(`(()=>{
+  P.speckGPU=0;
+  return null;
+})()`,sandbox);
+const loop3=vm.runInContext('renderer._loop',sandbox);
+for(let f=0;f<12;f++) loop3();
+const sp=vm.runInContext(`(()=>{
+  let n=0,fr=0,frMax=0,bad=0,zero=0;
+  const vis=Math.floor(SPECK*P.specks);
+  for(let i=0;i<vis;i++){
+    const p=i*3, f=spFlow[p+2];
+    if(!Number.isFinite(f)||f<0) bad++;
+    if(spFlow[p]===0&&spFlow[p+1]===0) zero++;
+    fr+=f; frMax=Math.max(frMax,f); n++;
+  }
+  return {particles:n, meanFroude:+(fr/n).toFixed(3), maxFroude:+frMax.toFixed(2),
+          nonFinite:bad, neverUpdated:zero,
+          hasFlowAttr:!!speckGeo.attributes.aFlow};
+})()`,sandbox);
+console.log('CPU speck shading inputs (current 1.4 / grade 2.5)',sp);
+
+vm.runInContext('P.current=0.55; P.grade=1.00;',sandbox);
+const loop4=vm.runInContext('renderer._loop',sandbox);
+for(let f=0;f<250;f++) loop4();
+const dist=vm.runInContext(`(()=>{
+  const b=[0,0,0,0,0]; let n=0,sum=0;
+  const vis=Math.floor(SPECK*P.specks);
+  for(let i=0;i<vis;i++){
+    const f=spFlow[i*3+2]; if(!Number.isFinite(f))continue;
+    sum+=f; n++;
+    b[f<0.25?0:f<0.45?1:f<0.65?2:f<0.85?3:4]++;
+  }
+  return {meanFroude:+(sum/n).toFixed(3),
+    'slick <0.25':b[0], '0.25-0.45':b[1], '0.45-0.65':b[2], '0.65-0.85':b[3], 'crest >0.85':b[4]};
+})()`,sandbox);
+console.log('Froude spread at DEFAULTS',dist);
 console.log('OK');

@@ -93,6 +93,34 @@ film the line rides on, the height the specks are drawn at and the surface fish
 rise through are all the same water the mesh draws. `surfWave 0` restores the
 old flat behaviour everywhere at once.
 
+**What a speck looks like.** Not a fleck of foam. Froude number,
+`sp/sqrt(g*d)`, chooses the shape: a bar drawn ACROSS the current where the
+water is fast and shallow (a standing crest, which is what a riffle is), a thin
+line ALONG it where it is slow and deep (a slick). Size follows Froude too, not
+raw speed — fast water over two metres of pool is a slick, the same speed over
+eight inches of cobble is a riffle, and only one of those should stand up. On
+the GPU path the head plus its two ghosts form a short wave train whose spacing
+is however far the water carried the speck in `speckTrail` seconds, so the
+spacing reads as speed on its own.
+
+Both paths share `GLSL_RIFFLE` and `GLSL_RIFFLE_FRAG`; the CPU path carries
+flow direction and Froude per particle in an `aFlow` attribute so that toggling
+the model does not change the look. Screen-space flow direction is recovered
+per-eye from `projectionMatrix[1][1]/projectionMatrix[0][0]` rather than a
+resolution uniform, which XR would get wrong. Measured spread at defaults: 12%
+of specks fully slick, 24% fully crest, the rest in the transition band — if a
+future change makes everything one shape, that ratio is what to check.
+
+**The surface pattern must travel at `tsp` metres per second, and the offset
+has to be applied in metres BEFORE the UV scale.** It used to read
+`sAlong*0.42/st - tsp*ph*1.5`: the coordinate was scaled by `0.42/st` and the
+offset by a flat `1.5`, so the pattern moved at `1.96*st` times the water speed
+— and `st` grows with speed, so the error grew with the current, and the two
+noise scales travelled at different speeds from each other as well. Subtract
+the distance travelled from the world coordinate and let one scale apply to
+both. This is why the surface and the specks disagreed even after the specks
+were correct.
+
 **Depth-averaged 2D, deliberately.** For nymphing, the right addition is a
 log-law vertical profile plus a vertical velocity from the depth gradient —
 near-zero at the bed, ~1.2x mean at the surface, lifting over a rising bed and

@@ -253,9 +253,9 @@ const MENU=[
   ['River grade','grade',0.00,2.50,0.10,'Steepness of the reach and the size of the drops between pools. Rebuilds the bed live.'],
   ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: 12544 specks living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
   ['Speck life s','speckTravel',2.00,20.0,0.50,'How long a speck lives before it fades out and is reborn upstream. Longer specks trace the whole run of the river past you; shorter ones read as local flow direction. Specks seeded around you live about a third as long as ones drifting down from upstream.'],
-  ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter dots showing where it was a moment ago, which makes direction and speed readable at a glance. This is the gap between them in seconds. Zero collapses them onto the head.'],
+  ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter crests behind it, spaced by however far the water actually carried it in this many seconds — so the spacing IS the speed, and the three together read as a short wave train. Zero collapses them onto the head.'],
   ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 12544 on the GPU path.'],
-  ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck.'],
+  ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck. Size also scales with Froude number on top of this, so riffles stand up and pool slicks stay fine — this sets the baseline.'],
   ['Speck range','speckRange',6.00,45.0,1.00,'How far upstream and downstream specks are kept, in metres. A shorter range packs the same count into less river, so you can read the flow with far fewer of them.'],
   ['Speck spread','speckSpread',0.00,1.00,0.05,'Share of specks respawning on a grid around you rather than drifting from upstream. Raise it to see flow in dead water.'],
   ['Obstacle height','obstHeight',0.00,1.60,0.05,'Scales how far the rocks and log rise off the bed. On the grid model this is what decides how hard the water is pushed around them: an obstacle well under the surface is flowed straight over, one that breaks it splits the current and throws a wake.'],
@@ -264,7 +264,7 @@ const MENU=[
   ['Surface detail','waterDetail',0.00,3.00,0.05,'Strength of the ripple normals on the water. The pattern scrolls ALONG the local flow vector taken from the solved grid, so it travels with the water rather than past it, and it scales with local speed — slack water stays glassy while a riffle textures up on its own.'],
   ['Foam life s','foamLife',0.00,25.0,0.50,'How long foam survives once it is made. Foam is generated where the flow tears \u2014 rock shoulders, the seam off the log, the lip of a drop \u2014 and then CARRIED downstream by the solved velocity, which is what turns it from a glow around obstacles into the long trailing streaks a real river has. Zero reverts to foam that only exists where turbulence is happening right now.'],
   ['Boils','boil',0.00,3.00,0.05,'Upwellings. Where the solved flow diverges, water is rising from below: the surface goes smooth and glassy and reflects the sky. Where it converges it dimples and collects foam. Taking the SIGN of divergence rather than its magnitude is what separates the two \u2014 they look nothing alike on a real river and used to be drawn identically.'],
-  ['Surface drift','drift',0.00,1.00,0.05,'How much of the surface pattern travels at the speed the WATER travels, rather than the speed waves travel. These are different numbers \u2014 a wave crosses shallow water at the square root of g times depth, which has nothing to do with where your fly will go \u2014 and the surface was previously showing the wave speed. That is physically correct and exactly wrong for a fishing game, because the one thing you need to read off the water is where a drifting fly ends up. At 1.00 the surface moves with the specks and with the line.'],
+  ['Surface drift','drift',0.00,1.00,0.05,'How much of the surface pattern travels at the speed the WATER travels, rather than the speed waves travel. At 1.00 it matches the specks and the fly exactly \u2014 the offset is applied in metres before the texture scale, which it previously was not, so the pattern used to run several times too fast and faster still as you raised the current. These are different numbers \u2014 a wave crosses shallow water at the square root of g times depth, which has nothing to do with where your fly will go \u2014 and the surface was previously showing the wave speed. That is physically correct and exactly wrong for a fishing game, because the one thing you need to read off the water is where a drifting fly ends up. At 1.00 the surface moves with the specks and with the line.'],
   ['Wave shading','waveShade',0.00,3.00,0.05,'Shades the water by the SLOPE of the solved free surface, not just the ripple texture. Surface relief already moves the geometry, so the pillow in front of a rock and the standing wave below it were physically there \u2014 but nothing lit them, so they stayed invisible. This is what makes them read.'],
   ['Whitewater','froth',0.00,2.00,0.05,'Broken white where the flow goes supercritical, meaning the Froude number passes 1 and the water is moving faster than a wave can travel across it. That is the actual physical definition of the boundary between green water and white, and it lands on the lips of drops and the fast shallow chutes without anyone placing it.'],
   ['Flow streaking','streak',0.00,2.00,0.05,'Stretches the surface ripple ALONG the current and squeezes it across, which is how moving water actually looks and the main reason you can read a river at a glance. Raise it if you want the current legible without the specks turned on.'],
@@ -2782,18 +2782,31 @@ const waterMat=new THREE.ShaderMaterial({
 
          The wave-celerity layer stays underneath as a minority contribution,
          because a real surface does carry both, but it no longer leads. */
+      /* The offset has to be applied in METRES, before the UV scale, or the
+         pattern does not travel at the speed you asked for. It used to read
+         sAlong*0.42/st - tsp*ph*1.5 : the coordinate is scaled by 0.42/st but
+         the offset was scaled by a flat 1.5, so the pattern actually moved at
+         1.96*st times the water speed — and st itself grows with speed, so
+         the error grew with the current and the two scales below travelled at
+         different speeds from each other as well. Subtract the distance
+         travelled from the world coordinate and let the same scale apply to
+         both, and the surface moves at exactly tsp m/s at every scale, every
+         stretch and every speed. */
       float cyc=0.55;
       float ph1=fract(uTime*cyc), ph2=fract(uTime*cyc+0.5);
       float blend=abs(1.0-2.0*ph1);
       float tsp=sp*uDrift+(sp-cel)*(1.0-uDrift)*0.35;
-      vec2 fA1=vec2(sAlong*0.42/st-tsp*ph1*1.5, sAcross*0.42*(0.55+0.45/st));
-      vec2 fA2=vec2(sAlong*0.42/st-tsp*ph2*1.5, sAcross*0.42*(0.55+0.45/st));
+      float uvA=0.42/st, uvAcr=0.42*(0.55+0.45/st);
+      vec2 fA1=vec2((sAlong-tsp*ph1/cyc)*uvA, sAcross*uvAcr);
+      vec2 fA2=vec2((sAlong-tsp*ph2/cyc)*uvA, sAcross*uvAcr);
       vec2 nA=mix(texture2D(uNorm,fA1).xy,texture2D(uNorm,fA2).xy,blend)*2.0-1.0;
       /* second scale, offset in phase so the two never reset together */
-      float qh1=fract(uTime*cyc*0.73+0.31), qh2=fract(uTime*cyc*0.73+0.81);
+      float cycB=cyc*0.73;
+      float qh1=fract(uTime*cycB+0.31), qh2=fract(uTime*cycB+0.81);
       float qblend=abs(1.0-2.0*qh1);
-      vec2 fB1=vec2(sAlong*1.55/st-tsp*qh1*1.5, sAcross*1.55);
-      vec2 fB2=vec2(sAlong*1.55/st-tsp*qh2*1.5, sAcross*1.55);
+      float uvB=1.55/st;
+      vec2 fB1=vec2((sAlong-tsp*qh1/cycB)*uvB, sAcross*1.55);
+      vec2 fB2=vec2((sAlong-tsp*qh2/cycB)*uvB, sAcross*1.55);
       vec2 nB=mix(texture2D(uNorm,fB1).xy,texture2D(uNorm,fB2).xy,qblend)*2.0-1.0;
       /* chop grows with speed; an upwelling flattens it right out */
       float calm=1.0-clamp(boil,0.0,1.0)*0.80*uBoil;
@@ -2846,10 +2859,55 @@ const waterMat=new THREE.ShaderMaterial({
   const w=new THREE.Mesh(g,waterMat);w.renderOrder=0;w.frustumCulled=false;scene.add(w);
 }
 
+/* ---- how a speck is drawn -------------------------------------------------
+   A speck is not a fleck of foam. What you actually see on a river is a train
+   of small standing crests where the water is fast and shallow, and long thin
+   slicks running down the current where it is slow and deep. Froude number,
+   sp/sqrt(g*d), is the number that separates those two, and it is already the
+   number that decides where the water turns white — so it decides the shape
+   here too: a bar ACROSS the current at high Froude, a line ALONG it at low.
+
+   Size follows Froude rather than raw speed for the same reason. Fast water
+   over two metres of pool is a slick; the same speed over eight inches of
+   cobble is a riffle, and only one of them should stand up. */
+const GLSL_RIFFLE=`
+/* screen-space direction of a horizontal world vector. The aspect ratio comes
+   out of the projection matrix — P[1][1]/P[0][0] — so it is correct per eye in
+   the headset without needing a resolution uniform that XR would get wrong. */
+vec2 screenDir(vec3 wp, vec2 off, mat4 mvm){
+  vec4 a=projectionMatrix*mvm*vec4(wp,1.0);
+  vec4 b=projectionMatrix*mvm*vec4(wp+vec3(off.x,0.0,off.y),1.0);
+  vec2 d=b.xy/max(abs(b.w),1e-4)-a.xy/max(abs(a.w),1e-4);
+  float asp=projectionMatrix[1][1]/max(abs(projectionMatrix[0][0]),1e-5);
+  d=vec2(d.x*asp,-d.y);          /* gl_PointCoord y runs DOWN the screen */
+  float l=length(d);
+  return l>1e-6 ? d/l : vec2(1.0,0.0);
+}
+float riffleGrow(float fr){ return 0.60+1.60*smoothstep(0.15,1.05,fr); }
+float riffleAlpha(float fr){ return 0.45+0.55*smoothstep(0.20,0.90,fr); }`;
+const GLSL_RIFFLE_FRAG=`
+    varying float vA,vFr; varying vec2 vDir;
+    void main(){
+      vec2 d=gl_PointCoord-0.5;
+      /* into the flow frame: x along the current, y across it */
+      vec2 f=vec2(dot(d,vDir),dot(d,vec2(-vDir.y,vDir.x)));
+      float crest=smoothstep(0.25,0.85,vFr);
+      vec2 g=f*mix(vec2(1.0,3.4),vec2(3.4,1.0),crest);
+      float r=dot(g,g);
+      if(r>0.25) discard;
+      float a=(1.0-smoothstep(0.03,0.25,r))*vA;
+      gl_FragColor=vec4(mix(vec3(0.78,0.87,0.90),vec3(1.00,1.00,0.97),crest),a);
+    }`;
+
 /* specks */
 const SPECK=4000;
 const spPos=new Float32Array(SPECK*3),spDep=new Float32Array(SPECK),spLife=new Float32Array(SPECK);
 const spAlpha=new Float32Array(SPECK);
+/* flow direction and Froude number per particle, so the CPU path can be shaded
+   by exactly the same rule as the GPU one — otherwise toggling the model
+   changes the whole look of the river, which is the thing this was supposed to
+   stop doing */
+const spFlow=new Float32Array(SPECK*3);
 const GX=14,GZ=9;let cellCursor=0;
 function seedSpeck(i,cx,mode){
   const p=i*3;
@@ -2872,24 +2930,26 @@ for(let i=0;i<SPECK;i++) seedSpeck(i,0,1);
 const speckGeo=new THREE.BufferGeometry();
 speckGeo.setAttribute('position',new THREE.BufferAttribute(spPos,3));
 speckGeo.setAttribute('alpha',new THREE.BufferAttribute(spAlpha,1));
+speckGeo.setAttribute('aFlow',new THREE.BufferAttribute(spFlow,3));
 const speckMat=new THREE.ShaderMaterial({
   transparent:true,depthWrite:false,
   uniforms:{uSize:{value:P.speckSize}},
   vertexShader:`
-    attribute float alpha; varying float vA; uniform float uSize;
+    attribute float alpha; attribute vec3 aFlow;
+    uniform float uSize;
+    varying float vA,vFr; varying vec2 vDir;
+    ${GLSL_RIFFLE}
     void main(){
-      vA=alpha;
+      float sp=length(aFlow.xy);
+      vFr=aFlow.z;
+      vDir=screenDir(position, (sp>1e-4?aFlow.xy/sp:vec2(1.0,0.0))*0.25, modelViewMatrix);
+      float grow=riffleGrow(vFr);
+      vA=alpha*riffleAlpha(vFr);
       vec4 mv=modelViewMatrix*vec4(position,1.0);
-      gl_PointSize=clamp(260.0*uSize/max(-mv.z,0.4),1.0,26.0*uSize);
+      gl_PointSize=clamp(520.0*uSize*grow/max(-mv.z,0.4),1.0,52.0*uSize*grow);
       gl_Position=projectionMatrix*mv;
     }`,
-  fragmentShader:`
-    varying float vA;
-    void main(){
-      vec2 d=gl_PointCoord-0.5;float r=dot(d,d);
-      if(r>0.25) discard;
-      gl_FragColor=vec4(0.96,0.99,0.97,(1.0-smoothstep(0.06,0.25,r))*vA);
-    }`});
+  fragmentShader:GLSL_RIFFLE_FRAG});
 const specks=new THREE.Points(speckGeo,speckMat);
 specks.frustumCulled=false;specks.renderOrder=2;scene.add(specks);
 
@@ -3149,11 +3209,12 @@ const gSpeckMat=new THREE.ShaderMaterial({
     uniform vec2 uGMin,uGSize;
     uniform sampler2D uFlow,uState,uHt;
     uniform vec4 uVort[8];
-    varying float vA;
+    varying float vA,vFr; varying vec2 vDir;
     ${GLSL_SURF}
     ${GLSL_FLOW}
     ${GLSL_SDEV}
     ${GLSL_HASH}
+    ${GLSL_RIFFLE}
     void main(){
       vec4 s=texture2D(uState,aRef);
       vec2 p=s.xy; float age=s.z, sd=s.w;
@@ -3171,25 +3232,27 @@ const gSpeckMat=new THREE.ShaderMaterial({
         }
       }
       float dep=depthHere(p);
-      float sp=length(flowAt(p));
+      vec2 fv=flowAt(p);
+      float sp=length(fv);
+      vFr=sp/sqrt(9.81*max(dep,0.03));
       float life=speckLife(sd,uSpread,uLife);
       float dz=(hsh(sd*17.3)<0.55)?0.0:-hsh(sd*29.7)*0.35;
       float fade=smoothstep(0.0,0.8,age)*(1.0-smoothstep(life-0.7,life,age));
-      vA=fade*smoothstep(0.06,0.16,dep)*(0.55+0.45*step(0.02,sp))*(1.0-0.30*aVert);
+      vA=fade*smoothstep(0.06,0.16,dep)*(0.55+0.45*step(0.02,sp))
+         *riffleAlpha(vFr)*(1.0-0.30*aVert);
       /* drawn on the SOLVED surface, so a speck riding the pillow in front of
          a rock rides it rather than sinking through it */
       vec3 wp=vec3(p.x, surfY(p.x)+surfaceDev(p)*uWave+0.014+dz, p.y);
+      vDir=screenDir(wp, (sp>1e-4?fv/sp:vec2(1.0,0.0))*0.25, modelViewMatrix);
+      /* the head is the crest; the two ghosts behind it are the rest of the
+         wave train, spaced by however far the water carried it in uTrail
+         seconds — so the spacing reads as speed on its own */
+      float grow=riffleGrow(vFr)*(1.0-0.20*aVert);
       vec4 mv=modelViewMatrix*vec4(wp,1.0);
-      gl_PointSize=clamp(260.0*uSize*(1.0-0.20*aVert)/max(-mv.z,0.4),1.0,26.0*uSize);
+      gl_PointSize=clamp(520.0*uSize*grow/max(-mv.z,0.4),1.0,52.0*uSize*grow);
       gl_Position=projectionMatrix*mv;
     }`,
-  fragmentShader:`
-    varying float vA;
-    void main(){
-      vec2 d=gl_PointCoord-0.5; float r=dot(d,d);
-      if(r>0.25) discard;
-      gl_FragColor=vec4(0.96,0.99,0.97,(1.0-smoothstep(0.06,0.25,r))*vA);
-    }`});
+  fragmentShader:GLSL_RIFFLE_FRAG});
 const gSpecks=new THREE.Points(gSpeckGeo,gSpeckMat);
 gSpecks.frustumCulled=false;gSpecks.renderOrder=2;gSpecks.visible=false;scene.add(gSpecks);
 
@@ -5593,6 +5656,8 @@ renderer.setAnimationLoop(()=>{
       const p=i*3;
       computeFlow(spPos[p],spPos[p+2]);
       const sp=Math.hypot(flowX,flowZ);
+      const dh=Math.max(bedDepth(spPos[p],spPos[p+2])+solvedDev(spPos[p],spPos[p+2]),0.03);
+      spFlow[p]=flowX; spFlow[p+1]=flowZ; spFlow[p+2]=sp/Math.sqrt(9.81*dh);
       spPos[p]+=flowX*dt;spPos[p+2]+=flowZ*dt;
       spLife[i]-=dt*(sp<0.055?9:1);
       if(spPos[p]>_camW.x+P.speckRange*1.15||spPos[p]<_camW.x-P.speckRange*1.5||spLife[i]<0||
@@ -5602,6 +5667,7 @@ renderer.setAnimationLoop(()=>{
       spPos[p+1]=filmY(spPos[p],spPos[p+2],simTime)+0.014+spDep[i];
     }
     speckGeo.attributes.position.needsUpdate=true;
+    speckGeo.attributes.aFlow.needsUpdate=true;
   }
 
   zoneGrp.visible=P.showZones>0.5;
