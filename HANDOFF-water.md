@@ -207,6 +207,18 @@ whole cycle out of step. The pattern stops being a continuous field being
 carried along and becomes noise that differs per pixel. This has been tried and
 reverted once; don't try it again.
 
+**If the river goes invisible and every water setting goes dead at once, that
+is a shader compile failure, not a logic bug.** A GLSL program that fails to
+link means the mesh is simply not drawn — you see the bed through where the
+water should be, which reads as perfect clarity, and nothing responds to any
+slider because there is nothing being shaded. Check the browser console for the
+GLSL error before touching any JS. `node glslcheck.mjs` catches the two that
+have shipped: a duplicate declaration in one scope (`float fr` twice), and a
+**backtick inside a GLSL comment** — shaders live in JS template literals, so a
+backtick in prose ends the string and truncates the shader mid-function. Both
+are invisible in a diff and neither is a JS error, so the smoke harness passes
+straight through them.
+
 **Standing waves** (`standWave`) are the one surface cue a scrolled normal map
 cannot produce. Everything else on the surface is a texture dragged downstream,
 so its *shapes* are whatever the noise contains — it can follow direction and

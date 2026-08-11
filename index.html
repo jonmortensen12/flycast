@@ -2832,10 +2832,6 @@ const waterMat=new THREE.ShaderMaterial({
          therefore blurred into mush at any real speed while the coarse layer
          moved correctly. That is the residual mismatch.
 
-         Working in tiles instead of seconds fixes it and is shorter: travel
-         TILE tiles per cycle, so the two copies are always TILE/2 of a tile
-         apart at every scale, every stretch and every speed, and the pattern's
-         UV velocity is TILE*rate = tsp*uv, which is the water speed exactly. */
       /* The rate has to be a CONSTANT, not derived per pixel. Deriving it from
          the local speed made fract(uTime*rate) diverge between neighbouring
          pixels — after a minute, two pixels a hand's width apart with a 1%
@@ -2884,7 +2880,14 @@ const waterMat=new THREE.ShaderMaterial({
          critical point, which is why crests pack tighter as the water speeds
          up, and amplitude from how close Fr gets to 1, which is why they
          appear on the fast shallow tongue and nowhere else. */
-      float fr=sp/sqrt(9.81*max(d,0.03));
+      /* fr is already computed above, from the same cel — redeclaring it here
+         is what broke the shader. GLSL rejects the duplicate at compile time,
+         the water program never links, and the mesh simply is not drawn: you
+         see the bed through where the water should be, which reads as perfect
+         clarity, and NOTHING on the water responds to any setting because
+         there is no water being shaded. If the river ever goes invisible and
+         every water slider goes dead at once, that is a shader compile failure,
+         not a logic bug — check the console for the GLSL error first. */
       float stand=smoothstep(0.55,1.05,fr)*(1.0-smoothstep(1.9,3.2,fr));
       if(uStand>0.001&&stand>0.001){
         /* clamped, and it matters: the raw relation gives 7 m at Fr 1.5 and
