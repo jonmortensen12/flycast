@@ -173,12 +173,32 @@ independent.
    layer, which is the one carrying the detail you read the current off, was
    blurred to mush at any real speed while the coarse layer moved correctly.
 
-Both are solved by working in **tiles, not seconds**: travel `TILE` (0.36)
-tiles per cycle, so the copies are always `TILE/2` of a tile apart at every
-scale, stretch and speed, and the UV velocity is `TILE*rate = tsp*uv`, which is
-the water speed by construction. If the surface ever looks like it is sliding
-at the wrong rate again, check that no constant has crept back in between the
-coordinate and its offset.
+(1) is fixed by subtracting the distance travelled from the world coordinate
+before the UV scale. (2) is fixed with **two constants, one per scale**
+(`cycA 1.60`, `cycB 5.50`) rather than the old flat 0.55 for both. Because the
+streak stretch grows the wavelength with speed, one constant per scale holds
+the separation-to-wavelength ratio roughly steady across the speed range.
+
+**The rate must be a compile-time constant, not derived from the local speed.**
+Deriving it per pixel is tempting — it makes the separation exactly constant —
+and it is wrong: `fract(uTime*rate)` diverges between neighbouring pixels, so
+after a minute two pixels a hand's width apart with a 1% speed difference are a
+whole cycle out of step. The pattern stops being a continuous field being
+carried along and becomes noise that differs per pixel. This has been tried and
+reverted once; don't try it again.
+
+**Speck budget.** 25600 specks, three vertices each. There is no fixed ceiling
+— it is `GS_W`, and raising it costs one more row and column of the update pass
+plus three more points. What made the last doubling free was removing waste
+from the draw, not spending more: `fieldAt()` returns velocity *and* depth from
+one texel instead of `flowAt()` and `depthHere()` fetching the same texel
+twice, and trail vertices take one RK2 back-step instead of four. Vertex
+texture fetches went 326k at 12544 specks to 333k at 25600. **If the budget is
+raised again, that is the number to check** — fill rate becomes the next limit,
+not fetches, and `speckSize` drives fill quadratically.
+
+The CPU path's 4000 is a real ceiling: each particle costs a `computeFlow()`
+call in JavaScript.
 
 **Speck colour** is `uSpeckC` / `uSpeckB`, shared by both speck materials and
 set from `speckHue`/`speckSat`/`speckBright` in `updateWaterColour()`. The tint

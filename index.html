@@ -254,10 +254,10 @@ const MENU=[
   ['Manning n','manningN',0.015,0.120,0.005,'Bed roughness. Gravel trout streams run about 0.035-0.06. This is what sets the actual current speed, together with slope and depth — deeper water runs faster for the same slope, and riffles are fast because they are steep, not because they are shallow.'],
   ['Current','current',0.10,1.40,0.05,'Master flow multiplier. On the grid model it scales the driving slope; on the analytic model it is discharge per unit width.'],
   ['River grade','grade',0.00,2.50,0.10,'Steepness of the reach and the size of the drops between pools. Rebuilds the bed live.'],
-  ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: 12544 specks living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
+  ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: 25600 specks living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
   ['Speck life s','speckTravel',2.00,20.0,0.50,'How long a speck lives before it fades out and is reborn upstream. Longer specks trace the whole run of the river past you; shorter ones read as local flow direction. Specks seeded around you live about a third as long as ones drifting down from upstream.'],
   ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter crests behind it, spaced by however far the water actually carried it in this many seconds — so the spacing IS the speed, and the three together read as a short wave train. Zero collapses them onto the head.'],
-  ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 12544 on the GPU path.'],
+  ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 25600 on the GPU path. The CPU number is a real ceiling — each of those costs a flow evaluation in JavaScript — but the GPU number is just where the budget was set, so say if you want it higher.'],
   ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck. Size also scales with Froude number on top of this, so riffles stand up and pool slicks stay fine — this sets the baseline.'],
   ['Speck range','speckRange',6.00,45.0,1.00,'How far upstream and downstream specks are kept, in metres. A shorter range packs the same count into less river, so you can read the flow with far fewer of them.'],
   ['Speck spread','speckSpread',0.00,1.00,0.05,'Share of specks respawning on a grid around you rather than drifting from upstream. Raise it to see flow in dead water.'],
@@ -2683,7 +2683,7 @@ const waterMat=new THREE.ShaderMaterial({
     uNorm:{value:waterNormalTex},uHt:{value:null},
     uUseGridV:{value:0},uWave:{value:P.surfWave},uManN:{value:P.manningN},
     uExt:{value:new THREE.Vector3(2.55,1.42,1.44)},uSed:{value:P.sediment},
-    uSedC:{value:new THREE.Color(0xa9c0bb)},uSat:{value:P.waterSat},
+    uSedC:{value:new THREE.Color(0xa9c0bb)},
     uClarity:{value:P.clarity},uOpaque:{value:P.waterOpaque},
     uStreak:{value:P.streak},uBoil:{value:P.boil},
     uWaveN:{value:P.waveShade},uFroth:{value:P.froth},uDrift:{value:P.drift},
@@ -2730,7 +2730,7 @@ const waterMat=new THREE.ShaderMaterial({
   fragmentShader:`
     uniform vec3 uDeep,uShal,uFast,uFoamC,uSkyLo,uSkyHi,uSun,uFogC;
     uniform float uUseGrid,uTime,uDetail,uFoamK,uGlint,uFogD,uStreak,uBoil;
-    uniform float uWaveN,uFroth,uCell,uDrift,uSed,uSat,uClarity,uOpaque;
+    uniform float uWaveN,uFroth,uCell,uDrift,uSed,uClarity,uOpaque;
     uniform vec3 uExt,uSedC;
     uniform vec2 uGMin,uGSize,uGTexel;
     uniform sampler2D uFlow; uniform sampler2D uNorm; uniform sampler2D uHt;
@@ -2825,18 +2825,31 @@ const waterMat=new THREE.ShaderMaterial({
          TILE tiles per cycle, so the two copies are always TILE/2 of a tile
          apart at every scale, every stretch and every speed, and the pattern's
          UV velocity is TILE*rate = tsp*uv, which is the water speed exactly. */
-      const float TILE=0.36;
-      float rA=tsp*uvA/TILE, rB=tsp*uvB/TILE;
-      float a1=fract(uTime*rA), a2=fract(uTime*rA+0.5);
-      float blend=abs(1.0-2.0*a1);
-      vec2 fA1=vec2(sAlong*uvA-TILE*a1, sAcross*uvAcr);
-      vec2 fA2=vec2(sAlong*uvA-TILE*a2, sAcross*uvAcr);
+      /* The rate has to be a CONSTANT, not derived per pixel. Deriving it from
+         the local speed made fract(uTime*rate) diverge between neighbouring
+         pixels — after a minute, two pixels a hand's width apart with a 1%
+         speed difference are a whole cycle out of step, so the pattern stops
+         being a continuous field being carried along and starts being noise
+         that differs per pixel. That is the regression.
+
+         Two constants instead, one per scale, chosen against each scale's own
+         wavelength. The half-cycle separation between the two copies is
+         tsp*0.5/cyc metres; the fine scale needs a much faster cycle than the
+         coarse one to keep that a small fraction of its shorter wavelength,
+         which the old flat 0.55 for both did not. And because the streak
+         stretch grows the wavelength with speed, one constant per scale holds
+         the ratio roughly steady across the whole speed range. */
+      const float cycA=1.60, cycB=5.50;
+      float ph1=fract(uTime*cycA), ph2=fract(uTime*cycA+0.5);
+      float blend=abs(1.0-2.0*ph1);
+      vec2 fA1=vec2((sAlong-tsp*ph1/cycA)*uvA, sAcross*uvAcr);
+      vec2 fA2=vec2((sAlong-tsp*ph2/cycA)*uvA, sAcross*uvAcr);
       vec2 nA=mix(texture2D(uNorm,fA1).xy,texture2D(uNorm,fA2).xy,blend)*2.0-1.0;
       /* second scale, offset in phase so the two never reset together */
-      float b1=fract(uTime*rB+0.31), b2=fract(uTime*rB+0.81);
-      float qblend=abs(1.0-2.0*b1);
-      vec2 fB1=vec2(sAlong*uvB-TILE*b1, sAcross*1.55);
-      vec2 fB2=vec2(sAlong*uvB-TILE*b2, sAcross*1.55);
+      float qh1=fract(uTime*cycB+0.31), qh2=fract(uTime*cycB+0.81);
+      float qblend=abs(1.0-2.0*qh1);
+      vec2 fB1=vec2((sAlong-tsp*qh1/cycB)*uvB, sAcross*1.55);
+      vec2 fB2=vec2((sAlong-tsp*qh2/cycB)*uvB, sAcross*1.55);
       vec2 nB=mix(texture2D(uNorm,fB1).xy,texture2D(uNorm,fB2).xy,qblend)*2.0-1.0;
       /* chop grows with speed; an upwelling flattens it right out */
       float calm=1.0-clamp(boil,0.0,1.0)*0.80*uBoil;
@@ -2864,10 +2877,13 @@ const waterMat=new THREE.ShaderMaterial({
       /* sediment SCATTERS light back out rather than absorbing it, so unlike
          everything above it makes deep water brighter, not darker */
       c=mix(c,uSedC,uSed*(1.0-T.g)*0.70);
-      /* chroma of the column only. The sky reflection below is deliberately
-         left alone: grey water under a blue sky is a real winter river, and
-         desaturating the reflection too just makes it look broken. */
-      c=mix(vec3(dot(c,vec3(0.2126,0.7152,0.0722))),c,uSat);
+      /* No separate desaturation pass here any more. Saturation is already in
+         the colour you picked, and the leftover uniform was reading a setting
+         that had been renamed out from under it — so it uploaded as zero and
+         forced the water to full greyscale on every frame, which is why hue
+         and saturation appeared to do nothing at all. The sky reflection below
+         is still applied afterwards, so grey water under a blue sky still
+         works, which was the only reason that pass existed. */
       c=mix(c,sky,clamp(fres*0.90,0.0,0.72)*(0.35+0.65*uGlint));
       c+=vec3(1.0,0.96,0.86)*glint*0.85*uGlint;
 
@@ -3099,7 +3115,12 @@ specks.frustumCulled=false;specks.renderOrder=2;scene.add(specks);
    entire point of drawing flow around a rock. The draw also got cheaper: the
    vertex shader does one state fetch instead of twenty-five field
    evaluations. ------------------------------------------------------------ */
-const GS_W=112, GSPECK=GS_W*GS_W;      /* 12544 real specks, 3 vertices each */
+/* 25600 specks, three vertices each. Doubling this was paid for by the two
+   changes above rather than by spending more: one texture fetch for velocity
+   and depth instead of two, and one back-integration step per trail vertex
+   instead of four. The draw is cheaper per vertex than it was at half the
+   count. `Speck density` still trims from here if you want fewer. */
+const GS_W=160, GSPECK=GS_W*GS_W;
 const GLSL_FLOW=`
 ${GLSL_VDEC}
 ${OBST.map((o,i)=>`const vec4 OB${i}=vec4(${o.x.toFixed(2)},${o.z.toFixed(2)},${o.r.toFixed(3)},${o.kind==='log'?'1.0':'0.0'});`).join('\n')}
@@ -3165,6 +3186,22 @@ float depthHere(vec2 p){
       return texture2D(uFlow,tc).b*3.1875;
   }
   return depthAt(p);
+}
+/* velocity AND depth from ONE fetch — they live in the same texel, and asking
+   for them separately was doubling the sampling cost of every speck vertex for
+   nothing. */
+vec3 fieldAt(vec2 p){
+  if(uUseGrid>0.5){
+    vec2 tc=vec2((p.x-uGMin.x)/uGSize.x,(p.y-uGMin.y)/uGSize.y);
+    if(tc.x>0.0&&tc.x<1.0&&tc.y>0.0&&tc.y<1.0){
+      vec4 t=texture2D(uFlow,tc);
+      vec2 e=min(tc,1.0-tc)*uGSize;
+      float w=smoothstep(0.5,2.5,min(e.x,e.y));
+      vec2 g=decodeVel(t.rg);
+      return vec3(w>0.999?g:mix(analyticAt(p),g,w), t.b*3.1875);
+    }
+  }
+  return vec3(analyticAt(p),depthAt(p));
 }`;
 /* the solved free-surface departure, so specks are drawn ON the water the
    renderer actually draws rather than on the flat still-water line */
@@ -3232,7 +3269,7 @@ const gsMat=new THREE.ShaderMaterial({
            the same rule the CPU path has always used */
         age-=uDt*(length(k1)<0.055?9.0:1.0);
       }
-      float dep=depthHere(p);
+      float dep=fieldAt(p).z;
       if(age<=0.0||p.x>uOriginX+uRange*1.15||p.x<uOriginX-uRange*1.5||dep<0.10){
         sd=fract(sd+0.6180339887+uTime*0.017);
         float r1=hsh(sd*97.1), r3=hsh(sd*53.3+7.7);
@@ -3345,15 +3382,18 @@ const gSpeckMat=new THREE.ShaderMaterial({
          already in the right place. */
       float back=aVert*uTrail;
       if(back>0.0){
-        float h=back*0.25;
-        for(int i=0;i<4;i++){
-          vec2 k1=flowAt(p);
-          vec2 k2=flowAt(p-k1*h);
-          p-=0.5*(k1+k2)*h;
-        }
+        /* ONE RK2 step, not four. Second order over a third of a second is
+           already well inside the width of the dot it positions, and this is
+           the vertex the whole draw was spending its budget on: two field
+           samples here instead of eight is most of what paid for doubling the
+           speck count. */
+        vec2 k1=flowAt(p);
+        vec2 k2=flowAt(p-k1*back);
+        p-=0.5*(k1+k2)*back;
       }
-      float dep=depthHere(p);
-      vec2 fv=flowAt(p);
+      vec3 fd=fieldAt(p);
+      float dep=fd.z;
+      vec2 fv=fd.xy;
       float sp=length(fv);
       vFr=sp/sqrt(9.81*max(dep,0.03));
       float life=speckLife(sd,uSpread,uLife);

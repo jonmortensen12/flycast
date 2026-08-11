@@ -395,4 +395,17 @@ const col=vm.runInContext(`(()=>{
   return rows;
 })()`,sandbox);
 console.table(col);
+
+/* count the vertex-shader texture fetches the speck draw actually costs, so a
+   budget change is a number and not a hope */
+const budget=vm.runInContext(`(()=>{
+  const heads=GSPECK, trails=GSPECK*2;
+  /* head: state + fieldAt + surfaceDev.  trail: state + 2 flowAt + fieldAt + surfaceDev */
+  const perHead=3, perTrail=5;
+  return {specks:GSPECK, points:GSPECK*3,
+    vertexFetches:heads*perHead+trails*perTrail,
+    updatePassPixels:GS_W*GS_W,
+    drawRange:gSpeckGeo.drawRange};
+})()`,sandbox);
+console.log('speck draw budget',budget);
 console.log('OK');
