@@ -498,4 +498,28 @@ const rip=vm.runInContext(`(()=>{
 })()`,sandbox);
 console.log('ripple map',rip);
 
+/* Menu layout. This failure mode is silent: rowRect() maps row 22 onto the same
+   pixel as row 11, so an overgrown tab draws settings on top of each other with
+   nothing thrown and nothing logged. Twelve tabs is cheap to check; finding it
+   by eye in a headset is not. */
+const menu=vm.runInContext(`(()=>{
+  const cap=PERCOL*2, over=[], collide=[];
+  for(let t=0;t<TABS.length;t++){
+    const tab=TABS[t];
+    if(tab.rows.length>cap) over.push(tab.name+' ('+tab.rows.length+'/'+cap+')');
+    const seen={}; const save=selTab; selTab=t;
+    for(const i of tab.rows){
+      const r=rowRect(i); if(!r) continue;
+      const k=r.x+'x'+r.y;
+      if(seen[k]!==undefined) collide.push(tab.name+': '+MENU[i][0]+' on '+MENU[seen[k]][0]);
+      else seen[k]=i;
+    }
+    selTab=save;
+  }
+  return {tabs:TABS.length, cap, overflowing:over, overlapping:collide.slice(0,6),
+          overlapCount:collide.length};
+})()`,sandbox);
+console.log('menu layout',menu);
+if(menu.overflowing.length||menu.overlapCount) console.log('  *** MENU LAYOUT FAILURE ***');
+
 console.log('OK');
