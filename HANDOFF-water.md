@@ -313,6 +313,23 @@ set from `speckHue`/`speckSat`/`speckBright` in `updateWaterColour()`. The tint
 multiplies the cool-white slick / warm-white crest base rather than replacing
 it, so saturation 0 is exactly the old look.
 
+**The shipped defaults are a tuned look, not neutral starting values**, taken
+from a share link. Several are deliberately far from where a fresh reading of
+this document would put them, so don't "correct" them:
+
+- `waterOpaque 0` and `watR/G/B` all 0 — the water column contributes no colour
+  or opacity of its own. What you see is sky reflection, foam, ripples and the
+  bed. `clarity 1.0` still shapes the falloff.
+- `waterDetail 0` — the scrolled noise is off entirely. All surface shape comes
+  from `ripple 0.95` (speck-splatted wavelets) and `standWave 1.15`.
+- `ripR/G/B` all 0 with `ripOpacity 0.26` and `ripStain 1.0` — ripples are
+  painted dark and fully stained toward the water colour.
+- `specks 0.16` with `speckBright 2.0` and `speckBudget 560` (313600 specks):
+  few visible specks, bright, but a dense field feeding the ripple map. That
+  combination is the point of the split between the state pass and the visible
+  draw — the map wants every speck, the eye wants a handful.
+- `skyGlint 2.9`, `foam 0.15`, `streak 0.4`, `froth 0.4`, `surfWave 0.65`.
+
 **Cost.** `surfY` costs six smoothsteps and depends only on `x`; it is cached
 per column in `gsurf`, rebuilt with `gslope` whenever the window moves. It was
 previously being called per cell per substep inside the free-surface loop —

@@ -272,6 +272,17 @@ try{
   console.log('module executed');
 }catch(e){ console.log('THROW:',e.message); console.log(e.stack.split('\n').slice(0,4).join('\n')); process.exit(1); }
 
+/* Read the shipped defaults HERE, before any probe below touches P. Read at the
+   end instead and you are reading whatever the last test left behind — which is
+   exactly what happened the first time this check was written. */
+const shipped=vm.runInContext(`(()=>{const o={};for(const k in P)o[k]=P[k];return o;})()`,sandbox);
+console.log('shipped defaults:',{keys:Object.keys(shipped).length,
+  clarity:shipped.clarity, waterOpaque:shipped.waterOpaque,
+  water:[shipped.watR,shipped.watG,shipped.watB],
+  ripple:shipped.ripple, ripOpacity:shipped.ripOpacity, ripStain:shipped.ripStain,
+  standWave:shipped.standWave, speckBudget:shipped.speckBudget,
+  waterDetail:shipped.waterDetail, specks:shipped.specks, speckBright:shipped.speckBright});
+
 /* connect both hands with triggers held, then tick frames */
 try{
   vm.runInContext('renderer.xr.connectAll();',sandbox);
@@ -486,4 +497,5 @@ const rip=vm.runInContext(`(()=>{
           worksWithSpecksHidden:stillOn, offWhenZero:off};
 })()`,sandbox);
 console.log('ripple map',rip);
+
 console.log('OK');
