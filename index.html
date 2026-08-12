@@ -183,6 +183,9 @@ const P = {
   takeRadius:0.7, maxSlip:0.32, latTol:1.2, upMax:6,
   splashV:4.5, lineRad:0.5, spookT:5, fatigue:1,
   riseRate:0.55, feedChance:0.6, nonFeedMult:0.15, fishPower:1,
+  /* venue mechanics. Zero on every river; the pond turns them on. */
+  flySink:0, chaseMin:0.28, chaseMax:1.60, chaseRadius:4.5, chaseSpeed:1.15,
+  chaseChance:0.9, chaseGiveUp:1.4, cruiseSpeed:1, branchOn:0, branchGrip:0.55,
 };
 const MENU=[
   ['— PRESETS —',null,0,0,0,''],
@@ -331,6 +334,26 @@ const MENU=[
   ['Feeding chance','feedChance',0.00,1.00,0.05,'Odds a fish is actively feeding when he re-evaluates. Feeding fish are the catchable ones.'],
   ['Non-feeder mult','nonFeedMult',0.00,1.00,0.05,'Take chance multiplier for a fish that is not feeding.'],
   ['Fish power','fishPower',0.30,2.50,0.05,'How hard a hooked fish pulls and runs.'],
+  ['\u2014 STILLWATER \u2014',null,0,0,0,''],
+  ['Fly sink m/s','flySink',0.00,1.20,0.02,'Terminal sink rate of the fly. At 0 the fly is a dry fly and rides the film exactly as it always has. Above 0 it sinks at this rate AND releases the tippet from the surface, so the leader gets pulled under by the fly instead of holding it up. The pond ships at 0.32; a river venue ships at 0.'],
+  ['Cruise speed','cruiseSpeed',0.10,3.00,0.10,'How fast a stillwater fish works its beat. Cruisers have no lie to hold, so this is what you are leading when you cast in front of one.'],
+  ['Chase min m/s','chaseMin',0.00,1.50,0.05,'How fast the fly must move through the water before a fish reads it as alive. Below this he ignores it, and a fly you stop moving is one he loses interest in.'],
+  ['Chase max m/s','chaseMax',0.30,4.00,0.10,'How fast the fly can move and still be catchable. Strip harder than this and he cannot get in front of it, and he breaks off the chase.'],
+  ['Chase radius m','chaseRadius',0.50,12.0,0.50,'How far away a fish will notice a moving fly and set off after it.'],
+  ['Chase speed','chaseSpeed',0.30,4.00,0.10,'How fast he closes, before the size scaling. This is also how far ahead of the fly he aims, so a faster fish cuts the corner harder.'],
+  ['Chase eagerness','chaseChance',0.05,3.00,0.05,'Odds per second that a fish inside the radius commits to a chase. Scaled down with distance and by whether he is feeding.'],
+  ['Chase patience s','chaseGiveUp',0.20,6.00,0.10,'How long the fly may be too slow, too fast or out of the water before he gives up on it.'],
+  ['\u2014 PLACES \u2014',null,0,0,0,''],
+  ['Cedar Run','!venue:cedar',0,0,0,'Freestone riffle, run and pool. The reach every constant in the game was tuned against, and the one to come back to when something feels wrong. Push right to go there \u2014 the page reloads and your settings come with you.'],
+  ['Boulder Garden','!venue:boulder',0,0,0,'Pocket water: steep, shallow, and a fish in every slot. Drifts last about a second, so it is high-stick and roll casts rather than false casting. Push right to go there.'],
+  ['Stairstep Falls','!venue:falls',0,0,0,'Six lips and six plunge pools. The channel pinches at each lip, which is what builds the tongue and the standing wave under it. Fish sit deep and come a long way up. Push right to go there.'],
+  ['Meadow Glide','!venue:meadow',0,0,0,'Spring creek flat: slow, clear, weeded, and no white water to hide a bad drift behind. Strict drag tolerance and spooky fish. Push right to go there.'],
+  ['The Long Run','!venue:bigrun',0,0,0,'Big water. Wide and deep with the middle running away from the edges, so line laid across the seam is dragged into a belly and has to be mended. Push right to go there.'],
+  ['Undercut Bend','!venue:bend',0,0,0,'A meander pool. Deep and undercut on the outside, shelving gravel on the inside, two sweepers. The only wadeable ground is the inside of the bend. Push right to go there.'],
+  ['Beaver Pond','!venue:pond',0,0,0,'Stillwater. The fish cruise instead of holding, the fly sinks and pulls the tippet under, and a take is earned by stripping it at a speed he believes \u2014 not too slow, not faster than he can swim. Push right to go there.'],
+  ['Alder Tunnel','!venue:alder',0,0,0,'A brush creek with a roof on it. The branches are solid to the line, so there is no backcast and no lifting the rod. Push right to go there.'],
+  ['Branch collision','branchOn',0,1,1,'Whether foliage is solid to the line. Only the Alder Tunnel has any, so this does nothing anywhere else.'],
+  ['Branch grip','branchGrip',0.00,0.95,0.05,'How much speed the line loses where it touches a branch. At 0 it slides off; near 1 it stops dead in the leaves.'],
 ];
 
 /* values derived from real tackle — see the notes beside each menu row */
@@ -378,41 +401,403 @@ const MAXNODE=1900, TOTAL_LINE=34.0, FLYLINE_LEN=27.0;
 const MIN_SLACK=0.25, MIN_OUT=4.0;
 let hooked=null;
 
+/* ════════════════════════════════════════════════════════════
+   1b. VENUES
+
+   Every venue is one descriptor. The river used to be four constants
+   and two functions; it is now the same four constants and two
+   functions read out of the descriptor, so a new place to fish is a
+   data entry rather than an engine change.
+
+   The catch is that the channel exists TWICE — once in JS for the
+   solver, the bed mesh, the fish and the line, and once in GLSL for
+   the water surface, the bed shading and the GPU specks. Each venue
+   therefore supplies both, written line for line against each other:
+   dz(x)  centreline offset from the river axis
+   hw(x)  half width at that station
+   dep(x,zr)  still-water depth, zr measured from the AXIS (not the
+              centreline), so it is the same coordinate the rest of
+              the engine uses.
+
+   Nothing here depends on P, so the GLSL is pure and gets baked into
+   the shaders at load. That is also why venues cannot hot-swap: the
+   switch writes the venue into the URL and reloads.
+   ════════════════════════════════════════════════════════════ */
+const CZ=-9.0;                       /* the river axis. Everything is relative to it. */
+const SG=(x,c,w)=>{const t=(x-c)/w;return Math.exp(-t*t);};
+const SCROSS=u=>Math.max(0,1-u*u);
+const STH=a=>a/(1+Math.abs(a));      /* bounded, smooth, and exists in GLSL 1.0 */
+const SSS=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
+
+/* holes: gaussian scour pockets added to the still depth. Written once as
+   data and emitted into both languages, because a plunge pool that exists in
+   the solver but not in the water shader is a pool you cannot see. */
+const holesJS=(list)=>(x,zr)=>{
+  let d=0;
+  for(let i=0;i<list.length;i++){const o=list[i];
+    d+=o.d*SG(x,o.x,o.rx)*SG(zr,o.z,o.rz);}
+  return d;
+};
+const holesGL=(list)=>list.length
+  ? list.map(o=>`d+=${o.d.toFixed(3)}*scG(x,${o.x.toFixed(2)},${o.rx.toFixed(2)})*scG(zr,${o.z.toFixed(2)},${o.rz.toFixed(2)});`).join('\n  ')
+  : '';
+
+/* a line of boulders down a reach, at a spacing and a wander */
+function boulderRow(n,x0,dx,seed){
+  const out=[];let s=seed;
+  const rnd=()=>{s=(s*16807)%2147483647;return s/2147483647;};
+  for(let i=0;i<n;i++){
+    const r=0.55+rnd()*0.55;
+    out.push({x:x0+i*dx+(rnd()-0.5)*dx*0.35,
+              z:(rnd()*2-1)*2.9, r:r, h:0.95+rnd()*0.7,
+              kind:'rock',sh:0,sgn:rnd()<0.5?1:-1});
+  }
+  return out;
+}
+
+/* The numbers a venue owns. Anything listed here is reset to the neutral
+   value on every venue change before the venue's own overrides go on, so
+   leaving the pond cannot leave you on a river with a sinking dry fly.
+   Tackle — rod, line, leader, friction, reel — is deliberately NOT here:
+   that is yours, and it travels with you. */
+const VENUE_BASE={
+  grade:1, current:1, gridCell:0.45, gridSpan:80, obstHeight:0.85, vortex:0.6,
+  foam:0.15, foamLife:1.5, surfWave:0.65, waveShade:0.65, drift:1,
+  clarity:1, sediment:0.06, specks:0.16, speckSize:0.051, speckRange:45,
+  treeRange:38, takeRadius:0.7, maxSlip:0.32, lineRad:0.5, splashV:4.5,
+  spookT:5, riseAggro:0.35, riseRate:0.55, feedChance:0.6,
+  flySink:0, branchOn:0, cruiseSpeed:1,
+};
+
+const SCENES={};
+
+/* ── 01 CEDAR RUN ─────────────────────────────────────────────
+   The reach every constant in this file was tuned against. Left
+   numerically identical to the version before venues existed. */
+SCENES.cedar={
+  name:'Cedar Run', sub:'freestone riffle, run and pool',
+  hwMax:7.0, dzMax:0.0, dMax:1.5, slope:0.0075,
+  drops:[{x:-46,h:0.20,w:1.8},{x:-25,h:0.16,w:1.5},{x:-6,h:0.22,w:1.2},
+         {x:15,h:0.18,w:2.0},{x:38,h:0.21,w:1.6},{x:60,h:0.17,w:1.4}],
+  dz:x=>0,
+  hw:x=>7.0,
+  dep:(x,zr)=>1.5*SCROSS(zr/7.0)*(0.55+0.45*Math.sin(x*0.13+1.3)),
+  glsl:`
+float scDz(float x){return 0.0;}
+float scHw(float x){return 7.0;}
+float scDep(float x,float zr){return 1.5*scCross(zr/7.0)*(0.55+0.45*sin(x*0.13+1.3));}`,
+  obst:[{x:-7.0,z:1.4,r:0.85,h:1.25,kind:'rock',sh:0,sgn:1},
+        {x: 1.5,z:-1.4,r:1.05,h:1.60,kind:'rock',sh:0,sgn:-1},
+        {x: 6.5,z:2.1,r:0.62,h:1.05,kind:'rock',sh:0,sgn:1},
+        {x:-3.0,z:-3.2,r:1.60,h:0.90,kind:'log',sh:0,sgn:-1}],
+  lies:[{x:-2.0,z:1.8,len:0.40},{x:-6.2,z:2.4,len:0.32},
+        {x:2.6,z:-2.0,len:0.46},{x:7.4,z:1.0,len:0.35}],
+  spawn:{x:0,z:0},
+  par:{}
+};
+
+/* ── 02 BOULDER GARDEN ────────────────────────────────────────
+   Steep, shallow, and every fish is inside a rod length. The
+   pockets are scour holes in the bed, so the solver makes the
+   slack water rather than it being painted on. */
+{
+  const rocks=boulderRow(11,-42,8.4,9973);
+  const holes=rocks.map(o=>({x:o.x+o.r*1.9,z:o.z,rx:o.r*2.0,rz:o.r*1.6,d:0.50}));
+  const hF=holesJS(holes);
+  SCENES.boulder={
+    name:'Boulder Garden', sub:'pocket water, short drifts, forty targets',
+    hwMax:5.4, dzMax:0.6, dMax:1.1, slope:0.030,
+    drops:[{x:-48,h:0.34,w:1.1},{x:-36,h:0.30,w:1.0},{x:-24,h:0.36,w:1.1},
+           {x:-12,h:0.32,w:1.0},{x:0,h:0.35,w:1.1},{x:12,h:0.31,w:1.0},
+           {x:24,h:0.37,w:1.1},{x:36,h:0.30,w:1.0},{x:48,h:0.34,w:1.1}],
+    dz:x=>0.5*Math.sin(x*0.08),
+    hw:x=>4.4+0.9*Math.sin(x*0.19+1.0),
+    dep:(x,zr)=>0.56*SCROSS((zr-0.5*Math.sin(x*0.08))/(4.4+0.9*Math.sin(x*0.19+1.0)))
+                *(0.70+0.30*Math.sin(x*0.31))+hF(x,zr),
+    glsl:`
+float scDz(float x){return 0.5*sin(x*0.08);}
+float scHw(float x){return 4.4+0.9*sin(x*0.19+1.0);}
+float scDep(float x,float zr){
+  float d=0.56*scCross((zr-scDz(x))/scHw(x))*(0.70+0.30*sin(x*0.31));
+  ${holesGL(holes)}
+  return d;}`,
+    obst:rocks,
+    lies:[{x:-33.5,z:-0.6,len:0.26},{x:-16.0,z:1.4,len:0.30},
+          {x:-1.5,z:-1.9,len:0.24},{x:9.5,z:0.8,len:0.33},
+          {x:22.0,z:-2.2,len:0.28},{x:35.0,z:1.6,len:0.31}],
+    par:{grade:1, current:0.85, gridCell:0.30, gridSpan:52, obstHeight:0.95,
+         vortex:0.9, foam:0.35, takeRadius:0.45, maxSlip:0.42, riseAggro:0.55,
+         speckRange:26}
+  };
+}
+
+/* ── 03 STAIRSTEP FALLS ───────────────────────────────────────
+   Six lips, six plunge pools. The channel pinches at every lip,
+   which is what makes the tongue and the standing wave below it. */
+{
+  const lips=[-45,-27,-9,9,27,45];
+  const holes=lips.map(l=>({x:l+5.5,z:0,rx:4.2,rz:5.0,d:1.85}));
+  const lipCut=lips.map(l=>({x:l,z:0,rx:1.8,rz:9.0,d:-0.30}));
+  const all=holes.concat(lipCut);
+  const hF=holesJS(all);
+  SCENES.falls={
+    name:'Stairstep Falls', sub:'step and plunge pool, foam you can read',
+    hwMax:6.6, dzMax:0.0, dMax:2.4, slope:0.006,
+    drops:lips.map(l=>({x:l,h:1.20,w:1.3})),
+    dz:x=>0,
+    hw:x=>{let w=6.6;
+      for(let i=0;i<lips.length;i++) w-=3.2*SG(x,lips[i],2.6);
+      return w;},
+    dep:(x,zr)=>{let w=6.6;
+      for(let i=0;i<lips.length;i++) w-=3.2*SG(x,lips[i],2.6);
+      return Math.max(0,0.50*SCROSS(zr/w)+hF(x,zr)*SCROSS(zr/(w+1.5)));},
+    glsl:`
+float scDz(float x){return 0.0;}
+float scHw(float x){
+  float w=6.6;
+  ${lips.map(l=>`w-=3.2*scG(x,${l.toFixed(1)},2.6);`).join('\n  ')}
+  return w;}
+float scDep(float x,float zr){
+  float w=scHw(x);
+  float d=0.0;
+  ${holesGL(all)}
+  return max(0.0,0.50*scCross(zr/w)+d*scCross(zr/(w+1.5)));}`,
+    obst:[{x:-22,z:3.4,r:0.90,h:1.40,kind:'rock',sh:0,sgn:1},
+          {x:-4,z:-3.6,r:1.00,h:1.55,kind:'rock',sh:0,sgn:-1},
+          {x:14,z:3.0,r:0.80,h:1.30,kind:'rock',sh:0,sgn:1},
+          {x:32,z:-3.2,r:0.95,h:1.45,kind:'rock',sh:0,sgn:-1}],
+    lies:[{x:-40.0,z:0.6,len:0.38},{x:-22.5,z:-1.8,len:0.34},
+          {x:-3.0,z:1.2,len:0.50},{x:14.5,z:-1.0,len:0.42},
+          {x:31.0,z:0.8,len:0.36}],
+    par:{grade:1, current:1.05, gridCell:0.32, gridSpan:56, foam:0.55,
+         foamLife:3.0, vortex:1.1, surfWave:0.9, waveShade:0.9,
+         riseAggro:0.65, takeRadius:0.8}
+  };
+}
+
+/* ── 04 MEADOW GLIDE ──────────────────────────────────────────
+   The cheapest venue here and the hardest to fish. Nothing but
+   slow clear water and a fish that gets a long look at your fly. */
+SCENES.meadow={
+  name:'Meadow Glide', sub:'spring creek flat, slow, clear, technical',
+  hwMax:6.1, dzMax:0.8, dMax:1.1, slope:0.0012,
+  drops:[],
+  dz:x=>0.8*Math.sin(x*0.04),
+  hw:x=>5.6+0.5*Math.sin(x*0.07+2.0),
+  dep:(x,zr)=>1.05*Math.pow(SCROSS((zr-0.8*Math.sin(x*0.04))/(5.6+0.5*Math.sin(x*0.07+2.0))),0.70),
+  glsl:`
+float scDz(float x){return 0.8*sin(x*0.04);}
+float scHw(float x){return 5.6+0.5*sin(x*0.07+2.0);}
+float scDep(float x,float zr){return 1.05*pow(max(scCross((zr-scDz(x))/scHw(x)),1e-4),0.70);}`,
+  obst:[],
+  lies:[{x:-26,z:-2.0,len:0.36},{x:-11,z:2.4,len:0.44},
+        {x:4,z:-1.2,len:0.52},{x:19,z:2.0,len:0.40},{x:34,z:-2.4,len:0.38}],
+  weeds:[{x:-32,z:-2.2,r:2.4},{x:-18,z:2.6,r:2.0},{x:-2,z:-1.4,r:2.8},
+         {x:12,z:2.2,r:2.2},{x:27,z:-2.6,r:2.5},{x:40,z:1.8,r:2.3}],
+  par:{grade:1, current:0.55, gridCell:0.45, gridSpan:70, vortex:0.15,
+       foam:0.02, clarity:1.5, sediment:0.03, specks:0.10, speckSize:0.038,
+       maxSlip:0.16, takeRadius:0.55, lineRad:0.95, splashV:2.6,
+       riseAggro:0.10, riseRate:0.85, feedChance:0.75, spookT:9}
+};
+
+/* ── 05 THE LONG RUN ──────────────────────────────────────────
+   Wide and deep, with the middle running away from the edges. The
+   speed profile falls out of the depth: Manning gives the deep
+   core the extra metre a second, and the seam appears on its own. */
+SCENES.bigrun={
+  name:'The Long Run', sub:'big water, one seam, forty feet of line',
+  hwMax:11.6, dzMax:0.0, dMax:1.95, slope:0.005,
+  drops:[{x:-40,h:0.16,w:2.2},{x:6,h:0.20,w:2.4},{x:52,h:0.17,w:2.0}],
+  dz:x=>0,
+  hw:x=>10.4+1.2*Math.sin(x*0.035),
+  dep:(x,zr)=>1.90*Math.pow(SCROSS(zr/(10.4+1.2*Math.sin(x*0.035))),0.55)
+              *(0.86+0.14*Math.sin(x*0.061+0.7)),
+  glsl:`
+float scDz(float x){return 0.0;}
+float scHw(float x){return 10.4+1.2*sin(x*0.035);}
+float scDep(float x,float zr){
+  return 1.90*pow(max(scCross(zr/scHw(x)),1e-4),0.55)*(0.86+0.14*sin(x*0.061+0.7));}`,
+  obst:[{x:-14,z:-6.4,r:1.40,h:1.10,kind:'rock',sh:0,sgn:1},
+        {x:18,z:5.2,r:1.20,h:1.00,kind:'rock',sh:0,sgn:-1}],
+  lies:[{x:-20,z:-4.4,len:0.44},{x:-2,z:0.4,len:0.50},
+        {x:16,z:-4.8,len:0.46},{x:36,z:1.8,len:0.38},{x:50,z:-2.2,len:0.42}],
+  par:{grade:1, current:1.0, gridCell:0.42, gridSpan:64, treeRange:44,
+       takeRadius:0.85, maxSlip:0.28, speckRange:52, spookT:4}
+};
+
+/* ── 06 UNDERCUT BEND ─────────────────────────────────────────
+   The meander. The centreline moves, and the cross-section leans
+   with it: deep and undercut on the outside, shelving gravel on
+   the inside, which is the only place you can stand. */
+SCENES.bend={
+  name:'Undercut Bend', sub:'meander pool, cut bank, one sweeper',
+  hwMax:6.4, dzMax:4.6, dMax:2.5, slope:0.004,
+  drops:[{x:-42,h:0.14,w:1.8},{x:0,h:0.16,w:1.8},{x:42,h:0.14,w:1.8}],
+  dz:x=>4.6*Math.sin(x*0.062),
+  hw:x=>6.2,
+  /* The deep water is on the OUTSIDE of the bend, which is the apex of the
+     meander — where the centreline is furthest out, not where it is steepest.
+     b therefore tracks the displacement itself, so the channel leans one way
+     through the first bend, flattens at the crossover, and leans back. */
+  dep:(x,zr)=>{
+    const u=(zr-4.6*Math.sin(x*0.062))/6.2;
+    const b=Math.max(-1,Math.min(1,Math.sin(x*0.062)*1.6));
+    return 2.30*SCROSS(u)*Math.max(0.16,0.80*(1.0+0.85*STH(u*2.2)*b));},
+  glsl:`
+float scDz(float x){return 4.6*sin(x*0.062);}
+float scHw(float x){return 6.2;}
+float scDep(float x,float zr){
+  float u=(zr-scDz(x))/scHw(x);
+  float b=clamp(sin(x*0.062)*1.6,-1.0,1.0);
+  return 2.30*scCross(u)*max(0.16,0.80*(1.0+0.85*scTh(u*2.2)*b));}`,
+  /* sweepers, leaning off the cut bank at each apex */
+  obst:[{x:-24,z:-9.6,r:1.70,h:1.00,kind:'log',sh:0,sgn:-1},
+        {x: 26,z: 9.4,r:1.50,h:0.95,kind:'log',sh:0,sgn:1}],
+  lies:[{x:-27,z:-9.0,len:0.48},{x:-22,z:-8.6,len:0.54},
+        {x:0,z:0.4,len:0.40},{x:23,z:8.8,len:0.46},{x:28,z:1.0,len:0.28}],
+  par:{grade:1, current:0.95, gridCell:0.38, gridSpan:58, vortex:0.7,
+       takeRadius:0.6, lineRad:0.6, riseAggro:0.45}
+};
+
+/* ── 07 BEAVER POND ───────────────────────────────────────────
+   The venue that breaks the model. There is no downstream to speak
+   of, the fish move instead of the fly, and the way you get a take
+   is to make the fly behave like something trying to escape.
+   The creek still runs through it, which is where they stack. */
+SCENES.pond={
+  name:'Beaver Pond', sub:'stillwater, cruising fish, strip the fly',
+  hwMax:14.0, dzMax:0.0, dMax:2.2, slope:0.0004,
+  drops:[],
+  dz:x=>0,
+  hw:x=>0.9+13.0*Math.sqrt(Math.max(0,1-Math.pow(x/23,2))),
+  dep:(x,zr)=>{
+    const h=0.9+13.0*Math.sqrt(Math.max(0,1-Math.pow(x/23,2)));
+    return (0.40+1.75*SSS(1.2,7.0,h))*Math.pow(SCROSS(zr/h),0.75);},
+  glsl:`
+float scDz(float x){return 0.0;}
+float scHw(float x){return 0.9+13.0*sqrt(max(0.0,1.0-(x/23.0)*(x/23.0)));}
+float scDep(float x,float zr){
+  float h=scHw(x);
+  return (0.40+1.75*scSS(1.2,7.0,h))*pow(max(scCross(zr/h),1e-4),0.75);}`,
+  /* drowned timber. Small radius, tall: nothing to the solver, everything
+     to a line being stripped past it. */
+  obst:[{x:-9,z:5.0,r:0.26,h:2.30,kind:'rock',sh:0,sgn:1},
+        {x:-2,z:-4.2,r:0.24,h:2.10,kind:'rock',sh:0,sgn:-1},
+        {x:6,z:2.0,r:0.28,h:2.40,kind:'rock',sh:0,sgn:1},
+        {x:13,z:-6.4,r:0.22,h:2.00,kind:'rock',sh:0,sgn:-1},
+        {x:-15,z:3.4,r:0.25,h:2.20,kind:'rock',sh:0,sgn:1}],
+  lies:[{x:-8,z:-3.0,len:0.44,cr:[5.5,3.4,0.16]},
+        {x:5,z:6.0,len:0.52,cr:[6.5,4.2,0.12]},
+        {x:12,z:-2.0,len:0.38,cr:[4.5,3.0,0.20]},
+        {x:-15,z:1.0,len:0.46,cr:[4.0,2.6,0.14]}],
+  cruise:true, chase:true, holdDeep:2.0,
+  par:{grade:1, current:0.35, gridCell:0.50, gridSpan:56, vortex:0.05,
+       foam:0.0, specks:0.08, speckSize:0.040, speckRange:22, drift:1,
+       clarity:1.25, sediment:0.10, surfWave:0.25, waveShade:0.35,
+       flySink:0.32,
+       takeRadius:0.5, riseRate:0.30, feedChance:0.85, riseAggro:0.55,
+       treeRange:44, spookT:6}
+};
+
+/* ── 08 ALDER TUNNEL ──────────────────────────────────────────
+   Four metres wide with a roof on it. The branches are real to the
+   line, which is the whole point: there is no backcast here. */
+{
+  const holes=[{x:-31,z:0,rx:2.4,rz:2.0,d:0.70},{x:-13,z:0,rx:2.2,rz:1.9,d:0.70},
+               {x:5,z:0,rx:2.4,rz:2.0,d:0.70},{x:23,z:0,rx:2.2,rz:1.9,d:0.70}];
+  const hF=holesJS(holes);
+  SCENES.alder={
+    name:'Alder Tunnel', sub:'brush creek, roll casts only',
+    hwMax:2.9, dzMax:0.9, dMax:1.5, slope:0.018,
+    drops:[{x:-36,h:0.28,w:0.9},{x:-18,h:0.26,w:0.9},{x:0,h:0.28,w:0.9},
+           {x:18,h:0.26,w:0.9},{x:36,h:0.28,w:0.9}],
+    dz:x=>0.9*Math.sin(x*0.13),
+    hw:x=>2.3+0.5*Math.sin(x*0.22+1.0),
+    dep:(x,zr)=>(0.50+0.30*Math.sin(x*0.27)+hF(x,zr))
+                *SCROSS((zr-0.9*Math.sin(x*0.13))/(2.3+0.5*Math.sin(x*0.22+1.0))),
+    glsl:`
+float scDz(float x){return 0.9*sin(x*0.13);}
+float scHw(float x){return 2.3+0.5*sin(x*0.22+1.0);}
+float scDep(float x,float zr){
+  float d=0.0;
+  ${holesGL(holes)}
+  return (0.50+0.30*sin(x*0.27)+d)*scCross((zr-scDz(x))/scHw(x));}`,
+    obst:[{x:-24,z:-1.2,r:0.45,h:0.85,kind:'rock',sh:0,sgn:1},
+          {x:-6,z:1.0,r:0.50,h:0.90,kind:'rock',sh:0,sgn:-1},
+          {x:11,z:-1.4,r:0.42,h:0.80,kind:'rock',sh:0,sgn:1},
+          {x:29,z:1.1,r:0.48,h:0.88,kind:'rock',sh:0,sgn:-1}],
+    lies:[{x:-31,z:0.2,len:0.24},{x:-13,z:-0.6,len:0.28},
+          {x:5,z:0.4,len:0.30},{x:23,z:-0.4,len:0.26}],
+    /* y is metres above the water surface at that station */
+    canopy:[{x:-38,z:-2.6,y:1.9,r:2.2},{x:-30,z:2.4,y:2.1,r:2.0},
+            {x:-22,z:-2.2,y:1.8,r:1.9},{x:-14,z:2.6,y:2.2,r:2.1},
+            {x:-6,z:-2.4,y:1.9,r:2.0},{x:2,z:2.2,y:2.0,r:1.9},
+            {x:10,z:-2.6,y:2.1,r:2.1},{x:18,z:2.4,y:1.9,r:2.0},
+            {x:26,z:-2.2,y:2.0,r:1.9},{x:34,z:2.6,y:2.1,r:2.1}],
+    par:{grade:1, current:0.80, gridCell:0.22, gridSpan:40, obstHeight:0.90,
+         vortex:0.8, foam:0.30, treeRange:24, speckRange:16,
+         takeRadius:0.40, maxSlip:0.45, riseAggro:0.60, branchOn:1}
+  };
+}
+
+/* which venue: #v=<id>. Unknown or missing falls back to the reach every
+   constant was tuned on. */
+const SCENE_IDS=['cedar','boulder','falls','meadow','bigrun','bend','pond','alder'];
+let SCENE_ID='cedar';
+try{
+  const m=/[#&]v=([a-z]+)/.exec(location.hash||'');
+  if(m&&SCENES[m[1]]) SCENE_ID=m[1];
+}catch(e){}
+const SC=SCENES[SCENE_ID];
+SC.id=SCENE_ID;
+SC.weeds=SC.weeds||[]; SC.canopy=SC.canopy||[];
+/* venue defaults land on top of the factory defaults. Anything in the URL
+   settings string is applied later and wins, unless the reload came from a
+   venue switch — see the boot block at the bottom of the file. */
+Object.assign(P,VENUE_BASE,SC.par);
+
+/* GLSL shared by every venue's channel functions. tanh and smoothstep-with-
+   clamp are written out rather than assumed, because GLSL ES 1.0 has neither
+   in the form we want and the Quest browser can still hand us that profile. */
+const GLSL_SCENE=`
+float scCross(float u){return max(0.0,1.0-u*u);}
+float scG(float x,float c,float w){float t=(x-c)/w;return exp(-t*t);}
+float scTh(float a){return a/(1.0+abs(a));}
+float scSS(float a,float b,float x){float t=clamp((x-a)/(b-a),0.0,1.0);return t*t*(3.0-2.0*t);}
+${SC.glsl}
+`;
+
 /* ---- river ---- */
-const CZ=-9.0, HALFW=7.0, MAXDEPTH=1.5;
-const DROPS=[{x:-46,h:0.20,w:1.8},{x:-25,h:0.16,w:1.5},{x:-6,h:0.22,w:1.2},
-             {x:15,h:0.18,w:2.0},{x:38,h:0.21,w:1.6},{x:60,h:0.17,w:1.4}];
+const HALFW=SC.hwMax, MAXDEPTH=SC.dMax;
+const DROPS=SC.drops;
 const smoothstep=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
 function surfY(x){
-  let y=-0.0075*x*P.grade;
+  let y=-SC.slope*x*P.grade;
   for(let i=0;i<DROPS.length;i++){const d=DROPS[i];
     y-=d.h*P.grade*smoothstep(d.x-d.w,d.x+d.w,x);}
   return y;
 }
-const bedDepth=(x,z)=>{
-  const u=(z-CZ)/HALFW,cross=Math.max(0,1-u*u);
-  return MAXDEPTH*cross*(0.55+0.45*Math.sin(x*0.13+1.3));
-};
+const bedDepth=(x,z)=>Math.max(0,SC.dep(x,z-CZ));
 function bedY(x,z){
-  const u=(z-CZ)/HALFW,s=surfY(x);
+  const s=surfY(x), u=(z-CZ-SC.dz(x))/SC.hw(x);
   if(Math.abs(u)<1) return s-bedDepth(x,z);
   if(u>=1) return s+Math.min(0.30,(u-1)*0.28);
   return s+0.05+Math.min(2.6,(Math.abs(u)-1)*3.0);
 }
+
 const ripple=(x,z,t)=>
   (Math.sin(x*1.7+t*2.3)*0.011+Math.sin(x*0.7+z*0.9+t*1.5)*0.017+Math.sin(z*2.4-t*1.1)*0.008)*0.55;
 
 /* filmY and solvedDev live with the grid, below — they read its arrays. */
 
-/* heights are measured off the bed. The old values left every rock half a metre
-   under water, which the grid solver correctly flowed straight over — no wake,
-   no seam. These two break the surface and two sit just under it. */
-const OBST=[
-  {x:-7.0,z:-7.6,r:0.85,h:1.25,kind:'rock',sh:0,sgn:1},
-  {x: 1.5,z:-10.4,r:1.05,h:1.60,kind:'rock',sh:0,sgn:-1},
-  {x: 6.5,z:-6.9,r:0.62,h:1.05,kind:'rock',sh:0,sgn:1},
-  {x:-3.0,z:-12.2,r:1.60,h:0.90,kind:'log',sh:0,sgn:-1},
-];
+/* Heights are measured off the bed, and an obstacle only diverts flow if it
+   comes near enough to the surface to do so — the solver treats it as bed
+   elevation, so one sitting half a metre under is simply flowed over.
+   The venue supplies these in axis-relative z; lift them to world here. */
+const OBST=SC.obst.map(o=>({x:o.x,z:CZ+o.z,r:o.r,h:o.h,kind:o.kind,sh:0,sgn:o.sgn||1}));
+/* Branches. Real to the line and to nothing else — they are above the water,
+   so they never touch the bed, the solver or the fish. */
+const CANOPY=SC.canopy.map(c=>({x:c.x,z:CZ+c.z,y:c.y,r:c.r}));
 const NV=16, vort=[];
 for(let i=0;i<NV;i++) vort.push({x:0,z:0,r:1,k:0,life:0});
 let vNext=0;
@@ -448,7 +833,7 @@ function computeFlow(x,z){
    answer the same question the same way, so the join at the edge of the solved
    window is a seam you have to go looking for. */
 function analyticFlow(x,z){
-  const u=(z-CZ)/HALFW,cross=Math.max(0,1-u*u);
+  const u=(z-CZ-SC.dz(x))/SC.hw(x),cross=Math.max(0,1-u*u);
   if(cross<=0.001){flowX=0;flowZ=0;return;}
   const d=Math.max(bedDepth(x,z),0.08);
   /* the slope is read over a five-metre baseline, not the old ninety
@@ -711,7 +1096,7 @@ let slideVel=0;           /* m/s of line accelerating through routing fingers */
 /* The X bounds move: the span is a setting and the window can follow the
    angler. Z never moves — the grid already spans the full width of the river. */
 let GX0=-40, GX1=40;
-const GZ0=CZ-HALFW-0.6, GZ1=CZ+HALFW+0.6;
+const GZ0=CZ-SC.dzMax-HALFW-0.6, GZ1=CZ+SC.dzMax+HALFW+0.6;
 let gridCentre=0;
 let gdx=0.40, GNX=1, GNZ=1, gridReady=false, gbed=null;
 let gfoam=null, gfoam0=null, gdivs=null, gshear=null;
@@ -1353,12 +1738,22 @@ function waterAndGround(i,h,t){
   const target=filmY(x,z,t)+RIDE;
   const above=pos[p+1]-target;
   if(above>0.10) return;
+  /* A SINKING FLY. Fly sink rate is zero on every river here, which leaves the
+     dry-fly behaviour exactly as it was. Above zero, the fly node is driven to
+     a terminal sink rate and the tippet behind it is released from the film,
+     so the leader is pulled under BY the fly instead of holding it up — which
+     is the difference between a dry fly and a wet one, and the thing the pond
+     is built around. */
+  const sinking=P.flySink>0.001&&(i===0||sArc(i)<P.tippetLen*1.3);
   if(above<0){
     /* Tippet is 0.15 mm nylon, denser than water — it should slice through the
        film, not sit on it. Hard-clamping every node was why a hooked fish showed
        a dead vertical line: the leader was nailed to the surface and the whole
        transition happened across one segment. */
-    if(hooked&&sArc(i)<P.tippetLen*1.3){
+    if(sinking){
+      if(i===0) vel[p+1]+=(-P.flySink-vel[p+1])*Math.min(1,h*5);
+      else      vel[p+1]-=1.2*h;
+    } else if(hooked&&sArc(i)<P.tippetLen*1.3){
       vel[p+1]-=1.2*h;
     } else {
       pos[p+1]=target;if(vel[p+1]<0)vel[p+1]=0;
@@ -1368,7 +1763,9 @@ function waterAndGround(i,h,t){
     vel[p+1]-=P.stick*26*h*(1-above/0.10);
     if(vel[p+1]<0&&pos[p+1]<=target+0.002) vel[p+1]=0;
   }
-  vel[p+1]+=(target-pos[p+1])*40*P.buoyancy*h;
+  if(!sinking) vel[p+1]+=(target-pos[p+1])*40*P.buoyancy*h;
+  /* and it stops at the bed, or a sinking fly leaves the world */
+  else if(pos[p+1]<gy+0.012){pos[p+1]=gy+0.012;if(vel[p+1]<0)vel[p+1]=0;}
   computeFlow(x,z);
   const contact=above<0?1:Math.max(0,1-above/0.06);
   if(contact<=0) return;
@@ -1533,6 +1930,7 @@ function physics(dt){
     }
 
     pushOutObstacles();
+    pushOutCanopy();
 
     /* ---- material flow, decided purely by tension vs friction ----
        Tension now comes from the solved constraint impulses, so these are
@@ -1734,6 +2132,14 @@ scene.fog=new THREE.Fog(0xa8b7b0,32,130);
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.03,400);
 camera.position.set(0,1.55,0.6);
 const player=new THREE.Group();player.add(camera);scene.add(player);
+/* start on the near bank of whatever venue this is, a step back from the
+   water. Cedar Run keeps the exact spot every earlier build started on. */
+{
+  const sx=SC.spawn?SC.spawn.x:0;
+  const sz=SC.spawn&&SC.spawn.z!==undefined
+    ? SC.spawn.z : CZ+SC.dz(sx)+SC.hw(sx)*1.08;
+  player.position.set(sx,0,sz);
+}
 
 /* Three lights, not one. A single directional sun flattens everything facing
    away from it; a cool fill from the opposite side keeps shaded rock and the
@@ -1825,8 +2231,9 @@ const skyMat=new THREE.ShaderMaterial({
 scene.add(new THREE.Mesh(new THREE.SphereGeometry(200,32,20),skyMat));
 
 const GLSL_SURF=`
+${GLSL_SCENE}
 float surfY(float x){
-  float y=-0.0075*x*uGrade;
+  float y=-${SC.slope.toFixed(5)}*x*uGrade;
   ${DROPS.map(d=>`y-=${d.h.toFixed(3)}*uGrade*smoothstep(${(d.x-d.w).toFixed(2)},${(d.x+d.w).toFixed(2)},x);`).join('\n  ')}
   return y;
 }`;
@@ -2015,7 +2422,8 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
          ${GLSL_VDEC}
          uniform float uBedT,uVary,uCaus,uBUse;
          uniform vec2 uBMin,uBSize;
-         varying vec3 vBedW;`)
+         varying vec3 vBedW;
+         ${GLSL_SCENE}`)
       /* The colour was blending four surfaces while the RELIEF stayed cobble
          for all of them, so sand and soil were shaped like a cobble bed and
          read as one. Blend the normals by the same weights. The bed is a
@@ -2047,10 +2455,10 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
             down to cobble, moderate water leaves gravel, slack water drops its
             sand, and the bank is the bank. The bed is then a readable map of
             the flow that made it, which is how a real river works. */
-         float uu=abs((vBedW.z-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)});
+         float uu=abs((vBedW.z-(${CZ.toFixed(1)})-scDz(vBedW.x))/scHw(vBedW.x));
          float bankW=smoothstep(0.86,1.14,uu);
          float cross=max(0.0,1.0-uu*uu);
-         float dep=${MAXDEPTH.toFixed(2)}*cross*(0.55+0.45*sin(vBedW.x*0.13+1.3));
+         float dep=max(0.0,scDep(vBedW.x,vBedW.z-(${CZ.toFixed(1)})));
          float spd=cross*1.1;
          if(uBUse>0.5){
            vec2 ftc=vec2((vBedW.x-uBMin.x)/uBSize.x,(vBedW.z-uBMin.y)/uBSize.y);
@@ -2102,7 +2510,7 @@ const _bedGravel=new THREE.Color(0x8a8071),_bedGrass=new THREE.Color(0x53663f),
 function rebuildBed(){
   const pa=bedPosAttr,ca=bedGeo.attributes.color;
   for(let i=0;i<pa.count;i++){
-    const x=pa.getX(i),z=pa.getZ(i),u=(z-CZ)/HALFW,d=bedDepth(x,z);
+    const x=pa.getX(i),z=pa.getZ(i),u=(z-CZ-SC.dz(x))/SC.hw(x),d=bedDepth(x,z);
     const y2=bedY(x,z)+Math.sin(x*2.3+z*1.7)*0.025+Math.sin(x*0.6-z*1.1)*0.045;
     pa.setY(i,y2);
     /* The vertex colours used to carry the bed's hue, which then multiplied
@@ -2173,6 +2581,69 @@ function placeObstacles(){
 }
 placeObstacles();
 
+/* ── BRANCHES ──────────────────────────────────────────────────────────
+   Foliage above the water. Invisible to the bed, the solver and the fish,
+   and solid to the line — which is the entire difficulty of a brush creek,
+   and the groundwork for snagging in every other venue. */
+for(const c of CANOPY){
+  const g=new THREE.SphereGeometry(c.r,9,7),pa=g.attributes.position;
+  for(let i=0;i<pa.count;i++){
+    const x=pa.getX(i),y=pa.getY(i),z=pa.getZ(i);
+    const n=1+Math.sin(x*3.1)*0.15+Math.sin(y*2.7+z*3.3)*0.17;
+    pa.setXYZ(i,x*n,y*n*0.62,z*n);
+  }
+  g.computeVertexNormals();
+  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
+    color:0x3c5731,roughness:1,flatShading:true}));
+  m.position.set(c.x,surfY(c.x)+c.y,c.z);
+  scene.add(m);
+  /* a trunk, so the canopy is attached to something */
+  const tr=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.13,c.y+0.6,6),
+    new THREE.MeshStandardMaterial({color:0x4a3c2c,roughness:1}));
+  tr.position.set(c.x+(c.z>CZ?0.2:-0.2),surfY(c.x)+(c.y+0.6)*0.5,
+                  c.z+(c.z>CZ?c.r*0.7:-c.r*0.7));
+  tr.rotation.z=(c.z>CZ?-1:1)*0.22;
+  scene.add(tr);
+}
+
+/* ── WEED BEDS ─────────────────────────────────────────────────────────
+   Soft obstacles: they bend rather than split the flow, so they are not in
+   OBST and the solver never sees them. They exist to give a spring creek
+   lanes to fish and edges to hold along. */
+for(const w of (SC.weeds||[])){
+  const g=new THREE.SphereGeometry(w.r,10,7),pa=g.attributes.position;
+  for(let i=0;i<pa.count;i++){
+    const x=pa.getX(i),y=pa.getY(i),z=pa.getZ(i);
+    const n=1+Math.sin(x*4.4)*0.16+Math.sin(z*3.9+y*2.2)*0.14;
+    pa.setXYZ(i,x*n,y*n*0.16,z*n*0.8);
+  }
+  g.computeVertexNormals();
+  const wz=CZ+w.z;
+  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
+    color:0x33512c,roughness:0.85,transparent:true,opacity:0.88}));
+  m.position.set(w.x,bedY(w.x,wz)+w.r*0.10,wz);
+  scene.add(m);
+}
+function pushOutCanopy(){
+  if(!(P.branchOn>0.5)||!CANOPY.length) return;
+  const grip=1-Math.max(0,Math.min(0.95,P.branchGrip));
+  for(let k=0;k<CANOPY.length;k++){
+    const c=CANOPY[k], cy=surfY(c.x)+c.y, ry=c.r*0.62;
+    for(let i=0;i<nAct;i++){
+      const p=i*3;
+      const dy=(pos[p+1]-cy)/ry;
+      if(dy<-1.0||dy>1.0) continue;
+      const dx=pos[p]-c.x, dz=pos[p+2]-c.z;
+      const rr=c.r*Math.sqrt(Math.max(0,1-dy*dy));
+      const d=Math.hypot(dx,dz);
+      if(d>=rr||rr<1e-3) continue;
+      const s=(rr-d)/Math.max(d,1e-4);
+      pos[p]+=dx*s; pos[p+2]+=dz*s;
+      vel[p]*=grip; vel[p+1]*=grip; vel[p+2]*=grip;
+    }
+  }
+}
+
 /* Concatenate a few transformed geometries into one buffer. Three ships this
    as BufferGeometryUtils, but importing a second module would mean a second
    CDN fetch on a headset that may be on hotel wifi — and this is twenty lines. */
@@ -2238,7 +2709,7 @@ function placeGrass(){
     const s=GRASS_SEED[i];
     if(i>=n){_gS.setScalar(0.0001);_gP.set(0,-999,0);_gQ.identity();
       _gM.compose(_gP,_gQ,_gS);grassMesh.setMatrixAt(i,_gM);continue;}
-    const z=CZ+s.side*(HALFW+s.off);
+    const z=CZ+SC.dz(s.x)+s.side*(SC.hw(s.x)+s.off);
     const y=bedY(s.x,z);
     /* keep it out of the water: anything the river would be standing in is bare */
     const dry=y>surfY(s.x)+0.01;
@@ -2317,7 +2788,7 @@ function placeTrees(){
   let ci=0,bi=0;
   for(let i=0;i<TREE_N;i++){
     const s=TREE_SEED[i];
-    const z=CZ+s.side*(HALFW+s.off);
+    const z=CZ+SC.dz(s.x)+s.side*(SC.hw(s.x)+s.off);
     const y=bedY(s.x,z);
     /* range cull: the reach is far longer than you can see, and a tree behind
        you costs exactly as much as one in front unless it is scaled away */
@@ -2622,7 +3093,7 @@ function placeRocks(){
   if(!rockMesh) return;
   for(let i=0;i<ROCK_N;i++){
     const s=ROCK_SEED[i];
-    const z=s.inRiver?CZ+s.side*HALFW*s.off:CZ+s.side*(HALFW+s.off);
+    const z=CZ+SC.dz(s.x)+(s.inRiver?s.side*SC.hw(s.x)*s.off:s.side*(SC.hw(s.x)+s.off));
     const y=bedY(s.x,z);
     /* in-river rock only where it will actually break or dimple the surface */
     const sub=surfY(s.x)-y;
@@ -2726,9 +3197,9 @@ const waterMat=new THREE.ShaderMaterial({
     ${GLSL_SURF}
     void main(){
       vec4 wp=modelMatrix*vec4(position,1.0);
-      float u=(wp.z-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
+      float u=(wp.z-(${CZ.toFixed(1)})-scDz(wp.x))/scHw(wp.x);
       float cross=max(0.0,1.0-u*u);
-      float d=${MAXDEPTH.toFixed(2)}*cross*(0.55+0.45*sin(wp.x*0.13+1.3));
+      float d=max(0.0,scDep(wp.x,wp.z-(${CZ.toFixed(1)})));
       float S=max(1e-5,((surfY(wp.x-2.5)-surfY(wp.x+2.5))/5.0)*uQ*2.0);
       float s=min(8.0,(1.0/max(uManN,0.005))*pow(max(d,0.08),0.6666667)*sqrt(S))*pow(max(cross,0.0001),0.35);
       float h=(sin(wp.x*1.7+uTime*2.3)*0.011
@@ -3143,11 +3614,11 @@ function seedSpeck(i,cx,mode){
     const c=cellCursor++;
     const gx=c%GX,gz=Math.floor(c/GX)%GZ;
     spPos[p]  =cx-P.speckRange+((gx+Math.random())/GX)*P.speckRange*2;
-    spPos[p+2]=CZ+(((gz+Math.random())/GZ)*2-1)*HALFW*0.92;
+    spPos[p+2]=CZ+SC.dz(spPos[p])+(((gz+Math.random())/GZ)*2-1)*SC.hw(spPos[p])*0.92;
     spLife[i] =5+Math.random()*10;
   } else {
     spPos[p]  =cx-P.speckRange*0.45-Math.random()*P.speckRange*0.85;
-    spPos[p+2]=CZ+(Math.random()*2-1)*HALFW*0.92;
+    spPos[p+2]=CZ+SC.dz(spPos[p])+(Math.random()*2-1)*SC.hw(spPos[p])*0.92;
     spLife[i] =14+Math.random()*22;
   }
   spDep[i]=Math.random()<0.55?0:-Math.random()*0.35;
@@ -3218,9 +3689,7 @@ const GLSL_FLOW=`
 ${GLSL_VDEC}
 ${OBST.map((o,i)=>`const vec4 OB${i}=vec4(${o.x.toFixed(2)},${o.z.toFixed(2)},${o.r.toFixed(3)},${o.kind==='log'?'1.0':'0.0'});`).join('\n')}
 float depthAt(vec2 p){
-  float u=(p.y-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
-  float cr=max(0.0,1.0-u*u);
-  return ${MAXDEPTH.toFixed(2)}*cr*(0.55+0.45*sin(p.x*0.13+1.3));
+  return max(0.0,scDep(p.x,p.y-(${CZ.toFixed(1)})));
 }
 vec2 obstacle(vec2 p, vec4 o, vec2 v, float s){
   vec2 d=p-o.xy;
@@ -3235,15 +3704,14 @@ vec2 obstacle(vec2 p, vec4 o, vec2 v, float s){
   return v;
 }
 vec2 analyticAt(vec2 p){
-  float u=(p.y-(${CZ.toFixed(1)}))/${HALFW.toFixed(1)};
+  float u=(p.y-(${CZ.toFixed(1)})-scDz(p.x))/scHw(p.x);
   float cr=max(0.0,1.0-u*u);
   if(cr<=0.001) return vec2(0.0);
   float d=max(depthAt(p),0.08);
   float S=max(1e-5,((surfY(p.x-2.5)-surfY(p.x+2.5))/5.0)*uQ*2.0);
   float s=min(8.0,(1.0/max(uManN,0.005))*pow(d,0.6666667)*sqrt(S))*pow(max(cr,1e-4),0.35);
   vec2 v=vec2(s,0.0);
-  v=obstacle(p,OB0,v,s); v=obstacle(p,OB1,v,s);
-  v=obstacle(p,OB2,v,s); v=obstacle(p,OB3,v,s);
+  ${OBST.map((o,i)=>`v=obstacle(p,OB${i},v,s);`).join('\n  ')}
   for(int i=0;i<8;i++){
     vec4 vo=uVort[i];
     if(vo.w==0.0) continue;
@@ -3369,7 +3837,7 @@ const gsMat=new THREE.ShaderMaterial({
         age=speckLife(sd,uSpread,uLife);
         if(r3<uSpread) p.x=uOriginX+(r1*2.0-1.0)*uRange;   /* spread around you */
         else           p.x=uOriginX-uRange*0.45-r1*uRange*0.85;  /* from upstream */
-        p.y=${CZ.toFixed(1)}+(hsh(sd*263.1+3.1)*2.0-1.0)*${(HALFW*0.92).toFixed(2)};
+        p.y=${CZ.toFixed(1)}+scDz(p.x)+(hsh(sd*263.1+3.1)*2.0-1.0)*scHw(p.x)*0.92;
       }
       gl_FragColor=vec4(p,age,sd);
     }`});
@@ -4051,8 +4519,7 @@ function makeTrout(len){
   g.rotation.order='YZX';        /* yaw, then pitch, then roll */
   g.scale.setScalar(len);return g;
 }
-const LIES=[{x:-2.0,z:-7.2,len:0.40},{x:-6.2,z:-6.6,len:0.32},
-            {x:2.6,z:-11.0,len:0.46},{x:7.4,z:-8.0,len:0.35}];
+const LIES=SC.lies.map(l=>({x:l.x,z:CZ+l.z,len:l.len,cr:l.cr}));
 const fishes=[];
 function makeMarker(){
   const g=new THREE.Group();
@@ -4079,12 +4546,17 @@ class Trout{
     this.held=false;this.inspect=new THREE.Quaternion();
     this.run=new THREE.Vector3(-1,0,0);this.runT=0;
     this.beh='cruise';this.behT=0;this.effort=0.5;this.v=new THREE.Vector3();
+    /* a cruiser works a circuit instead of holding a lie: [rx, rz, rad/s] */
+    this.cr=l.cr||null; this.cruA=Math.random()*6.2832; this.cruHead=0; this.badT=0;
     this.mesh=makeTrout(l.len);scene.add(this.mesh);
     this.marker=makeMarker();scene.add(this.marker);
   }
   restY(){
     const x=this.p?this.p.x:this.lie.x,z=this.p?this.p.z:this.lie.z;
-    return surfY(x)-Math.min(0.42,bedDepth(x,z)*(this.feeding?0.36:0.62));
+    /* stillwater fish sit deeper than river fish, because nothing is
+       delivering food to a fixed spot near the surface */
+    const hf=SC.holdDeep||1;
+    return surfY(x)-Math.min(0.42*hf,bedDepth(x,z)*(this.feeding?0.36:0.62)*hf);
   }
   newRunDir(){
     let ax=pos[0]-rpos[0],az=pos[2]-rpos[2];
@@ -4268,6 +4740,21 @@ class Trout{
         if(SND.ok){ if(this.riseKind===2) sndSplash(3.6); else sndPlop(); }
       }
       if(u>=1) commitStrike(this);
+    } else if(this.state==='chasing'){
+      /* Closing on the fly. He swims at where it is GOING, not where it is,
+         which is why a fly stripped faster than he swims is one he can never
+         get in front of — and why a fly that stops is one he loses. */
+      const lead=Math.min(0.5,P.chaseSpeed*0.35);
+      const tx=pos[0]+vel[0]*lead, ty=pos[1], tz=pos[2]+vel[2]*lead;
+      let dx=tx-this.p.x, dy=ty-this.p.y, dz=tz-this.p.z;
+      const dd=Math.hypot(dx,dy,dz)||1e-4;
+      const sp=P.chaseSpeed*(0.75+0.70*Math.min(1,this.len/0.45));
+      const st=Math.min(dd,sp*dt);
+      this.p.x+=dx/dd*st; this.p.y+=dy/dd*st; this.p.z+=dz/dd*st;
+      if(dd>1e-3) this.cruHead=Math.atan2(dz,-dx);
+      const fm=filmY(this.p.x,this.p.z,t);
+      if(this.p.y>fm-0.03) this.p.y=fm-0.03;
+      this.riseAnim=0;
     } else if(this.state==='landed'){
       /* A landed fish floats up in front of you so it can be looked at, and can
          be taken in the left hand and turned over. Pinch to hold, release to
@@ -4285,8 +4772,19 @@ class Trout{
     } else {
       this.feedT-=dt;
       if(this.feedT<=0){this.feeding=Math.random()<P.feedChance;this.feedT=8+Math.random()*14;}
-      this.p.x=this.lie.x+Math.sin(t*0.6+this.lie.z)*0.10;
-      this.p.z=this.lie.z+Math.sin(t*0.37+this.lie.x)*0.14;
+      if(this.cr){
+        /* A cruiser does not hold. He works a beat, and the cast has to go
+           where he is going rather than where he is. */
+        this.cruA+=dt*this.cr[2]*Math.max(0.05,P.cruiseSpeed);
+        const nx=this.lie.x+Math.cos(this.cruA)*this.cr[0];
+        const nz=this.lie.z+Math.sin(this.cruA)*this.cr[1];
+        const mx=nx-this.p.x, mz=nz-this.p.z;
+        if(Math.hypot(mx,mz)>1e-4) this.cruHead=Math.atan2(mz,-mx);
+        this.p.x=nx; this.p.z=nz;
+      } else {
+        this.p.x=this.lie.x+Math.sin(t*0.6+this.lie.z)*0.10;
+        this.p.z=this.lie.z+Math.sin(t*0.37+this.lie.x)*0.14;
+      }
       let ty=this.restY();
       if(this.feeding){
         this.riseT-=dt*P.riseRate*2;
@@ -4344,7 +4842,8 @@ class Trout{
     /* nose is local -X. Holding, a trout points into the current, which runs
        toward +X, so upstream is a heading of zero. */
     const hd=this.state==='hooked'?Math.atan2(this.v.z,-this.v.x):
-             this.state==='striking'?(this.strikeHead||0):0;
+             this.state==='striking'?(this.strikeHead||0):
+             (this.state==='chasing'||this.cr)?(this.cruHead||0):0;
     m.rotation.y+=((hd-m.rotation.y+Math.PI*3)%(Math.PI*2)-Math.PI)*Math.min(1,dt*3);
     /* nose leads the velocity vector. The nose is local -X, so a positive Z
        rotation swings it DOWN — hence the minus. */
@@ -4378,8 +4877,10 @@ class Trout{
     /* body wave: faster and wider when hooked, lazy while holding */
     const u=m.userData.swim.userData.u;
     u.uT.value=t;
-    u.uSpd.value=this.state==='hooked'?9.0:(this.feeding?3.6:2.2);
-    const amp=this.state==='hooked'?1.7:(this.feeding?0.85:0.55);
+    u.uSpd.value=this.state==='hooked'?9.0:this.state==='chasing'?8.0:
+                 (this.feeding?3.6:2.2);
+    const amp=this.state==='hooked'?1.7:this.state==='chasing'?1.35:
+              (this.feeding?0.85:0.55);
     u.uAmp.value+=(amp-u.uAmp.value)*Math.min(1,dt*3);
     const w=Math.sin(7.0-t*u.uSpd.value+u.uPh.value);
     const wPrev=Math.sin(7.0-(t-0.02)*u.uSpd.value+u.uPh.value);
@@ -4406,6 +4907,7 @@ class Trout{
   }
   reseat(){
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
+    this.badT=0;
     this.p.copy(this.lie);this.p.y=this.restY();
     if(hooked===this){hooked=null;rebuildMasses();}
   }
@@ -5051,7 +5553,8 @@ function afterSettingsChange(){
 }
 function copySettings(){
   settingsStr=encodeSettings();
-  try{ location.hash='s='+encodeURIComponent(settingsStr); }catch(e){}
+  /* keep the venue in the URL, or a shared link always lands on Cedar Run */
+  try{ location.hash='v='+SCENE_ID+'&s='+encodeURIComponent(settingsStr); }catch(e){}
   const url=location.href;
   copyState='copied to clipboard';
   if(navigator.clipboard&&navigator.clipboard.writeText){
@@ -5063,6 +5566,19 @@ function runAction(key){
     waterLook=(waterLook+1)%WATER_LOOKS.length;
     const [name,vals]=WATER_LOOKS[waterLook];
     applyPreset(vals); say(name);
+  }
+  else if(key.indexOf('!venue:')===0){
+    /* The channel is baked into the shaders at load, so venues do not hot
+       swap — the switch writes the venue and the current settings into the
+       URL and reloads. sw=1 tells the boot block to put the venue's own
+       water and fish defaults back on top afterwards, so you keep your
+       tackle and get the venue's river. */
+    const id=key.slice(7);
+    if(id===SCENE_ID){say('you are already on '+SC.name);return;}
+    try{
+      location.hash='v='+id+'&sw=1&s='+encodeURIComponent(encodeSettings());
+      location.reload();
+    }catch(e){say('could not switch venue');}
   }
   else if(key==='!physical'){applyPreset(PHYSICAL);say('physical defaults loaded');}
   else if(key==='!classicrod'){applyPreset(CLASSIC);say('classic tackle loaded');}
@@ -6014,6 +6530,38 @@ renderer.setAnimationLoop(()=>{
     }
   }
 
+  /* ---- stillwater: a fly that has to behave like something alive ----
+     Nothing drifts in a pond, so a take is earned by MOVEMENT rather than by
+     the absence of it. Below Chase min he is not interested; above Chase max
+     he cannot get in front of it; in between he follows, and eats it if he
+     catches up. Off on every river, because SC.chase is only set on the pond. */
+  if(SC.chase&&!hooked){
+    const sub=fy<film-0.015&&bedDepth(fx,fz)>0.05;
+    computeFlow(fx,fz);
+    const strip=Math.hypot(vel[0]-flowX,vel[2]-flowZ);
+    const alive=sub&&strip>P.chaseMin&&strip<P.chaseMax;
+    for(const f of fishes){
+      if(f.state==='chasing'){
+        const d=Math.hypot(fx-f.p.x,fz-f.p.z);
+        if(alive) f.badT=0; else f.badT+=dt;
+        if(d<0.30&&alive){ f.beginStrike(); pulse(0.35); }
+        else if(f.badT>P.chaseGiveUp||d>P.chaseRadius*2.0){
+          f.state='holding'; f.badT=0; f.evaluated=false;
+          say(strip>=P.chaseMax?'too fast \u2014 he gave up on it'
+                               :'he lost interest');
+        }
+        continue;
+      }
+      if(f.state!=='holding'||!alive) continue;
+      const d=Math.hypot(fx-f.p.x,fz-f.p.z);
+      if(d>P.chaseRadius) continue;
+      const eager=(f.feeding?1:P.nonFeedMult)*(1-d/P.chaseRadius);
+      if(Math.random()<eager*P.chaseChance*dt){
+        f.state='chasing'; f.badT=0; say('he\u2019s following it'); pulse(0.20);
+      }
+    }
+  }
+
   if(hooked&&hooked.beh==='jump'&&pos[1]>filmY(pos[0],pos[2],simTime)-0.02&&Math.random()<dt*14){
     spawnRing(pos[0],pos[2],1.5);
     if(SND.ok) sndSplash(3.5+hooked.len*4);
@@ -6318,7 +6866,7 @@ renderer.setAnimationLoop(()=>{
     }
     const hud=document.getElementById('pvhud');
     if(hud) hud.textContent=
-      'x '+player.position.x.toFixed(1)+'  z '+player.position.z.toFixed(1)+
+      SC.name+'   x '+player.position.x.toFixed(1)+'  z '+player.position.z.toFixed(1)+
       '   '+(1/Math.max(dt,1e-4)).toFixed(0)+' fps'+
       '   tris '+renderer.info.render.triangles+
       '   draws '+renderer.info.render.calls+
@@ -6386,7 +6934,7 @@ function pvFishEnsure(){
   pvFish=makeTrout(0.36);
   pvFish.rotation.order='YZX';
   /* just inside the near bank, at eye level, so you can walk round it */
-  pvBase.set(0,1.12,CZ+HALFW*0.92);
+  pvBase.set(0,1.12,CZ+SC.dz(0)+SC.hw(0)*0.92);
   pvFish.position.copy(pvBase);
   scene.add(pvFish);
 }
@@ -6627,6 +7175,9 @@ if(location.hash&&location.hash.indexOf('s=')>=0){
     const raw=decodeURIComponent(location.hash.slice(location.hash.indexOf('s=')+2));
     const n=applySettings(raw);
     if(n) hint.innerHTML='<b>Loaded '+n+' settings from the URL.</b> '+hint.innerHTML;
+    /* arrived here from a venue switch: the tackle in the URL stays, but the
+       water and fish numbers belong to the venue, so they go back on top */
+    if(/[#&]sw=1/.test(location.hash||'')) applyPreset(Object.assign({},VENUE_BASE,SC.par));
   }catch(e){}
 }
 
