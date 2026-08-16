@@ -32,17 +32,62 @@ has drifted apart.
 `holesJS`/`holesGL` emit gaussian scour pockets into both languages from one
 data list — that is how the plunge pools and the pocket water get their depth.
 
-## Why switching reloads the page
+## Switching venues
 
-The channel functions are baked into the shaders as source at load, so venues
-cannot hot-swap. The switch writes `#v=<id>&sw=1&s=<settings>` and reloads.
+Venues hot-swap. `runAction('!venue:<id>')` calls `requestVenue()`, which queues
+the change; the frame loop fades to black, calls `applyVenue()` on the frame the
+screen is fully covered, holds black while the new river settles, and fades back
+up. About 1.4 s end to end and **the page never reloads**.
 
-`sw=1` tells the boot block to put `VENUE_BASE` and then `SC.par` back on top of
-the settings that came in on the URL. The effect is: **your tackle travels with
-you, the river does not.** Anything a venue is allowed to own is listed in
-`VENUE_BASE` and gets reset on every switch — that is what stops you leaving the
-pond and arriving at Cedar Run with a sinking dry fly. Rod, line, leader,
-friction and reel are deliberately not in that list.
+It used to reload — `#v=<id>&sw=1&s=<settings>` and `location.reload()`. That is
+fine on a desktop and close to unusable in a headset, because **a reload ends the
+WebXR session**: you are dumped to the 2D overlay and have to press Enter VR
+again, having rebuilt the entire world on the far side. That is not a level
+change, it is a restart that happens to land somewhere else.
+
+What actually blocked the swap was the shaders. Each venue's channel is compiled
+into five programs, so `applyVenue()`:
+
+1. repoints `SC` and everything derived from it — `HALFW`, `DROPS`, `GZ0/GZ1`,
+   `OBST`, `CANOPY`, `LIES` — which is why all of those are `let`;
+2. regenerates the three venue GLSL blocks (`buildSceneGLSL`, `buildSurfGLSL`,
+   `buildFlowGLSL`) and calls `reskinVenueShaders()`;
+3. reallocates the grid, rebuilds bed, scenery, trees, fish and zone markers,
+   restarts both speck paths, stands you on the new bank, and resets the cast.
+
+`reskinVenueShaders()` does not rebuild the shader literals. At load, each
+material's source is recorded once with the three venue blocks punched out and
+replaced by tokens; the blocks are interpolated verbatim so the match is exact,
+and it is **checked at load** against the venue we know we booted on, which makes
+a silent miss later impossible. Re-expanding is then a string join. Punch order
+matters: `GLSL_SURF` contains `GLSL_SCENE`, so the longer block comes out first.
+
+Two cache traps, both load-bearing:
+
+- **ShaderMaterial** keys its program off the shader source, so new source is a
+  new program — but you still have to set `needsUpdate`, or three never looks.
+- **The bed is not a ShaderMaterial.** It is a `MeshStandardMaterial` with
+  `onBeforeCompile`, and three keys those off the *built-in* shader id, so the
+  injected venue GLSL is invisible to the cache. `customProgramCacheKey` returns
+  `'flycast-bed-1:'+SCENE_ID` for exactly this reason. Drop the `SCENE_ID` and
+  the bed silently keeps the previous river's shape while everything else moves.
+
+**Settling is budgeted, not blocking.** The boot block runs 120 solver steps
+before it lets you play; doing that inline here would be a multi-hundred-
+millisecond freeze in a live XR session. `applyVenue` sets `venueSettle=120` and
+the fade step spends 6 a frame while the screen is black — about 20 frames.
+
+**Your tackle travels with you, the river does not.** `applyVenue` re-applies
+`VENUE_BASE` and then `SC.par`, the same pair the reload used to apply from the
+boot block. Anything a venue is allowed to own is listed in `VENUE_BASE` and is
+reset on every switch — that is what stops you leaving the pond and arriving at
+Cedar Run with a sinking dry fly. Rod, line, leader, friction, reel and the GPU
+speck budget are deliberately not in that list, so they simply persist: there is
+no URL round trip carrying them any more, because nothing reloads.
+
+`syncUrl()` still writes `#v=<id>&s=<settings>` after every swap, so the address
+bar stays a shareable link and a manual refresh puts you back where you were.
+Old `sw=1` links keep working; nothing produces them now.
 
 ## The pond
 

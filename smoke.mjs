@@ -235,6 +235,11 @@ const seen=new Set();
 const base={THREE,document,console,Math,JSON,Date,Object,Array,Number,String,Boolean,
   Float32Array,Float64Array,Uint8Array,Uint8ClampedArray,Uint16Array,Uint32Array,Int32Array,Int8Array,Int16Array,
   Promise,Error,isNaN,isFinite,parseFloat,parseInt,Set,Map,Symbol,RegExp,
+  /* the URL restore path reads these. They were missing, so the whole
+     `#s=...` block threw on the first line and was swallowed by its own
+     try/catch — the harness reported a clean boot while never once
+     exercising the code that carries your settings between sessions. */
+  decodeURIComponent,encodeURIComponent,
   innerWidth:1280,innerHeight:720,devicePixelRatio:2,
   requestAnimationFrame:()=>0,cancelAnimationFrame(){},
   setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,clearInterval(){},
@@ -521,5 +526,121 @@ const menu=vm.runInContext(`(()=>{
 })()`,sandbox);
 console.log('menu layout',menu);
 if(menu.overflowing.length||menu.overlapCount) console.log('  *** MENU LAYOUT FAILURE ***');
+
+/* Venue hot swap. Venues used to reload the page, which in a headset means
+   leaving VR; they now swap in place, and this is the check that everything
+   venue-shaped actually followed — and, just as important, that everything
+   TACKLE-shaped did not. */
+const venue=vm.runInContext(`(()=>{
+  const loop=renderer._loop;
+  const snap=()=>({venue:SCENE_ID, halfw:HALFW, gz1:+GZ1.toFixed(2),
+    obst:OBST.length, obstMeshes:obstMeshes.length, obstDrawn:obstGroup.children.length,
+    canopy:CANOPY.length, lies:LIES.length, fishes:fishes.length,
+    zones:zoneRings.length, bedKey:bedMat.customProgramCacheKey(),
+    obstInFlowGLSL:(GLSL_FLOW.match(/const vec4 OB/g)||[]).length});
+  const shaderHash=()=>VENUE_SHADERS.map(e=>{
+    const s=e.mat.vertexShader+e.mat.fragmentShader; let a=0;
+    for(let i=0;i<s.length;i++) a=(a*31+s.charCodeAt(i))>>>0;
+    return a; }).join(',');
+  const boot=shaderHash();
+  /* set tackle and the speck budget, then travel */
+  P.speckBudget=112; P.lineWt=6.5; P.tippet=27; P.nodeLen=0.12;
+  onSettingChanged('speckBudget'); loop();
+  const rows=[snap()];
+  for(const v of ['alder','pond','falls','cedar']){
+    runAction('!venue:'+v);
+    for(let f=0;f<40;f++) loop();
+    rows.push(snap());
+  }
+  const consistent=rows.every(r=>r.obst===r.obstMeshes&&r.obst===r.obstDrawn
+    &&r.obst===r.obstInFlowGLSL&&r.lies===r.fishes&&r.lies===r.zones
+    &&r.bedKey==='flycast-bed-1:'+r.venue);
+  /* let the last transition run all the way out: fade down, settle the new
+     river a few solver steps a frame, fade back up. Nothing may be left
+     holding the screen black or half-settled. */
+  let drain=0;
+  while((venueFade>0||venueSettle>0)&&drain<400){ loop(); drain++; }
+  const sig=r=>JSON.stringify(r);
+  return {rows, consistent, drainFrames:drain,
+    transitionCompletes:venueFade===0&&venueSettle===0&&gridReady,
+    distinctReaches:new Set(rows.map(r=>r.venue+':'+r.halfw+':'+r.gz1)).size,
+    /* coming back to a reach has to reproduce it exactly, or something is
+       accumulating across swaps */
+    returnsIdentical:sig(rows[0])===sig(rows[rows.length-1]),
+    /* every venue GLSL block put back exactly where it came from */
+    shaderRoundTrip:shaderHash()===boot,
+    noStrayTokens:!VENUE_SHADERS.some(e=>/@surf|@flow|@scene/.test(e.mat.vertexShader+e.mat.fragmentShader)),
+    /* the point of the exercise: your gear survived four venue changes */
+    tackleKept:P.lineWt===6.5&&P.tippet===27&&P.nodeLen===0.12,
+    budgetKept:P.speckBudget===112&&GS_W===112&&gsRT[0].width===112,
+    venueOwnedApplied:P.branchOn===0&&P.specks===0.16};
+})()`,sandbox);
+console.table(venue.rows);
+console.log('venue hot swap',{consistent:venue.consistent, distinctReaches:venue.distinctReaches,
+  returnsIdentical:venue.returnsIdentical,
+  transitionCompletes:venue.transitionCompletes, drainFrames:venue.drainFrames,
+  shaderRoundTrip:venue.shaderRoundTrip, noStrayTokens:venue.noStrayTokens,
+  tackleKept:venue.tackleKept, budgetKept:venue.budgetKept,
+  venueOwnedApplied:venue.venueOwnedApplied});
+if(!(venue.consistent&&venue.shaderRoundTrip&&venue.noStrayTokens&&venue.tackleKept
+     &&venue.budgetKept&&venue.venueOwnedApplied&&venue.returnsIdentical
+     &&venue.transitionCompletes&&venue.distinctReaches===4))
+  console.log('  *** VENUE SWAP FAILURE ***');
+
+/* The settings string is what carries your tackle into a shared link and back.
+   It never used to be tested here at all, because decodeURIComponent was not in
+   the sandbox and the whole restore block threw on its first line. */
+const roundTrip=vm.runInContext(`(()=>{
+  /* deliberately all NON-venue keys: the budget, the line, the leader and the
+     reel are yours. A venue-owned key like speckSize is supposed to be
+     overwritten by the reach and would prove nothing here. */
+  const want={speckBudget:96, lineWt:7, tippet:19, reelSpeed:3.4};
+  Object.assign(P,want);
+  const str=encodeSettings();
+  const url='v='+SCENE_ID+'&s='+encodeURIComponent(str);
+  Object.assign(P,{speckBudget:48, lineWt:3, tippet:44, speckSize:0.9});
+  const raw=decodeURIComponent(url.slice(url.indexOf('s=')+2));
+  const n=applySettings(raw);
+  const ok=Object.keys(want).every(k=>Math.abs(P[k]-want[k])<1e-3);
+  /* and a venue switch on top must not touch anything the venue does not own */
+  applyPreset(Object.assign({},VENUE_BASE,SC.par));
+  return {keysApplied:n, hashChars:url.length, restored:ok,
+    survivesVenueDefaults:Object.keys(want).every(k=>Math.abs(P[k]-want[k])<1e-3),
+    budgetResized:(renderer._loop(),GS_W===96&&gsRT[0].width===96)};
+})()`,sandbox);
+console.log('settings round trip',roundTrip);
+if(!(roundTrip.restored&&roundTrip.survivesVenueDefaults&&roundTrip.budgetResized))
+  console.log('  *** SETTINGS ROUND TRIP FAILURE ***');
+
+/* Line threaded through the guides must be invisible to rocks and branches.
+   When it was not, the guide constraint dragged the blank after whatever the
+   scenery had shoved and the rod folded at the cork — Boulder Garden and Alder
+   Tunnel, the two venues with scenery at rod height in the water you stand in. */
+const guarded=vm.runInContext(`(()=>{
+  const [lo,hi]=guidedNodes();
+  const inRod=i=>{const s=sArc(i);return s>=lineOut&&s<=lineOut+rodArc;};
+  let wrongSkip=0, wrongKeep=0;
+  for(let i=0;i<nAct;i++){
+    const skipped=(i>=lo&&i<=hi);
+    if(skipped&&!inRod(i)) wrongSkip++;
+    if(!skipped&&inRod(i)&&i>lo&&i<hi) wrongKeep++;
+  }
+  /* and prove it end to end: park every line node inside a rock and check that
+     only the ones outside the guides get moved */
+  const ob=OBST[0];
+  const cy=bedY(ob.x,ob.z)+ob.h*P.obstHeight;
+  for(let i=0;i<nAct;i++){ pos[i*3]=ob.x; pos[i*3+1]=cy; pos[i*3+2]=ob.z; }
+  const before=Float32Array.from(pos.subarray(0,nAct*3));
+  pushOutObstacles();
+  let movedInRod=0, movedFree=0;
+  for(let i=0;i<nAct;i++){const p=i*3;
+    const d=Math.hypot(pos[p]-before[p],pos[p+1]-before[p+1],pos[p+2]-before[p+2]);
+    if(d<=1e-9) continue;
+    if(i>=lo&&i<=hi) movedInRod++; else movedFree++; }
+  return {guidedSpan:[lo,hi], wrongSkip, wrongKeep, movedInRod, movedFree};
+})()`,sandbox);
+console.log('guided line exempt from scenery',guarded);
+if(guarded.movedInRod||guarded.wrongSkip||guarded.wrongKeep||!guarded.movedFree)
+  console.log('  *** GUIDE EXEMPTION FAILURE ***');
 
 console.log('OK');

@@ -277,7 +277,8 @@ for crestness, so the two cues agree by construction. A second harmonic sharpens
 the crest and flattens the trough; without it the train reads as corrugation.
 
 **Speck budget.** `speckBudget` is the side of the square state texture, so the
-count is its square: 160 -> 25600, 256 -> 65536, 512 -> 262144. `gSpeckResize()`
+count is its square: **80 -> 6400 (the shipped default)**, 160 -> 25600,
+256 -> 65536, 512 -> 262144. `gSpeckResize()`
 reallocates the render targets and rebuilds the point geometry together — they
 are both sized from `GS_W` and must never disagree. Two rules it enforces and
 that any rewrite must keep: **dispose the old render targets** (otherwise every
@@ -324,10 +325,19 @@ this document would put them, so don't "correct" them:
   from `ripple 0.95` (speck-splatted wavelets) and `standWave 1.15`.
 - `ripR/G/B` all 0 with `ripOpacity 0.26` and `ripStain 1.0` — ripples are
   painted dark and fully stained toward the water colour.
-- `specks 0.16` with `speckBright 2.0` and `speckBudget 560` (313600 specks):
-  few visible specks, bright, but a dense field feeding the ripple map. That
+- `specks 0.16` with `speckBright 2.0` and `speckBudget 80` (6400 specks): few
+  visible specks, bright, but a field dense enough to feed the ripple map. That
   combination is the point of the split between the state pass and the visible
   draw — the map wants every speck, the eye wants a handful.
+
+  **The budget was 560 (313600 specks) and that was a phone number, not a
+  headset number.** It was tuned by looking at the picture on a flat screen,
+  where an over-budget speck field costs you nothing you can see. On a Quest it
+  costs 72 fps, and a standalone headset that misses frame rate does not show
+  you a slower picture — the compositor reprojects, and it reads as **jittery
+  head tracking**. That failure mode is invisible everywhere except in the
+  headset, which is the whole reason the number drifted four times too high.
+  Check GPU budgets on the device they are for.
 - `skyGlint 2.9`, `foam 0.15`, `streak 0.4`, `froth 0.4`, `surfWave 0.65`.
 
 **Cost.** `surfY` costs six smoothsteps and depends only on `x`; it is cached

@@ -315,6 +315,26 @@ Recorded because each one was mis-diagnosed at least once.
    a pulley rather than an anchor.
 10. **Frozen the moment the left hand grabbed line** — a variable referenced in the stripping
    code that was never declared. Same class as (8): fine until that branch executes.
+11. **Rod folded at the cork, again, but only in Boulder Garden and Alder Tunnel** — and this
+   time the damping reference was fine. `pushOutObstacles()`/`pushOutCanopy()` ran over
+   *every* active line node, including the ~17 threaded through the guides. Line inside the
+   rod is captive in eleven rings; what a rock or a branch touches there is the blank, not
+   the line, and the blank is not a colliding body. So the push-out modelled a contact that
+   does not exist — and `solveGuide()` couples each guide to the line **both ways**, so a
+   node shoved a branch-radius sideways dragged the rod node after it and buckled the blank
+   at the first free joint. Measured with the rod inside an alder: a persistent 25° kink at
+   the cork, 7° after `guidedNodes()` exempted the guided span. Free line outside the tiptop
+   and the pool between the stripping guide and the reel still catch on everything — that is
+   real, and in a brush creek it is most of the difficulty. Two venues, because they are the
+   two with scenery at rod height in the water you stand in.
+12. **Nothing recovered a bad rod except resetting it by hand** — `sanity()` watched the line
+   and only the line, so `blewUp` (which triggers the automatic `resetCast`) could never fire
+   on the blank. Everything that can diverge the line reaches the rod through the guides. It
+   is eleven free nodes; they are checked now.
+13. **A GPU budget four times too high, invisible outside the headset** — `speckBudget` shipped
+   at 560, i.e. 313600 specks, tuned by eye on a flat screen. A standalone headset that misses
+   72 fps does not render slower, it **reprojects**, and that reads as jittery head tracking,
+   not as a soft picture. Now 80 (6400 specks). Check device budgets on the device.
 
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch

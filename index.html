@@ -175,7 +175,7 @@ const P = {
   watR:0, watG:0, watB:0,
   speckR:0.7, speckG:0.7, speckB:0.7, speckBright:2,
   foamR:0.933, foamG:0.957, foamB:0.945, foamBright:1, foamDirt:0,
-  speckBudget:560, standWave:1.15,
+  speckBudget:80, standWave:1.15,
   ripple:0.95, rippleSpan:60, rippleScale:1.7,
   ripOpacity:0.26, ripR:0, ripG:0, ripB:0, ripStain:1,
   riseAggro:0.35, wetShine:1, fishDetail:1,
@@ -265,9 +265,9 @@ const MENU=[
   ['Surface relief','surfWave',0.00,2.50,0.05,'How much the water surface is displaced by the SOLVED free surface rather than by decorative sine waves. This is the pillow that stands up in front of a rock, the drawdown over a lip, the standing wave below it. The solver has always computed this; until now the renderer threw it away and drew three hardcoded sines instead. Zero returns to that.'],
   ['Standing waves','standWave',0.00,2.00,0.05,'Adds the one thing the scrolling texture cannot produce: crests that sit ACROSS the current and hold still while the water runs through them. That is what a riffle is, and it is exactly what the specks draw, so this is the setting that lets the surface tell you what the specks tell you. Amplitude and wavelength both come from the Froude number, so the crests appear only where the water is genuinely fast and shallow, they pack tighter as it speeds up, and they vanish in a slow pool. Everything else on the surface is a texture being dragged downstream; this is the only part that is locked to the riverbed. Start at 1.00 and turn Specks down to see whether you can still read the water.'],
   ['— SPECKS & RIPPLES —',null,0,0,0,''],
-  ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: 25600 specks living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
-  ['GPU speck budget','speckBudget',48,2048,16,'The side of the square texture the GPU specks live in, so the count is this number SQUARED: 160 is 25600, 512 is 262144, 1024 is a million, 2048 is four million. The top of the slider is clamped to the largest texture your device will allocate. There is no meaningful ceiling from the simulation — you will run out of fill rate long before you run out of specks, so if raising this costs frames, drop Speck size FIRST: size costs fill quadratically and the count only linearly. Applies when you let go of the slider, and restarts every speck, so the field fades back in rather than snapping. No effect on the CPU path, which is genuinely fixed at 4000.'],
-  ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or 25600 on the GPU path. The CPU number is a real ceiling — each of those costs a flow evaluation in JavaScript — but the GPU number is just where the budget was set, so say if you want it higher.'],
+  ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: as many specks as GPU speck budget squared, living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
+  ['GPU speck budget','speckBudget',48,2048,16,'The side of the square texture the GPU specks live in, so the count is this number SQUARED: 80 is 6400, 160 is 25600, 512 is 262144, 1024 is a million, 2048 is four million. It ships at 80 because that is what a standalone headset holds 72 fps at — above roughly 160 the Quest starts dropping frames, and dropped frames show up as jittery head tracking rather than as a slow picture, which is the worst way for a budget to overrun. On a desktop GPU you can raise it a long way. The top of the slider is clamped to the largest texture your device will allocate. There is no meaningful ceiling from the simulation — you will run out of fill rate long before you run out of specks, so if raising this costs frames, drop Speck size FIRST: size costs fill quadratically and the count only linearly. Applies when you let go of the slider, and restarts every speck, so the field fades back in rather than snapping. Travels with you between venues like the rest of your settings. No effect on the CPU path, which is genuinely fixed at 4000.'],
+  ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or GPU speck budget squared on the GPU path. The CPU number is a real ceiling — each of those costs a flow evaluation in JavaScript — but the GPU number is just where the budget was set, so raise that if you want more.'],
   ['Speck size','speckSize',0.01,4.00,0.02,'On-screen size of each speck. Size also scales with Froude number on top of this, so riffles stand up and pool slicks stay fine — this sets the baseline.'],
   ['Speck life s','speckTravel',2.00,20.0,0.50,'How long a speck lives before it fades out and is reborn upstream. Longer specks trace the whole run of the river past you; shorter ones read as local flow direction. Specks seeded around you live about a third as long as ones drifting down from upstream.'],
   ['Speck trail s','speckTrail',0.00,1.00,0.02,'GPU specks only. Each speck draws two fainter crests behind it, spaced by however far the water actually carried it in this many seconds — so the spacing IS the speed, and the three together read as a short wave train. Zero collapses them onto the head.'],
@@ -344,7 +344,7 @@ const MENU=[
   ['Chase eagerness','chaseChance',0.05,3.00,0.05,'Odds per second that a fish inside the radius commits to a chase. Scaled down with distance and by whether he is feeding.'],
   ['Chase patience s','chaseGiveUp',0.20,6.00,0.10,'How long the fly may be too slow, too fast or out of the water before he gives up on it.'],
   ['\u2014 PLACES \u2014',null,0,0,0,''],
-  ['Cedar Run','!venue:cedar',0,0,0,'Freestone riffle, run and pool. The reach every constant in the game was tuned against, and the one to come back to when something feels wrong. Push right to go there \u2014 the page reloads and your settings come with you.'],
+  ['Cedar Run','!venue:cedar',0,0,0,'Freestone riffle, run and pool. The reach every constant in the game was tuned against, and the one to come back to when something feels wrong. Push right to go there \u2014 it fades across without reloading, and your tackle and settings come with you.'],
   ['Boulder Garden','!venue:boulder',0,0,0,'Pocket water: steep, shallow, and a fish in every slot. Drifts last about a second, so it is high-stick and roll casts rather than false casting. Push right to go there.'],
   ['Stairstep Falls','!venue:falls',0,0,0,'Six lips and six plunge pools. The channel pinches at each lip, which is what builds the tongue and the standing wave under it. Fish sit deep and come a long way up. Push right to go there.'],
   ['Meadow Glide','!venue:meadow',0,0,0,'Spring creek flat: slow, clear, weeded, and no white water to hide a bad drift behind. Strict drag tolerance and spooky fish. Push right to go there.'],
@@ -419,9 +419,10 @@ let hooked=null;
               centreline), so it is the same coordinate the rest of
               the engine uses.
 
-   Nothing here depends on P, so the GLSL is pure and gets baked into
-   the shaders at load. That is also why venues cannot hot-swap: the
-   switch writes the venue into the URL and reloads.
+   Nothing here depends on P, so the GLSL is pure and can be baked
+   straight into the shaders. It used to be baked once, at load, which
+   is why a venue change had to reload the page; it is now regenerated
+   and recompiled in place instead \u2014 see section 7b.
    ════════════════════════════════════════════════════════════ */
 const CZ=-9.0;                       /* the river axis. Everything is relative to it. */
 const SG=(x,c,w)=>{const t=(x-c)/w;return Math.exp(-t*t);};
@@ -748,28 +749,36 @@ try{
   const m=/[#&]v=([a-z]+)/.exec(location.hash||'');
   if(m&&SCENES[m[1]]) SCENE_ID=m[1];
 }catch(e){}
-const SC=SCENES[SCENE_ID];
+/* SC and everything derived from it are LET, not const. They used to be const
+   because a venue could only arrive at load; venues now hot swap in place (see
+   applyVenue, section 7b) and every one of these has to be able to point at the
+   new reach. */
+let SC=SCENES[SCENE_ID];
 SC.id=SCENE_ID;
 SC.weeds=SC.weeds||[]; SC.canopy=SC.canopy||[];
 /* venue defaults land on top of the factory defaults. Anything in the URL
-   settings string is applied later and wins, unless the reload came from a
-   venue switch — see the boot block at the bottom of the file. */
+   settings string is applied later and wins — see the boot block at the bottom
+   of the file. Once running, applyVenue re-applies this same pair. */
 Object.assign(P,VENUE_BASE,SC.par);
 
 /* GLSL shared by every venue's channel functions. tanh and smoothstep-with-
    clamp are written out rather than assumed, because GLSL ES 1.0 has neither
-   in the form we want and the Quest browser can still hand us that profile. */
-const GLSL_SCENE=`
+   in the form we want and the Quest browser can still hand us that profile.
+   Written as a BUILDER rather than a literal so the swap can regenerate it
+   against the new venue and hand the result back to the five materials that
+   compile it in. */
+function buildSceneGLSL(){ return `
 float scCross(float u){return max(0.0,1.0-u*u);}
 float scG(float x,float c,float w){float t=(x-c)/w;return exp(-t*t);}
 float scTh(float a){return a/(1.0+abs(a));}
 float scSS(float a,float b,float x){float t=clamp((x-a)/(b-a),0.0,1.0);return t*t*(3.0-2.0*t);}
 ${SC.glsl}
-`;
+`; }
+let GLSL_SCENE=buildSceneGLSL();
 
 /* ---- river ---- */
-const HALFW=SC.hwMax, MAXDEPTH=SC.dMax;
-const DROPS=SC.drops;
+let HALFW=SC.hwMax, MAXDEPTH=SC.dMax;
+let DROPS=SC.drops;
 const smoothstep=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
 function surfY(x){
   let y=-SC.slope*x*P.grade;
@@ -794,10 +803,10 @@ const ripple=(x,z,t)=>
    comes near enough to the surface to do so — the solver treats it as bed
    elevation, so one sitting half a metre under is simply flowed over.
    The venue supplies these in axis-relative z; lift them to world here. */
-const OBST=SC.obst.map(o=>({x:o.x,z:CZ+o.z,r:o.r,h:o.h,kind:o.kind,sh:0,sgn:o.sgn||1}));
+let OBST=SC.obst.map(o=>({x:o.x,z:CZ+o.z,r:o.r,h:o.h,kind:o.kind,sh:0,sgn:o.sgn||1}));
 /* Branches. Real to the line and to nothing else — they are above the water,
    so they never touch the bed, the solver or the fish. */
-const CANOPY=SC.canopy.map(c=>({x:c.x,z:CZ+c.z,y:c.y,r:c.r}));
+let CANOPY=SC.canopy.map(c=>({x:c.x,z:CZ+c.z,y:c.y,r:c.r}));
 const NV=16, vort=[];
 for(let i=0;i<NV;i++) vort.push({x:0,z:0,r:1,k:0,life:0});
 let vNext=0;
@@ -1096,7 +1105,9 @@ let slideVel=0;           /* m/s of line accelerating through routing fingers */
 /* The X bounds move: the span is a setting and the window can follow the
    angler. Z never moves — the grid already spans the full width of the river. */
 let GX0=-40, GX1=40;
-const GZ0=CZ-SC.dzMax-HALFW-0.6, GZ1=CZ+SC.dzMax+HALFW+0.6;
+/* Z bounds are venue geometry — a four-metre creek and a twenty-eight-metre
+   pond do not share a grid — so they move when the venue does. */
+let GZ0=CZ-SC.dzMax-HALFW-0.6, GZ1=CZ+SC.dzMax+HALFW+0.6;
 let gridCentre=0;
 let gdx=0.40, GNX=1, GNZ=1, gridReady=false, gbed=null;
 let gfoam=null, gfoam0=null, gdivs=null, gshear=null;
@@ -1776,6 +1787,28 @@ function waterAndGround(i,h,t){
   vel[p]=flowX+rx;vel[p+1]=ry;vel[p+2]=flowZ+rz;
 }
 
+/* ---- what the scenery is allowed to touch ---------------------------------
+   Line between the tiptop and the stripping guide is THREADED THROUGH THE ROD.
+   It is captive in eleven rings, held against the blank, and the thing a rock
+   or a branch makes contact with there is the rod, not the line. The rod is not
+   a colliding body, so pushing that line out of the scenery models a contact
+   that does not exist — and it does not merely look wrong, it wrecks the blank:
+   solveGuide() couples each guide to the line BOTH ways, so a node shoved a
+   branch-radius sideways drags the rod node after it, and the blank buckles at
+   the first free joint above the cork. That is the "folded rod" in Boulder
+   Garden and Alder Tunnel, and it is those two venues because they are the two
+   where scenery sits at rod height in the water you are standing in: brush at
+   1.8-2.2 m over a four-metre creek, and boulders you wade between. Nothing
+   else in the game recovers it, because sanity() only ever watched the line, so
+   the fold survives until you reset the rod by hand.
+   Free line outside the tiptop still catches on everything, and so does the
+   pool between the stripping guide and the reel — that is real, and in a brush
+   creek it is most of the difficulty. Only the guided span is exempt.
+   Returns the inclusive node range to skip; hi<lo means skip nothing. */
+function guidedNodes(){
+  return [Math.ceil(idxAt(lineOut)), Math.floor(idxAt(lineOut+rodArc))];
+}
+
 /* Obstacle collision.
    Two bugs in the old version. placeObstacles() puts the mesh CENTRE at
    bedY + h*obstHeight, but the collision test treated that same height as the
@@ -1787,12 +1820,14 @@ function waterAndGround(i,h,t){
    line follows the visible rock rather than an invisible cylinder, and is called
    once per substep AFTER the iterations so it survives them. */
 function pushOutObstacles(){
+  const [gLo,gHi]=guidedNodes();
   for(let o=0;o<OBST.length;o++){
     const ob=OBST[o];
     const cy=bedY(ob.x,ob.z)+ob.h*P.obstHeight;
     const hy=ob.r*(ob.kind==='log'?0.55:0.72);      /* vertical semi-axis */
     const top=cy+hy;
     for(let i=0;i<nAct;i++){
+      if(i>=gLo&&i<=gHi) continue;                  /* inside the guides */
       const p=i*3;
       const y=pos[p+1];
       if(y>top) continue;
@@ -1852,6 +1887,16 @@ function sanity(){
        !Number.isFinite(vel[p])||!Number.isFinite(vel[p+1])||!Number.isFinite(vel[p+2])){blewUp=true;return;}
     const sp=Math.abs(vel[p])+Math.abs(vel[p+1])+Math.abs(vel[p+2]);
     if(sp>140){const k=140/sp;vel[p]*=k;vel[p+1]*=k;vel[p+2]*=k;}
+  }
+  /* The rod was never watched. Everything that can diverge the line can reach
+     the blank through the guides, and a rod left holding a non-finite node has
+     no way back on its own: the auto-reset below only ever fired on the line,
+     so the symptom was a rod stuck in a shape until you reset it by hand. It is
+     eleven free nodes; checking them costs nothing. */
+  for(let i=2;i<RN;i++){
+    const p=i*3;
+    if(!Number.isFinite(rpos[p])||!Number.isFinite(rpos[p+1])||!Number.isFinite(rpos[p+2])||
+       !Number.isFinite(rvel[p])||!Number.isFinite(rvel[p+1])||!Number.isFinite(rvel[p+2])){blewUp=true;return;}
   }
 }
 
@@ -2230,13 +2275,14 @@ const skyMat=new THREE.ShaderMaterial({
       #include <colorspace_fragment>}`});
 scene.add(new THREE.Mesh(new THREE.SphereGeometry(200,32,20),skyMat));
 
-const GLSL_SURF=`
+function buildSurfGLSL(){ return `
 ${GLSL_SCENE}
 float surfY(float x){
   float y=-${SC.slope.toFixed(5)}*x*uGrade;
   ${DROPS.map(d=>`y-=${d.h.toFixed(3)}*uGrade*smoothstep(${(d.x-d.w).toFixed(2)},${(d.x+d.w).toFixed(2)},x);`).join('\n  ')}
   return y;
-}`;
+}`; }
+let GLSL_SURF=buildSurfGLSL();
 
 let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
 {
@@ -2392,7 +2438,12 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
   /* Injected rather than a raw ShaderMaterial, so the bed keeps three.js
      lighting, fog and tone mapping for free. Everything below is additive:
      set Bed variation and Caustics to zero and it renders as it did. */
-  bedMat.customProgramCacheKey=()=>'flycast-bed-1';
+  /* The venue is compiled into this shader (scDep, scHw, scDz), and three keys
+     a MeshStandardMaterial's program off the BUILT-IN shader id — the injected
+     source is invisible to the cache. Without the venue in the key, hot
+     swapping to a new reach would silently reuse the old channel's program and
+     the bed would keep the previous river's shape. */
+  bedMat.customProgramCacheKey=()=>'flycast-bed-1:'+SCENE_ID;
   bedMat.onBeforeCompile=sh=>{
     sh.uniforms.uGravel={value:bedGravel.map};
     sh.uniforms.uSand={value:bedSand.map};
@@ -2543,8 +2594,34 @@ function rebuildBed(){
   pa.needsUpdate=true;ca.needsUpdate=true;bedGeo.computeVertexNormals();
 }
 rebuildBed();
-const obstMeshes=[];
-for(const o of OBST){
+/* Scenery that IS the venue — rocks, brush, weed beds — hangs off groups of
+   its own so a venue change can empty and refill them without walking the
+   whole scene graph looking for what belonged to the last river. */
+const obstGroup=new THREE.Group(), canopyGroup=new THREE.Group(), weedGroup=new THREE.Group();
+scene.add(obstGroup); scene.add(canopyGroup); scene.add(weedGroup);
+/* Emptying a group has to free what it owns and touch nothing it borrows.
+   Every fish draws the SAME body geometry, and a loaded asset shares its
+   geometry and materials across every instance built from it, so a blanket
+   dispose of one trout would take the next one's body with it. Anything shared
+   is flagged with markShared() at the point it is created and skipped here. */
+function markShared(o){ if(o&&typeof o==='object'){o.userData=o.userData||{};o.userData.shared=true;} return o; }
+const _owned=o=>o&&o.dispose&&!(o.userData&&o.userData.shared);
+function emptyGroup(g){
+  for(const m of g.children){
+    if(!m.traverse) continue;
+    m.traverse(c=>{
+      if(_owned(c.geometry)) c.geometry.dispose();
+      const mt=c.material;
+      if(Array.isArray(mt)){ for(const q of mt) if(_owned(q)) q.dispose(); }
+      else if(_owned(mt)) mt.dispose();
+    });
+  }
+  g.clear();
+}
+let obstMeshes=[];
+function buildObstacles(){
+ emptyGroup(obstGroup); obstMeshes=[];
+ for(const o of OBST){
   let m;
   if(o.kind==='rock'){
     const g=new THREE.SphereGeometry(o.r,10,7),pa=g.attributes.position;
@@ -2573,8 +2650,10 @@ for(const o of OBST){
       new THREE.MeshStandardMaterial({color:0x4e4231,roughness:1,flatShading:true}));
     m.rotation.z=Math.PI/2;m.rotation.y=0.35;
   }
-  scene.add(m);obstMeshes.push(m);
+  obstGroup.add(m);obstMeshes.push(m);
+ }
 }
+buildObstacles();
 function placeObstacles(){
   for(let i=0;i<OBST.length;i++){const o=OBST[i];
     obstMeshes[i].position.set(o.x,bedY(o.x,o.z)+o.h*P.obstHeight,o.z);}
@@ -2585,7 +2664,9 @@ placeObstacles();
    Foliage above the water. Invisible to the bed, the solver and the fish,
    and solid to the line — which is the entire difficulty of a brush creek,
    and the groundwork for snagging in every other venue. */
-for(const c of CANOPY){
+function buildCanopy(){
+ emptyGroup(canopyGroup);
+ for(const c of CANOPY){
   const g=new THREE.SphereGeometry(c.r,9,7),pa=g.attributes.position;
   for(let i=0;i<pa.count;i++){
     const x=pa.getX(i),y=pa.getY(i),z=pa.getZ(i);
@@ -2596,21 +2677,25 @@ for(const c of CANOPY){
   const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
     color:0x3c5731,roughness:1,flatShading:true}));
   m.position.set(c.x,surfY(c.x)+c.y,c.z);
-  scene.add(m);
+  canopyGroup.add(m);
   /* a trunk, so the canopy is attached to something */
   const tr=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.13,c.y+0.6,6),
     new THREE.MeshStandardMaterial({color:0x4a3c2c,roughness:1}));
   tr.position.set(c.x+(c.z>CZ?0.2:-0.2),surfY(c.x)+(c.y+0.6)*0.5,
                   c.z+(c.z>CZ?c.r*0.7:-c.r*0.7));
   tr.rotation.z=(c.z>CZ?-1:1)*0.22;
-  scene.add(tr);
+  canopyGroup.add(tr);
+ }
 }
+buildCanopy();
 
 /* ── WEED BEDS ─────────────────────────────────────────────────────────
    Soft obstacles: they bend rather than split the flow, so they are not in
    OBST and the solver never sees them. They exist to give a spring creek
    lanes to fish and edges to hold along. */
-for(const w of (SC.weeds||[])){
+function buildWeeds(){
+ emptyGroup(weedGroup);
+ for(const w of (SC.weeds||[])){
   const g=new THREE.SphereGeometry(w.r,10,7),pa=g.attributes.position;
   for(let i=0;i<pa.count;i++){
     const x=pa.getX(i),y=pa.getY(i),z=pa.getZ(i);
@@ -2622,14 +2707,18 @@ for(const w of (SC.weeds||[])){
   const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
     color:0x33512c,roughness:0.85,transparent:true,opacity:0.88}));
   m.position.set(w.x,bedY(w.x,wz)+w.r*0.10,wz);
-  scene.add(m);
+  weedGroup.add(m);
+ }
 }
+buildWeeds();
 function pushOutCanopy(){
   if(!(P.branchOn>0.5)||!CANOPY.length) return;
   const grip=1-Math.max(0,Math.min(0.95,P.branchGrip));
+  const [gLo,gHi]=guidedNodes();
   for(let k=0;k<CANOPY.length;k++){
     const c=CANOPY[k], cy=surfY(c.x)+c.y, ry=c.r*0.62;
     for(let i=0;i<nAct;i++){
+      if(i>=gLo&&i<=gHi) continue;                  /* inside the guides */
       const p=i*3;
       const dy=(pos[p+1]-cy)/ry;
       if(dy<-1.0||dy>1.0) continue;
@@ -3036,6 +3125,9 @@ async function loadSceneAssets(){
     if(fv&&fv.length){
       const G=fv[0];
       troutAsset={geo:G.items[0].geo,mat:G.items[0].mat,extra:G.items.slice(1)};
+      /* shared by every fish built from the asset — see emptyGroup */
+      markShared(troutAsset.geo); markShared(troutAsset.mat);
+      for(const it of troutAsset.extra){ markShared(it.geo); markShared(it.mat); }
       for(const f of fishes) f.rebuildMesh();
       say('trout model loaded, '+G.tris+' tris');
     }
@@ -3679,13 +3771,19 @@ specks.frustumCulled=false;specks.renderOrder=2;scene.add(specks);
    entire point of drawing flow around a rock. The draw also got cheaper: the
    vertex shader does one state fetch instead of twenty-five field
    evaluations. ------------------------------------------------------------ */
-/* 25600 specks, three vertices each. Doubling this was paid for by the two
-   changes above rather than by spending more: one texture fetch for velocity
-   and depth instead of two, and one back-integration step per trail vertex
-   instead of four. The draw is cheaper per vertex than it was at half the
-   count. `Speck density` still trims from here if you want fewer. */
+/* `speckBudget` squared specks, three vertices each. The per-speck cost came
+   down twice — one texture fetch for velocity and depth instead of two, and one
+   back-integration step per trail vertex instead of four — so the draw is
+   cheaper per vertex than it was at a quarter of the count.
+   It ships at 80 (6400 specks) rather than anything larger because the ceiling
+   here is a STANDALONE HEADSET, not a desktop GPU, and the way this budget
+   overruns is not a soft picture: miss 72 fps on a Quest and the compositor
+   starts reprojecting, which reads as jittery head tracking. That is far worse
+   than fewer specks, and it is invisible on a phone or a monitor, which is how
+   the budget came to be set four times too high. `Speck density` still trims
+   from here if you want fewer without reallocating. */
 let GS_W=Math.max(16,Math.round(P.speckBudget)), GSPECK=GS_W*GS_W;
-const GLSL_FLOW=`
+function buildFlowGLSL(){ return `
 ${GLSL_VDEC}
 ${OBST.map((o,i)=>`const vec4 OB${i}=vec4(${o.x.toFixed(2)},${o.z.toFixed(2)},${o.r.toFixed(3)},${o.kind==='log'?'1.0':'0.0'});`).join('\n')}
 float depthAt(vec2 p){
@@ -3763,7 +3861,8 @@ vec3 fieldAt(vec2 p){
     }
   }
   return vec3(analyticAt(p),depthAt(p));
-}`;
+}`; }
+let GLSL_FLOW=buildFlowGLSL();
 /* the solved free-surface departure, so specks are drawn ON the water the
    renderer actually draws rather than on the flat still-water line */
 const GLSL_SDEV=`
@@ -4168,6 +4267,51 @@ function ripStep(){
 }
 gSpecks.frustumCulled=false;gSpecks.renderOrder=2;gSpecks.visible=false;scene.add(gSpecks);
 
+/* ── VENUE SHADER RESKIN ──────────────────────────────────────────────────
+   Three blocks of GLSL are GENERATED from the venue rather than written by
+   hand — the channel functions (GLSL_SCENE), the free surface (GLSL_SURF) and
+   the analytic flow field with its baked obstacle list (GLSL_FLOW) — and five
+   programs compile them in. That, and only that, is why venues used to need a
+   page reload.
+
+   Rather than restructure four large shader literals into builders, record
+   each material's source ONCE with those three blocks punched out and replaced
+   by tokens. The blocks are interpolated verbatim, so the match is exact — and
+   it is checked HERE, at load, against the venue we know we booted on, which
+   makes a silent miss later impossible. Re-expanding a recorded template with
+   the next venue's blocks is then a string join.
+
+   Punch order matters: GLSL_SURF contains GLSL_SCENE, so the longer block has
+   to come out first or the shorter one eats half of it. */
+const VENUE_SHADERS=[];
+const _TSURF=' @surf ', _TFLOW=' @flow ', _TSCENE=' @scene ';
+function registerVenueShader(name,mat){
+  const punch=src=>(src||'').split(GLSL_SURF).join(_TSURF)
+                            .split(GLSL_FLOW).join(_TFLOW)
+                            .split(GLSL_SCENE).join(_TSCENE);
+  const vs=punch(mat.vertexShader), fs=punch(mat.fragmentShader);
+  if(vs===mat.vertexShader&&fs===mat.fragmentShader)
+    console.warn('venue reskin: no venue GLSL found in "'+name+'" — it will not follow a venue change');
+  VENUE_SHADERS.push({name,mat,vs,fs});
+}
+registerVenueShader('water',waterMat);
+registerVenueShader('speck update',gsMat);
+registerVenueShader('speck draw',gSpeckMat);
+registerVenueShader('ripple splat',ripMat);
+function reskinVenueShaders(){
+  const fill=t=>t.split(_TSURF).join(GLSL_SURF)
+                 .split(_TFLOW).join(GLSL_FLOW)
+                 .split(_TSCENE).join(GLSL_SCENE);
+  for(const e of VENUE_SHADERS){
+    e.mat.vertexShader=fill(e.vs);
+    e.mat.fragmentShader=fill(e.fs);
+    /* ShaderMaterial keys its program off the source itself, so new source is
+       a new program; needsUpdate is what makes three go and look. */
+    e.mat.needsUpdate=true;
+  }
+  if(bedMat) bedMat.needsUpdate=true;      /* keyed by SCENE_ID, see above */
+}
+
 /* ════════════════════════════════════════════════════════════
    5. TROUT
    ════════════════════════════════════════════════════════════ */
@@ -4394,7 +4538,7 @@ function troutGeometry(){
   g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
   g.setIndex(idx);g.computeVertexNormals();return g;
 }
-const TROUT_GEO=troutGeometry();
+const TROUT_GEO=markShared(troutGeometry());   /* one body, every fish */
 function finShape(pts){
   const s=new THREE.Shape();s.moveTo(pts[0][0],pts[0][1]);
   for(let i=1;i<pts.length;i++)s.lineTo(pts[i][0],pts[i][1]);
@@ -4519,8 +4663,11 @@ function makeTrout(len){
   g.rotation.order='YZX';        /* yaw, then pitch, then roll */
   g.scale.setScalar(len);return g;
 }
-const LIES=SC.lies.map(l=>({x:l.x,z:CZ+l.z,len:l.len,cr:l.cr}));
+/* The lies are the venue's, so they move with it; `fishes` is kept as the same
+   array object throughout because half the engine closes over it. */
+let LIES=SC.lies.map(l=>({x:l.x,z:CZ+l.z,len:l.len,cr:l.cr}));
 const fishes=[];
+const fishGroup=new THREE.Group();
 function makeMarker(){
   const g=new THREE.Group();
   const stem=new THREE.Mesh(new THREE.CylinderGeometry(0.005,0.005,0.85,5),
@@ -4548,8 +4695,8 @@ class Trout{
     this.beh='cruise';this.behT=0;this.effort=0.5;this.v=new THREE.Vector3();
     /* a cruiser works a circuit instead of holding a lie: [rx, rz, rad/s] */
     this.cr=l.cr||null; this.cruA=Math.random()*6.2832; this.cruHead=0; this.badT=0;
-    this.mesh=makeTrout(l.len);scene.add(this.mesh);
-    this.marker=makeMarker();scene.add(this.marker);
+    this.mesh=makeTrout(l.len);fishGroup.add(this.mesh);
+    this.marker=makeMarker();fishGroup.add(this.marker);
   }
   restY(){
     const x=this.p?this.p.x:this.lie.x,z=this.p?this.p.z:this.lie.z;
@@ -4912,6 +5059,13 @@ class Trout{
     if(hooked===this){hooked=null;rebuildMasses();}
   }
 }
+scene.add(fishGroup);
+function buildFish(){
+  hooked=null; fishHeld=null;
+  emptyGroup(fishGroup);
+  fishes.length=0;
+  for(const l of LIES) fishes.push(new Trout(l));
+}
 for(const l of LIES) fishes.push(new Trout(l));
 
 /* scratch for the landed-fish inspection, filled by the controller pass */
@@ -4944,17 +5098,22 @@ function commitStrike(f){
 }
 
 const zoneGrp=new THREE.Group();scene.add(zoneGrp);
-const zoneRings=[],zoneLanes=[];
-for(let i=0;i<LIES.length;i++){
-  const r=new THREE.Mesh(new THREE.RingGeometry(0.94,1.0,40),
-    new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true,opacity:0.8,
-      side:THREE.DoubleSide,depthWrite:false}));
-  r.rotation.x=-Math.PI/2;r.renderOrder=5;zoneGrp.add(r);zoneRings.push(r);
-  const g=new THREE.BufferGeometry();
-  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(4*3),3));
-  const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xe0c26a,transparent:true,opacity:0.55}));
-  l.renderOrder=5;zoneGrp.add(l);zoneLanes.push(l);
+let zoneRings=[],zoneLanes=[];
+/* one ring and one lane per lie, so this is rebuilt whenever the lies are */
+function buildZones(){
+  emptyGroup(zoneGrp); zoneRings=[]; zoneLanes=[];
+  for(let i=0;i<LIES.length;i++){
+    const r=new THREE.Mesh(new THREE.RingGeometry(0.94,1.0,40),
+      new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true,opacity:0.8,
+        side:THREE.DoubleSide,depthWrite:false}));
+    r.rotation.x=-Math.PI/2;r.renderOrder=5;zoneGrp.add(r);zoneRings.push(r);
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(4*3),3));
+    const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xe0c26a,transparent:true,opacity:0.55}));
+    l.renderOrder=5;zoneGrp.add(l);zoneLanes.push(l);
+  }
 }
+buildZones();
 
 /* ---- dynamic tube: fixed render resolution, arbitrary source length ---- */
 class DynTube{
@@ -5551,10 +5710,16 @@ function afterSettingsChange(){
   lastGrade=P.grade;
   lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft, lastTaper=P.rodTaper, lastCell=P.gridCell, lastObst=P.obstHeight;
 }
+/* Where you are and what you have set, in the address bar. Venues no longer
+   reload, so this is the only thing keeping the URL honest — and it means a
+   refresh still puts you back on the reach you were fishing with your tackle
+   intact, which the reload used to give us for free. */
+function syncUrl(){
+  try{ location.hash='v='+SCENE_ID+'&s='+encodeURIComponent(encodeSettings()); }catch(e){}
+}
 function copySettings(){
   settingsStr=encodeSettings();
-  /* keep the venue in the URL, or a shared link always lands on Cedar Run */
-  try{ location.hash='v='+SCENE_ID+'&s='+encodeURIComponent(settingsStr); }catch(e){}
+  syncUrl();
   const url=location.href;
   copyState='copied to clipboard';
   if(navigator.clipboard&&navigator.clipboard.writeText){
@@ -5568,17 +5733,10 @@ function runAction(key){
     applyPreset(vals); say(name);
   }
   else if(key.indexOf('!venue:')===0){
-    /* The channel is baked into the shaders at load, so venues do not hot
-       swap — the switch writes the venue and the current settings into the
-       URL and reloads. sw=1 tells the boot block to put the venue's own
-       water and fish defaults back on top afterwards, so you keep your
-       tackle and get the venue's river. */
-    const id=key.slice(7);
-    if(id===SCENE_ID){say('you are already on '+SC.name);return;}
-    try{
-      location.hash='v='+id+'&sw=1&s='+encodeURIComponent(encodeSettings());
-      location.reload();
-    }catch(e){say('could not switch venue');}
+    /* Hot swap through a fade — no reload, so a headset never leaves VR. See
+       section 7b. The URL is still kept current so the address bar remains a
+       shareable link to where you are standing. */
+    requestVenue(key.slice(7));
   }
   else if(key==='!physical'){applyPreset(PHYSICAL);say('physical defaults loaded');}
   else if(key==='!classicrod'){applyPreset(CLASSIC);say('classic tackle loaded');}
@@ -6216,6 +6374,138 @@ function resetCast(){
 }
 
 /* ════════════════════════════════════════════════════════════
+   7b. CHANGING VENUE
+
+   Venues used to be a page reload: the switch wrote the venue and the whole
+   settings string into the URL and called location.reload(). That works on a
+   desktop and is close to unusable in a headset, because a reload ENDS THE
+   WEBXR SESSION. You get dropped out to the 2D overlay, have to find and press
+   Enter VR again, and everything — grid, textures, shader programs, the trout —
+   is built from nothing on the far side. Nothing about that is a level change;
+   it is quitting and restarting the game and arriving somewhere else.
+
+   What actually blocked a hot swap was that each venue's channel is compiled
+   into five shader programs. So: regenerate the three venue GLSL blocks, hand
+   them to the recorded shader templates, and flag the materials — three keys a
+   ShaderMaterial's program off its source, so new source is a new program (the
+   bed, an injected standard material, needs SCENE_ID in its cache key instead;
+   see bedMat above). Everything else was already rebuildable, because live
+   settings like River grade and Cell size have always had to rebuild the bed
+   and the solver anyway. So this reuses those paths rather than adding new ones.
+
+   The one thing it costs that a reload did not: shader compilation happens
+   with the frame loop running. That is what the fade is for — it hides the
+   compile hitch, and a fade to black and back is what a level change is
+   supposed to feel like anyway.
+   ════════════════════════════════════════════════════════════ */
+function applyVenue(id){
+  SCENE_ID=id;
+  SC=SCENES[id]; SC.id=id;
+  SC.weeds=SC.weeds||[]; SC.canopy=SC.canopy||[];
+  /* Exactly the split the reload had: the venue owns the water and the fish,
+     your tackle is yours and travels with you. Anything not in VENUE_BASE and
+     not in the venue's own par — the speck budget, line, rod, reel, volumes —
+     is simply left alone, which is what makes those settings persist across a
+     level change without a URL round trip to carry them. */
+  Object.assign(P,VENUE_BASE,SC.par);
+
+  HALFW=SC.hwMax; MAXDEPTH=SC.dMax; DROPS=SC.drops;
+  GZ0=CZ-SC.dzMax-HALFW-0.6; GZ1=CZ+SC.dzMax+HALFW+0.6;
+  OBST=SC.obst.map(o=>({x:o.x,z:CZ+o.z,r:o.r,h:o.h,kind:o.kind,sh:0,sgn:o.sgn||1}));
+  CANOPY=SC.canopy.map(c=>({x:c.x,z:CZ+c.z,y:c.y,r:c.r}));
+  LIES=SC.lies.map(l=>({x:l.x,z:CZ+l.z,len:l.len,cr:l.cr}));
+
+  /* stand on the near bank of the new reach before anything is built, so the
+     grid window and the scatter cull centre on where you actually are */
+  const sx=SC.spawn?SC.spawn.x:0;
+  const sz=SC.spawn&&SC.spawn.z!==undefined
+    ? SC.spawn.z : CZ+SC.dz(sx)+SC.hw(sx)*1.08;
+  player.position.set(sx,0,sz);
+  _camW.set(sx,1.55,sz);
+  _scatterX=sx; _scatterZ=sz; _scatterT=0;
+  gridCentre=sx;
+
+  /* the channel, in GLSL, and the programs that compile it */
+  GLSL_SCENE=buildSceneGLSL();
+  GLSL_SURF=buildSurfGLSL();
+  GLSL_FLOW=buildFlowGLSL();
+  reskinVenueShaders();
+
+  /* The solver. New Z bounds and a completely different bed, so nothing of the
+     old grid survives. Allocating is cheap; SETTLING is not — the boot block
+     runs 120 steps before it lets you play, and doing that here would be a
+     multi-hundred-millisecond freeze in the middle of a live XR session, which
+     is the one thing a headset must never see. So the steps are budgeted out
+     over the frames the screen is black instead (see venueFadeStep). */
+  for(const v of vort){v.life=0;v.k=0;}
+  gridReady=false;
+  gridAlloc(); gridTexInit();
+  venueSettle=P.waterModel>0.5?120:0;
+
+  /* geometry. The bed and the obstacle placement are deliberately NOT here:
+     afterSettingsChange() below does both, and doing them twice is the single
+     most expensive thing this function could get wrong. buildObstacles has to
+     precede it, though — it makes the meshes that placeObstacles positions. */
+  buildObstacles();
+  buildCanopy(); buildWeeds();
+  placeTrees(); placeRocks(); placeGrass();
+  buildFish(); buildZones();
+
+  /* Specks restart rather than drifting in from the last river: the CPU ones
+     are reseeded around you, and gsReset makes the GPU pass rewrite every
+     texel of state on the next two frames. */
+  for(let i=0;i<SPECK;i++) seedSpeck(i,sx,1);
+  speckGeo.attributes.position.needsUpdate=true;
+  gsReset=2;
+
+  afterSettingsChange();
+  resetCast();
+  syncUrl();
+  say('\u2014 '+SC.name+' \u2014');
+}
+
+/* The fade is a black shell on the camera rig, not a post pass: it costs one
+   transparent sphere and it works identically in and out of a headset. */
+let venueFade=0, venueNext=null, venueSettle=0;
+const fadeShell=new THREE.Mesh(
+  new THREE.SphereGeometry(0.35,12,8),
+  new THREE.MeshBasicMaterial({color:0x000000,side:THREE.BackSide,
+    transparent:true,opacity:0,depthTest:false,depthWrite:false}));
+fadeShell.renderOrder=999; fadeShell.frustumCulled=false; fadeShell.visible=false;
+camera.add(fadeShell);
+const FADE_OUT=0.45, FADE_IN=0.7, SETTLE_PER_FRAME=6;
+/* Ticked from the frame loop. Down to black; swap on the frame the screen is
+   fully covered; hold black while the new river settles, a few solver steps a
+   frame rather than all of them at once; then back up. Nothing here blocks for
+   longer than a handful of grid steps, so the headset keeps its framerate the
+   whole way across and never leaves the session. */
+function venueFadeStep(dt){
+  if(venueNext){
+    venueFade=Math.min(1,venueFade+dt/FADE_OUT);
+    if(venueFade>=1){
+      const id=venueNext; venueNext=null;
+      try{ applyVenue(id); }
+      catch(e){ console.error('venue switch failed:',e); say('could not switch venue'); venueSettle=0; }
+    }
+  } else if(venueSettle>0){
+    const n=Math.min(SETTLE_PER_FRAME,venueSettle);
+    for(let i=0;i<n;i++){ gridStep(1/20); gridFoam(1/20); }
+    venueSettle-=n;
+    if(venueSettle<=0) gridTexUpdate();
+  } else if(venueFade>0){
+    venueFade=Math.max(0,venueFade-dt/FADE_IN);
+  }
+  fadeShell.visible=venueFade>0.001;
+  fadeShell.material.opacity=venueFade;
+}
+function requestVenue(id){
+  if(!SCENES[id]){ say('no such venue'); return; }
+  if(id===SCENE_ID){ say('you are already on '+SC.name); return; }
+  if(venueNext) return;                       /* one switch in flight is enough */
+  venueNext=id;
+}
+
+/* ════════════════════════════════════════════════════════════
    8. LOOP
    ════════════════════════════════════════════════════════════ */
 const nowMs=()=>(typeof performance!=='undefined'&&performance.now)?performance.now():0;
@@ -6241,6 +6531,8 @@ renderer.setAnimationLoop(()=>{
     gridTexUpdate();
     started=true;
   }
+  /* a venue change in flight: fade down, swap at black, fade back up */
+  venueFadeStep(dt);
   /* fluid runs on its own clock, independent of render rate */
   if(P.waterModel>0.5){
     if(!gridReady){gridAlloc();gridTexInit();}
