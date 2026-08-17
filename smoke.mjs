@@ -791,4 +791,87 @@ console.log('stats panel handle live with the menu shut',hudDrag);
 if(!(hudDrag.handle&&hudDrag.minus&&hudDrag.plus)||hudDrag.numbers||hudDrag.menuPanel||hudDrag.nothing)
   console.log('  *** HUD HANDLE FAILURE ***');
 
+/* Teleport locomotion. What must hold: it never lands you somewhere wading
+   could not have put you, the hop puts your HEAD on the ring rather than the
+   rig origin, the screen is black on the frame you move, a snap turn leaves
+   your head where it was, and turning the whole thing off gives the stick
+   straight back to the walk code. */
+const tp=vm.runInContext(`(()=>{
+  const wasTP=P.teleport, wasP={x:player.position.x,z:player.position.z,y:player.rotation.y};
+  const wasGrip=offGrip;
+  P.teleport=1; blinkT=0; blinkPending=false; tpArmed=false;
+  const aim=(x,y,z)=>{ offGrip={getWorldPosition:v=>v.set(x,y,z), getWorldQuaternion:q=>q};
+                       return {landed:tpAim(), ok:tpOK, hit:{x:+tpHit.x.toFixed(2),z:+tpHit.z.toFixed(2)}}; };
+
+  /* somewhere you can stand, somewhere you cannot */
+  const mid=CZ+SC.dz(0);                       /* deepest part of the channel */
+  const bankZ=mid+SC.hw(0)*1.06;               /* dry ground off the edge */
+  const standable={ bank:tpStandable(0,bankZ),
+                    middle:tpStandable(0,mid),
+                    depthMid:+(surfY(0)-bedY(0,mid)).toFixed(2),
+                    onRock:tpStandable(OBST[0].x,OBST[0].z) };
+
+  /* Aim across the water from the near bank. A flat throw from hand height
+     carries into the middle, which is over your chest, so it must come back
+     refused — that is the depth rule doing its job, not a miss. */
+  /* heights are off the GROUND here — the reach falls away downstream, so the
+     bank by the spawn is nowhere near y=0 */
+  const gy=tpTop(0,bankZ);
+  camera.position.set(0,gy+1.55,bankZ);
+  const near=aim(0,gy+1.20,bankZ);
+  near.depth=+(surfY(near.hit.x)-bedY(near.hit.x,near.hit.z)).toFixed(2);
+  /* a shorter throw drops in the margin, where you can stand */
+  const margin=aim(0,gy+0.30,bankZ);
+  margin.depth=+(surfY(margin.hit.x)-bedY(margin.hit.x,margin.hit.z)).toFixed(2);
+  /* launched from far too high, it outruns the range and must be refused */
+  const far=aim(0,gy+26.0,bankZ);
+  far.reach=+Math.hypot(far.hit.x-camera.position.x,far.hit.z-camera.position.z).toFixed(1);
+
+  /* the hop itself: head onto the ring, dark on the frame it moves */
+  tpHit.set(0,tpTop(0,bankZ-4),bankZ-4); tpOK=true;
+  const head0={x:camera.position.x,z:camera.position.z};
+  const rig0={x:player.position.x,z:player.position.z};
+  blinkTo_(tpHit.x,tpHit.z);
+  let darkAtMove=-1, moved=false, peak=0;
+  for(let f=0;f<60&&blinkT>0;f++){
+    const bx=player.position.x, bz=player.position.z;
+    const d=blinkStep(1/72);
+    peak=Math.max(peak,d);
+    if(!moved&&(player.position.x!==bx||player.position.z!==bz)){ moved=true; darkAtMove=d; }
+  }
+  /* the rig moved by the error at the HEAD, so the head is now on the ring */
+  const headLand={x:+(head0.x+(player.position.x-rig0.x)).toFixed(2),
+                  z:+(head0.z+(player.position.z-rig0.z)).toFixed(2)};
+  const onRing=Math.hypot(headLand.x-tpHit.x,headLand.z-tpHit.z)<0.01;
+
+  /* snap turn: yaw advances, the head does not move */
+  player.position.set(2,0,3); player.rotation.y=0; camera.position.set(0,1.55,0);
+  const r0=Math.hypot(player.position.x-camera.position.x,player.position.z-camera.position.z);
+  snapTurn(Math.PI/6);
+  const r1=Math.hypot(player.position.x-camera.position.x,player.position.z-camera.position.z);
+  const snap={yaw:+player.rotation.y.toFixed(4), radiusKept:Math.abs(r1-r0)<1e-9,
+              turned:Math.abs(player.position.x-2)>1e-6};
+
+  /* off means off: the stick goes back to the walk code and nothing is drawn */
+  P.teleport=0;
+  const offMode={owns:teleportStep(0,-1), arc:tpArc.visible, ring:tpMark.grp.visible};
+  /* on means the walk code never sees the stick, even half pushed */
+  P.teleport=1;
+  const onHalf=teleportStep(0,-0.2);
+
+  P.teleport=wasTP; offGrip=wasGrip; blinkT=0; blinkPending=false; tpArmed=false;
+  tpArc.visible=false; tpMark.grp.visible=false;
+  player.position.set(wasP.x,0,wasP.z); player.rotation.y=wasP.y;
+  return {standable, near, margin, far, peak:+peak.toFixed(2), moved,
+          darkAtMove:+darkAtMove.toFixed(2), onRing, snap, offMode, onHalf,
+          range:wasTP===undefined?null:P.tpRange};
+})()`,sandbox);
+console.log('teleport locomotion',tp);
+if(!tp.standable.bank||tp.standable.middle||tp.standable.onRock||
+   !tp.near.landed||tp.near.ok||!tp.margin.landed||!tp.margin.ok||tp.far.ok||
+   !tp.moved||tp.darkAtMove<0.999||tp.peak<0.999||!tp.onRing||
+   !tp.snap.radiusKept||!tp.snap.turned||
+   tp.offMode.owns||tp.offMode.arc||tp.offMode.ring||!tp.onHalf)
+  console.log('  *** TELEPORT FAILURE ***');
+
 console.log('OK');

@@ -162,6 +162,7 @@ const P = {
   reelSpeed:2.6, reelPower:60, lineStretch:60, spoolDrag:3, spoolDead:0.05, buoyancy:1, stick:1, tippet:40,
   guideMu:0.15, slipInertia:0.06, dragHeld:1, routeOn:0, handSlide:8, reelSlack:0.1, lineVis:0.8, flySize:1.8, haptics:1,
   moveSpeed:1.6, netRadius:0.3, invertY:0, reelHand:0,
+  teleport:1, tpRange:9, snapTurn:30,
   volume:0.7, volReel:1, volSplash:1, volRiver:0.55, volLine:1,
   lineTaper:1,
   waterModel:1, gridCell:0.45, gridIter:20, gridRate:27, manningN:0.055,
@@ -245,8 +246,11 @@ const MENU=[
   ['Line level','volLine',0.00,1.50,0.05,'Air noise off the line during the stroke. Brightness and loudness both follow rod tip speed.'],
   ['Splash level','volSplash',0.00,1.50,0.05,'The fly hitting the water, a fish rising, and a hooked fish breaking the surface.'],
   ['— PLAYER —',null,0,0,0,''],
-  ['Move speed','moveSpeed',0.40,4.00,0.10,'Walking speed on the left stick. Deep water slows you regardless.'],
-  ['Invert walk Y','invertY',0,1,1,'Flip the forward and backward walking direction.'],
+  ['Teleport move','teleport',0,1,1,'1 moves you the way most headset games do: push the left stick forward and an arc comes off your left hand with a ring where it lands, let go and you blink to it. Green ring means you can stand there; red means the water is over your chest, or there is a boulder in the way. Pushing the stick hard left or right snaps you round by Snap turn instead. 0 goes back to sliding the stick around, which is smoother to fish from and rougher on the stomach.'],
+  ['Teleport range m','tpRange',3.00,20.0,1.00,'How far a hop can carry. This is the arc’s launch speed, not a leash — aim higher and it simply falls short of anything past this, exactly like a thrown line. Nine metres is about five wading paces.'],
+  ['Snap turn °','snapTurn',0.00,45.0,15.0,'How far a hard push left or right on the stick turns you, with teleport movement on. Snapping instead of sweeping is what keeps turning comfortable when you are not walking. 0 turns it off and leaves you turning with your feet.'],
+  ['Move speed','moveSpeed',0.40,4.00,0.10,'Walking speed on the left stick, with teleport movement off. Deep water slows you regardless.'],
+  ['Invert walk Y','invertY',0,1,1,'Flip the forward and backward walking direction. Applies to the teleport aim too.'],
   ['Reel hand','reelHand',0,1,1,'Which side of the reel the handle is on. 0 is left-hand wind, the usual setup for a right-handed caster, and puts the handle on the side facing you. 1 is right-hand wind. Takes effect immediately.'],
   ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
   ['— RIVER —',null,0,0,0,''],
@@ -6639,6 +6643,9 @@ function applyVenue(id){
   const sz=SC.spawn&&SC.spawn.z!==undefined
     ? SC.spawn.z : CZ+SC.dz(sx)+SC.hw(sx)*1.08;
   player.position.set(sx,0,sz);
+  /* a snap turn leaves yaw on the rig, and carrying it into a new river spawns
+     you facing across the bank instead of down the reach */
+  player.rotation.y=0;
   _camW.set(sx,1.55,sz);
   _scatterX=sx; _scatterZ=sz; _scatterT=0;
   gridCentre=sx;
@@ -6713,14 +6720,182 @@ function venueFadeStep(dt){
   } else if(venueFade>0){
     venueFade=Math.max(0,venueFade-dt/FADE_IN);
   }
-  fadeShell.visible=venueFade>0.001;
-  fadeShell.material.opacity=venueFade;
+  /* One shell, two customers: whichever of the venue fade and the teleport
+     blink wants the screen darker gets it. Two overlapping black spheres would
+     have squared their opacity and shown a seam through the middle of the
+     crossfade every time you hopped during one. */
+  const dark=Math.max(venueFade,blinkStep(dt));
+  fadeShell.visible=dark>0.001;
+  fadeShell.material.opacity=dark;
 }
 function requestVenue(id){
   if(!SCENES[id]){ say('no such venue'); return; }
   if(id===SCENE_ID){ say('you are already on '+SC.name); return; }
   if(venueNext) return;                       /* one switch in flight is enough */
   venueNext=id;
+}
+
+/* ── TELEPORT ──────────────────────────────────────────────────────────
+   Sliding a whole body around on a thumbstick is the thing in this game most
+   likely to make somebody take the headset off, and it is worst exactly where
+   you spend your time — standing still in moving water, where the river is
+   already sliding past you and your inner ear is the only thing being asked to
+   disagree with it. So: aim, blink, arrive, the way most headset games do it.
+
+   The arc comes off the LEFT HAND rather than the head, because that is the
+   hand the stick is under and because aiming with your hand lets you look at
+   the fish while you pick the spot. It is a real ballistic arc, launched at
+   sqrt(g * range), which is what makes the range read as a throw rather than
+   as a leash: aim past it and the arc falls short on its own.
+
+   What counts as somewhere you can stand is exactly what counts while wading —
+   the bed, in water no deeper than the same 1.15 m the walk clamp uses. Not a
+   navmesh, not a list of allowed spots. Anywhere you could have walked to, you
+   can hop to, so turning this on never shuts a piece of river off. */
+const TP_WADE=1.15;             /* same chest-deep limit the walk clamp uses */
+const TP_STEPS=48, TP_DT=0.055;
+let tpArmed=false, tpOK=false, tpSnapLatch=0;
+const tpHit=new THREE.Vector3(), _tpP=new THREE.Vector3(), _tpV=new THREE.Vector3(),
+      _qTp=new THREE.Quaternion();
+/* Beads rather than a line: a GL line is one pixel wide however close it is,
+   and one pixel of arc across a bright river is not something you can aim. */
+const tpArc=(()=>{
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(TP_STEPS*3),3));
+  const m=new THREE.Points(g,new THREE.PointsMaterial({color:0x4fd18b,size:0.07,
+    transparent:true,opacity:0.95,depthTest:false}));
+  m.renderOrder=18;m.frustumCulled=false;m.visible=false;scene.add(m);return m;
+})();
+const tpMark=(()=>{
+  const grp=new THREE.Group();
+  const ring=new THREE.Mesh(new THREE.RingGeometry(0.26,0.34,30),
+    new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true,opacity:0.85,
+      side:THREE.DoubleSide,depthTest:false,depthWrite:false}));
+  ring.rotation.x=-Math.PI/2;
+  const post=new THREE.Mesh(new THREE.CylinderGeometry(0.012,0.012,0.90,6),
+    new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true,opacity:0.55,
+      depthTest:false,depthWrite:false}));
+  post.position.y=0.45;
+  grp.add(ring,post);grp.renderOrder=18;grp.visible=false;scene.add(grp);
+  return {grp,parts:[ring,post]};
+})();
+function tpTint(hex){ for(const p of tpMark.parts) p.material.color.setHex(hex);
+                      tpArc.material.color.setHex(hex); }
+/* What the arc actually hits: ground on the bank, WATER over the channel.
+   Marching it down to the bed instead was wrong twice over — the beads dived
+   through the surface, and the ring came to rest metres past where you were
+   pointing, because a flat throw across a river carries on until it finds the
+   bottom. You wade on the bed but you aim at the water. */
+const tpTop=(x,z)=>Math.max(bedY(x,z),surfY(x));
+/* Can a body stand here? Depth first, then the boulders — a rock is bed
+   elevation to the solver but it is a thing to climb over to a wader, and
+   arriving inside one is the one landing that cannot be walked out of. */
+function tpStandable(x,z){
+  if(surfY(x)-bedY(x,z)>TP_WADE) return false;
+  for(const o of OBST) if(Math.hypot(x-o.x,z-o.z)<o.r+0.20) return false;
+  return true;
+}
+/* March the arc until it meets the bed. Returns true if it landed anywhere at
+   all; tpOK says whether that anywhere is somewhere you can stand. */
+function tpAim(){
+  if(!offGrip) return false;
+  offGrip.getWorldPosition(_tpP);
+  _tpV.set(0,0,-1).applyQuaternion(offGrip.getWorldQuaternion(_qTp))
+      .multiplyScalar(Math.sqrt(9.81*Math.max(1,P.tpRange)));
+  const pa=tpArc.geometry.attributes.position.array;
+  camera.getWorldPosition(_camWorld);
+  let n=0, landed=false;
+  for(let i=0;i<TP_STEPS;i++){
+    pa[i*3]=_tpP.x;pa[i*3+1]=_tpP.y;pa[i*3+2]=_tpP.z;n=i+1;
+    if(!landed&&_tpP.y<=tpTop(_tpP.x,_tpP.z)){
+      tpHit.copy(_tpP);tpHit.y=tpTop(_tpP.x,_tpP.z);landed=true;break;
+    }
+    _tpV.y-=9.81*TP_DT;
+    _tpP.addScaledVector(_tpV,TP_DT);
+  }
+  /* hide the unused tail by collapsing it onto the last live bead */
+  for(let i=n;i<TP_STEPS;i++){pa[i*3]=pa[(n-1)*3];pa[i*3+1]=pa[(n-1)*3+1];pa[i*3+2]=pa[(n-1)*3+2];}
+  tpArc.geometry.attributes.position.needsUpdate=true;
+  if(!landed) return false;
+  /* Aiming downhill would otherwise buy distance the range never promised. */
+  const reach=Math.hypot(tpHit.x-_camWorld.x,tpHit.z-_camWorld.z);
+  tpOK=reach<=P.tpRange*1.4&&tpStandable(tpHit.x,tpHit.z);
+  return true;
+}
+/* Rotating the RIG spins you around the middle of your room, not around your
+   head, which throws you sideways every snap. Rotate the rig about where your
+   head actually is and the head stays put. */
+function snapTurn(rad){
+  camera.getWorldPosition(_camWorld);
+  const c=Math.cos(rad), s=Math.sin(rad);
+  const dx=player.position.x-_camWorld.x, dz=player.position.z-_camWorld.z;
+  player.position.x=_camWorld.x+dx*c+dz*s;
+  player.position.z=_camWorld.z-dx*s+dz*c;
+  player.rotation.y+=rad;
+}
+/* The blink. Dark before you move and light after, so the jump happens on a
+   frame nobody sees — which is the whole reason teleporting is comfortable.
+   It borrows the venue fade's shell rather than adding a second one. */
+let blinkT=0; const blinkTo=new THREE.Vector3(); let blinkPending=false;
+/* Down, HOLD, up. The hold is not decoration: without it the ramps meet at a
+   point, the screen only ever samples about 95% dark at 72 fps, and the move
+   lands on a frame you can still just see through — which is the one frame the
+   whole mechanism exists to hide. Three frames of real black cost nothing. */
+const BLINK_OUT=0.09, BLINK_HOLD=0.04, BLINK_IN=0.16;
+function blinkTo_(x,z){ blinkTo.set(x,0,z); blinkPending=true;
+                        blinkT=BLINK_OUT+BLINK_HOLD+BLINK_IN; }
+function blinkStep(dt){
+  if(blinkT<=0) return 0;
+  blinkT-=dt;
+  if(blinkT<=0){ blinkT=0; blinkPending=false; return 0; }
+  if(blinkT>BLINK_HOLD+BLINK_IN) return 1-(blinkT-BLINK_HOLD-BLINK_IN)/BLINK_OUT;
+  if(blinkT>BLINK_IN){
+    if(blinkPending){
+      /* Move the RIG by the error at your HEAD, not to the marker: in room
+         scale your head is not over the rig origin, and teleporting the origin
+         leaves you standing a stride from the ring you aimed at. */
+      camera.getWorldPosition(_camWorld);
+      player.position.x+=blinkTo.x-_camWorld.x;
+      player.position.z+=blinkTo.z-_camWorld.z;
+      blinkPending=false;
+    }
+    return 1;
+  }
+  return blinkT/BLINK_IN;
+}
+/* Called from the frame loop with the left stick already read. Returns true if
+   it owns the stick, which with teleport on it always does — a half-pushed
+   stick that slid you a few centimetres while you were lining up a hop would
+   be the worst of both schemes. */
+function teleportStep(ax,fwd){
+  if(P.teleport<0.5){
+    tpArc.visible=false;tpMark.grp.visible=false;tpArmed=false;
+    return false;
+  }
+  const push=-fwd;                       /* stick pushed away from you */
+  /* Snap turn on the cross axis, one turn per push. Only while you are not
+     aiming, so a sloppy diagonal picks a spot rather than spinning you. */
+  if(!tpArmed&&P.snapTurn>0.5&&Math.abs(ax)>0.70&&Math.abs(ax)>Math.abs(push)){
+    if(tpSnapLatch===0){ snapTurn(-Math.sign(ax)*P.snapTurn*Math.PI/180); tpSnapLatch=Math.sign(ax); pulse(0.25); }
+  } else if(Math.abs(ax)<0.45) tpSnapLatch=0;
+
+  if(push>0.55) tpArmed=true;
+  if(tpArmed&&push<0.30){                /* let go: commit */
+    tpArmed=false;
+    if(tpOK&&blinkT<=0){ blinkTo_(tpHit.x,tpHit.z); pulse(0.45); }
+    else if(!tpOK) say('you could not stand there');
+  }
+  if(!tpArmed||blinkT>0){
+    tpArc.visible=false;tpMark.grp.visible=false;
+    return true;
+  }
+  const landed=tpAim();
+  if(!landed){ tpArc.visible=false;tpMark.grp.visible=false;tpOK=false;return true; }
+  tpTint(tpOK?0x4fd18b:0xd06048);
+  tpArc.visible=true;
+  tpMark.grp.visible=true;
+  tpMark.grp.position.copy(tpHit);
+  return true;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -6792,12 +6967,14 @@ renderer.setAnimationLoop(()=>{
   const ax=offPad&&offPad.axes.length>=4?offPad.axes[2]:0;
   const ay=offPad&&offPad.axes.length>=4?offPad.axes[3]:0;
 
-  /* the menu is pointer-driven now, so the stick always walks and the left
+  /* the menu is pointer-driven now, so the stick always moves you and the left
      hand keeps full line control while you tune */
-  if(Math.hypot(ax,ay)>0.15){
+  const stickFwd=(P.invertY>0.5?-ay:ay);
+  const onStick=teleportStep(ax,stickFwd);
+  if(!onStick&&Math.hypot(ax,ay)>0.15){
     camera.getWorldQuaternion(_camQ);
     const e=new THREE.Euler().setFromQuaternion(_camQ,'YXZ');
-    const yaw=e.y,fwd=(P.invertY>0.5?-ay:ay),str=ax;
+    const yaw=e.y,fwd=stickFwd,str=ax;
     const vx=Math.sin(yaw)*fwd+Math.cos(yaw)*str;
     const vz=Math.cos(yaw)*fwd-Math.sin(yaw)*str;
     camera.getWorldPosition(_camW);
