@@ -643,4 +643,152 @@ console.log('guided line exempt from scenery',guarded);
 if(guarded.movedInRod||guarded.wrongSkip||guarded.wrongKeep||!guarded.movedFree)
   console.log('  *** GUIDE EXEMPTION FAILURE ***');
 
+/* No rock may hang in the water. The mesh centre is put at the height the
+   SOLVER calls the crown, so the lower hemisphere used to stop a vertical
+   semi-axis short of the bed and you could see the river running underneath a
+   boulder. The skirt has to reach past the deepest bed under the footprint,
+   the crown must not move while it does, and re-cutting it must not
+   accumulate — placeObstacles() runs on every tick of the Obstacle height and
+   grade sliders. */
+const skirt=vm.runInContext(`(()=>{
+  const rocks=[];
+  for(const o of OBST){
+    if(o.kind!=='rock') continue;
+    const cy=bedY(o.x,o.z)+o.h*P.obstHeight, extra=rockSkirt(o);
+    /* the bottom of the skirt against the bed all the way round the footprint;
+       positive anywhere is water showing under a boulder */
+    let gap=-1e9;
+    for(let k=0;k<8;k++){const an=k*Math.PI/4;
+      gap=Math.max(gap,(cy-o.r*0.72-extra)-bedY(o.x+Math.cos(an)*o.r,o.z+Math.sin(an)*o.r));}
+    rocks.push({r:o.r,gap:+gap.toFixed(3),extra:+extra.toFixed(3)});
+  }
+  /* the cut is a function of the setting, not an accumulation: taller rocks
+     get a deeper skirt, and re-cutting at the same setting changes nothing */
+  const at=v=>{const was=P.obstHeight;P.obstHeight=v;
+    const r=OBST.filter(o=>o.kind==='rock').map(o=>+rockSkirt(o).toFixed(3));
+    P.obstHeight=was;return r;};
+  const lo=at(0.40), hi=at(1.40);
+  /* run the real deform on a two-vertex stand-in: crown fixed, underside dropped */
+  const o0=OBST.find(o=>o.kind==='rock');
+  const fake={userData:{base:Float32Array.from([0,0.5,0, 0,-0.5,0])},
+    geometry:{attributes:{position:{array:new Float32Array(6),needsUpdate:false}},
+              computeVertexNormals(){}}};
+  skirtRock(fake,o0); skirtRock(fake,o0);       /* twice: must not accumulate */
+  const fa=fake.geometry.attributes.position.array;
+  return {rocks, floating:rocks.filter(x=>x.gap>-0.10).length,
+          deeperWhenTaller:hi.every((v,i)=>v>lo[i]),
+          crownHeld:fa[1]===0.5, underDropped:+(fa[4]+0.5+rockSkirt(o0)).toFixed(6)};
+})()`,sandbox);
+console.log('rocks reach the bed',skirt);
+if(skirt.floating||!skirt.crownHeld||skirt.underDropped!==0||!skirt.deeperWhenTaller)
+  console.log('  *** FLOATING ROCK ***');
+
+/* The film has to let go of the line from the fly BACKWARDS. A switch at a
+   fixed arc length is what produced the plumb drop from a flat line down to a
+   sunk fly; the front has to start at the fly, walk back, and stall in the fly
+   line rather than swallowing all of it. */
+const sink=vm.runInContext(`(()=>{
+  const was=P.flySink; P.flySink=0.32;
+  sinkArc=0;
+  /* fly under the film, well clear of the bed */
+  pos[0]=0; pos[2]=CZ; pos[1]=filmY(0,CZ,simTime)-0.30;
+  const walk=[];
+  for(let f=0;f<1800;f++){ sinkStep(1/72); if(f%300===0) walk.push(+sinkArc.toFixed(3)); }
+  const settled=+sinkArc.toFixed(3);
+  /* fly line is buoyant: the front must stop inside SINK_LINE of the leader */
+  const capped=settled<=leaderTot+SINK_LINE+1e-6 && settled>leaderTot;
+  /* the release has to be graded across the feather, not a step */
+  const relAt=s=>Math.max(0,Math.min(1,(sinkArc-s)/SINK_FEATHER));
+  const graded=relAt(settled-SINK_FEATHER*0.5)>0.2&&relAt(settled-SINK_FEATHER*0.5)<0.8;
+  /* pick the fly up and the film takes all of it back */
+  pos[1]=filmY(0,CZ,simTime)+0.60; sinkStep(1/72);
+  const reset=sinkArc===0;
+  /* and a dry fly never releases anything */
+  P.flySink=0; sinkStep(1/72);
+  const dryStaysUp=sinkArc===0;
+  P.flySink=was; sinkArc=0;
+  return {walk, settled, leader:+leaderTot.toFixed(2), capped, graded, reset, dryStaysUp,
+          monotonic:walk.every((v,i)=>i===0||v>walk[i-1])};
+})()`,sandbox);
+console.log('sink front walks up the line',sink);
+if(!(sink.capped&&sink.graded&&sink.reset&&sink.dryStaysUp&&sink.monotonic))
+  console.log('  *** SINK FRONT FAILURE ***');
+
+/* A netted fish goes to the nearest margin and stays there with its card, and
+   the margin cannot silt up with the whole river. */
+const trophy=vm.runInContext(`(()=>{
+  for(const f of fishes) f.reseat();
+  trophySeq=0;
+  const out=[];
+  for(let i=0;i<4&&i<fishes.length;i++){
+    const f=fishes[i];
+    f.land();
+    const cz=CZ+SC.dz(f.bank.x);
+    out.push({side:Math.sign(f.bank.z-cz),
+              depth:+bedDepth(f.bank.x,f.bank.z).toFixed(2),
+              inRiver:Math.abs((f.bank.z-cz)/SC.hw(f.bank.x))<1,
+              label:!!(f.label&&f.label.mesh.visible)});
+  }
+  const parked=fishes.filter(f=>f.state==='landed');
+  /* the ones sent home must have given their cards back */
+  const strayCards=fishes.filter(f=>f.state!=='landed'&&f.label&&f.label.mesh.visible).length;
+  const g=fishes[0];
+  /* Run the landed branch for real. It has to SWIM to the margin — a lerp on
+     the distance launches a beaten fish off the net at eight metres a second —
+     then settle there, keep its card under it, and never time out and vanish. */
+  const p0=parked[0];
+  const far0=p0.p.distanceTo(p0.bank);
+  for(let f=0;f<72;f++) p0.update(1/72,f/72);
+  const swimSpeed=+(far0-p0.p.distanceTo(p0.bank)).toFixed(2);   /* m in one second */
+  /* drop it a metre short and let it arrive */
+  p0.p.set(p0.bank.x+1.0,p0.bank.y,p0.bank.z);
+  for(let f=0;f<220;f++) p0.update(1/72,f/72);
+  const far1=p0.p.distanceTo(p0.bank);
+  const cardUnder=p0.label.mesh.position.y<p0.p.y&&
+                  Math.abs(p0.label.mesh.position.x-p0.p.x)<1e-6;
+  const res={caught:out, parked:parked.length, cap:MAX_TROPHY, strayCards,
+          inches:+g.lengthIn().toFixed(1), ounces:+g.weightOz().toFixed(1),
+          card:g.weightText(),
+          /* sweep every length a venue can hold: the split must never read
+             "n lb 16 oz", and a sub-pound fish is weighed in ounces alone */
+          badSplit:(()=>{let bad=0,plain=0;
+            for(let L=0.15;L<=0.80;L+=0.001){
+              const s=Trout.prototype.weightText.call(
+                {bodyMass:()=>0.30*Math.pow(L/0.30,3), weightOz:Trout.prototype.weightOz});
+              if(/ 16 oz$/.test(s)) bad++;
+              if(/^0 lb/.test(s)) bad++;
+              if(/^\\d+ oz$/.test(s)) plain++;
+            }
+            return {bad,plain};})(),
+          allWet:out.every(o=>o.depth>=0.10&&o.inRiver),
+          allCarded:out.every(o=>o.label),
+          swimSpeed, settled:+far1.toFixed(3),
+          stillLanded:p0.state==='landed', cardUnder};
+  for(const f of fishes) f.reseat();            /* leave the river as we found it */
+  trophySeq=0;
+  return res;
+})()`,sandbox);
+console.log('landed fish rest in the margin',trophy);
+if(trophy.parked>trophy.cap||trophy.strayCards||!trophy.allWet||!trophy.allCarded||
+   !trophy.stillLanded||!trophy.cardUnder||trophy.settled>0.05||
+   trophy.swimSpeed<0.5||trophy.swimSpeed>2.0||
+   trophy.badSplit.bad||!trophy.badSplit.plain)
+  console.log('  *** LANDED FISH FAILURE ***');
+
+/* The stats panel must be movable with the menu SHUT, and must not eat the
+   trigger the reel needs while it is. */
+const hudDrag=vm.runInContext(`(()=>{
+  const uvAt=(x,y)=>({object:hud.mesh,uv:{x:x/HW,y:1-y/HH}});
+  const mid=HH/2+60;
+  return {handle:hudChrome(uvAt(HHANDLE.x+4,HHANDLE.y+4)),
+          minus:hudChrome(uvAt(HSC_M.x+4,HSC_M.y+4)),
+          plus:hudChrome(uvAt(HSC_P.x+4,HSC_P.y+4)),
+          numbers:hudChrome(uvAt(HW/2,mid)),
+          menuPanel:hudChrome({object:menu.mesh,uv:{x:0.01,y:0.99}}),
+          nothing:hudChrome(null)};
+})()`,sandbox);
+console.log('stats panel handle live with the menu shut',hudDrag);
+if(!(hudDrag.handle&&hudDrag.minus&&hudDrag.plus)||hudDrag.numbers||hudDrag.menuPanel||hudDrag.nothing)
+  console.log('  *** HUD HANDLE FAILURE ***');
+
 console.log('OK');

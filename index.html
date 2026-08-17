@@ -196,7 +196,7 @@ const MENU=[
   ['Hook a test fish','!hookfish',0,0,0,'Hooks the fish nearest your fly straight away, so you can work on the fight without having to earn it first.'],
   ['Motion recorder','!record',0,0,0,'Opens the recorder. Record yourself casting, then replay your own motion as a ghost rod and practise following it. Trim the take with the two timeline handles.'],
   ['Recenter panel','!recenter',0,0,0,'Puts the panel back in front of you at a comfortable distance. Use this if you ever lose track of it.'],
-  ['Stats scale','hudScale',0.40,3.00,0.05,'Size of the statistics window. It has its own drag handle and plus/minus buttons in its top corners, usable any time the menu is open.'],
+  ['Stats scale','hudScale',0.40,3.00,0.05,'Size of the statistics window. It has its own drag handle and plus/minus buttons in its top corners, and unlike this panel they work with the menu SHUT: point the rod at the handle strip along the top of the stats window and hold the trigger to move it anywhere you like, including behind you. Nothing else on that window answers the pointer, so the trigger still reels.'],
   ['Panel scale','menuScale',0.40,3.00,0.05,'Size of this panel. The plus and minus buttons in its top right do the same thing, and the handle at the top left drags it around.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
   ['— ROD MODEL —',null,0,0,0,''],
@@ -335,7 +335,7 @@ const MENU=[
   ['Non-feeder mult','nonFeedMult',0.00,1.00,0.05,'Take chance multiplier for a fish that is not feeding.'],
   ['Fish power','fishPower',0.30,2.50,0.05,'How hard a hooked fish pulls and runs.'],
   ['\u2014 STILLWATER \u2014',null,0,0,0,''],
-  ['Fly sink m/s','flySink',0.00,1.20,0.02,'Terminal sink rate of the fly. At 0 the fly is a dry fly and rides the film exactly as it always has. Above 0 it sinks at this rate AND releases the tippet from the surface, so the leader gets pulled under by the fly instead of holding it up. The pond ships at 0.32; a river venue ships at 0.'],
+  ['Fly sink m/s','flySink',0.00,1.20,0.02,'Terminal sink rate of the fly. At 0 the fly is a dry fly and rides the film exactly as it always has. Above 0 it sinks at this rate and takes line down with it — the film lets go from the fly BACKWARDS, up the tippet, then the leader, and finally a couple of metres of fly line before the line’s own float stops it. So the sag deepens into a curve as the fly goes down instead of dropping plumb off a line pinned flat, and the rest of the line stays on top. The pond ships at 0.32; a river venue ships at 0.'],
   ['Cruise speed','cruiseSpeed',0.10,3.00,0.10,'How fast a stillwater fish works its beat. Cruisers have no lie to hold, so this is what you are leading when you cast in front of one.'],
   ['Chase min m/s','chaseMin',0.00,1.50,0.05,'How fast the fly must move through the water before a fish reads it as alive. Below this he ignores it, and a fly you stop moving is one he loses interest in.'],
   ['Chase max m/s','chaseMax',0.30,4.00,0.10,'How fast the fly can move and still be catchable. Strip harder than this and he cannot get in front of it, and he breaks off the chase.'],
@@ -1730,6 +1730,40 @@ function airDrag(i,h){
   vel[p]=nx+vt2*tx;vel[p+1]=ny+vt2*ty;vel[p+2]=nz+vt2*tz;
 }
 const RIDE=0.010, BREAK=2.6;
+/* ── HOW A SINKING FLY TAKES THE LINE DOWN ─────────────────────────────
+   The old rule was a switch at a fixed arc length: everything inside 1.3
+   tippet lengths was free to sink and everything beyond it was nailed to the
+   film, for ever, from the moment the fly landed. That is the vertical drop —
+   the fly went to fishing depth in a couple of seconds and the whole descent
+   had to be spent by one short piece of leader hanging straight down off a
+   line that was pinned flat.
+   What actually happens is a front. The fly pulls the tippet under, the tippet
+   pulls the piece of leader above it, and the release walks BACK up the line
+   from the fly, slower than the fly sinks, until it reaches fly line — which
+   is buoyant and stops it. So the sag is a curve that grows, the leader ends
+   up at an angle rather than plumb, and only a short length of the fly line
+   ever gets dragged off the surface. sinkArc is where that front has got to,
+   measured in arc metres from the fly; SINK_FEATHER is how abruptly the film
+   lets go across it, and SINK_LINE caps how much fly line the fly is strong
+   enough to take with it. */
+const SINK_FEATHER=0.90, SINK_LINE=2.20;
+let sinkArc=0;
+function sinkStep(dt){
+  if(P.flySink<=0.001){sinkArc=0;return;}
+  if(hooked&&hooked.state==='hooked') return;      /* the fish owns the fly node */
+  const fx=pos[0],fz=pos[2];
+  /* picked up, or in the air on the next cast: the film has hold of all of it
+     again the moment the fly is out */
+  if(pos[1]>filmY(fx,fz,simTime)+0.04||bedDepth(fx,fz)<=0.02){sinkArc=0;return;}
+  /* Once the fly is on the bottom nothing is pulling any more, and what is
+     left is nylon settling under its own weight — far slower than being towed,
+     but not nothing, or the leader would hang in the water for ever exactly
+     where the fly happened to touch down. */
+  const onBed=pos[1]<bedY(fx,fz)+0.05?0.25:1;
+  const beyond=Math.max(0,sinkArc-leaderTot);
+  const gain=Math.max(0,1-beyond/SINK_LINE);       /* fly line resists, and wins */
+  sinkArc=Math.min(leaderTot+SINK_LINE,sinkArc+P.flySink*2.2*gain*onBed*dt);
+}
 function waterAndGround(i,h,t){
   const p=i*3,x=pos[p],z=pos[p+2];
   /* a hooked fish lives below the film and must be free to sound, so the fly
@@ -1751,11 +1785,13 @@ function waterAndGround(i,h,t){
   if(above>0.10) return;
   /* A SINKING FLY. Fly sink rate is zero on every river here, which leaves the
      dry-fly behaviour exactly as it was. Above zero, the fly node is driven to
-     a terminal sink rate and the tippet behind it is released from the film,
-     so the leader is pulled under BY the fly instead of holding it up — which
-     is the difference between a dry fly and a wet one, and the thing the pond
-     is built around. */
-  const sinking=P.flySink>0.001&&(i===0||sArc(i)<P.tippetLen*1.3);
+     a terminal sink rate and the line behind it is released from the film in
+     the order the fly can pull it under — see sinkStep(). rel is 0 for line
+     the film still owns and 1 for line hanging free of it. */
+  const rel=P.flySink>0.001
+    ? (i===0?1:Math.max(0,Math.min(1,(sinkArc-sArc(i))/SINK_FEATHER)))
+    : 0;
+  const sinking=rel>0.02;
   if(above<0){
     /* Tippet is 0.15 mm nylon, denser than water — it should slice through the
        film, not sit on it. Hard-clamping every node was why a hooked fish showed
@@ -1763,7 +1799,7 @@ function waterAndGround(i,h,t){
        transition happened across one segment. */
     if(sinking){
       if(i===0) vel[p+1]+=(-P.flySink-vel[p+1])*Math.min(1,h*5);
-      else      vel[p+1]-=1.2*h;
+      else      vel[p+1]-=1.2*h*rel;
     } else if(hooked&&sArc(i)<P.tippetLen*1.3){
       vel[p+1]-=1.2*h;
     } else {
@@ -1774,9 +1810,12 @@ function waterAndGround(i,h,t){
     vel[p+1]-=P.stick*26*h*(1-above/0.10);
     if(vel[p+1]<0&&pos[p+1]<=target+0.002) vel[p+1]=0;
   }
-  if(!sinking) vel[p+1]+=(target-pos[p+1])*40*P.buoyancy*h;
+  /* Partly released line is partly held up, which is the whole point: the
+     float falls off along the feather instead of at one node, so the line
+     leaves the surface on a curve rather than over a cliff. */
+  if(rel<0.999) vel[p+1]+=(target-pos[p+1])*40*P.buoyancy*h*(1-rel);
   /* and it stops at the bed, or a sinking fly leaves the world */
-  else if(pos[p+1]<gy+0.012){pos[p+1]=gy+0.012;if(vel[p+1]<0)vel[p+1]=0;}
+  if(sinking&&pos[p+1]<gy+0.012){pos[p+1]=gy+0.012;if(vel[p+1]<0)vel[p+1]=0;}
   computeFlow(x,z);
   const contact=above<0?1:Math.max(0,1-above/0.06);
   if(contact<=0) return;
@@ -1904,6 +1943,7 @@ function physics(dt){
   const h=dt/SUB, h2=h*h;
   slipOut=0;spoolOut=0;
   updateSlipMass();
+  sinkStep(dt);
   for(let s=1;s<=SUB;s++){
     simTime+=h;
     const a=s/SUB;
@@ -2645,6 +2685,9 @@ function buildObstacles(){
     }
     g.setAttribute('color',new THREE.Float32BufferAttribute(rc,3));
     m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.93}));
+    /* the undeformed shape, kept so the skirt below can be recut whenever
+       Obstacle height moves without the rock accumulating stretch */
+    m.userData.base=Float32Array.from(g.attributes.position.array);
   } else {
     m=new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.19,o.r*2.2,10),
       new THREE.MeshStandardMaterial({color:0x4e4231,roughness:1,flatShading:true}));
@@ -2654,8 +2697,44 @@ function buildObstacles(){
  }
 }
 buildObstacles();
+/* How far a rock's underside has to be pushed to reach the bed. Measured to
+   the DEEPEST bed under the footprint, not the bed at the centre: a rock on a
+   shelving margin only needs one edge left hanging to read as floating. Split
+   out from the deform so it can be checked without a real vertex buffer. */
+function rockSkirt(o){
+  const cy=bedY(o.x,o.z)+o.h*P.obstHeight;
+  let drop=cy-bedY(o.x,o.z);
+  for(let k=0;k<8;k++){
+    const an=k*Math.PI/4;
+    drop=Math.max(drop,cy-bedY(o.x+Math.cos(an)*o.r,o.z+Math.sin(an)*o.r));
+  }
+  /* 0.72 is the vertical squash the geometry was built with; the extra 0.20
+     buries the bottom of the skirt rather than landing it exactly on the bed,
+     where a seam would show through the bed's own noise. */
+  return Math.max(0,drop+0.20-o.r*0.72);
+}
+/* A rock is a squashed sphere whose CENTRE is put at the height the solver
+   calls its crown — so its lower half hung a vertical semi-axis clear of the
+   bed and you could see the river running underneath a boulder. The crown is
+   the part you judge the height by, so it stays exactly where it is and
+   everything below the waist is dropped instead: the band between the waist
+   ring and the one under it stretches into a full-radius skirt that carries
+   the stone down to the bed and rounds off inside it. Cut here rather than
+   into the geometry because Obstacle height is a live slider and the depth of
+   the skirt is a function of it — placeObstacles() already re-runs on every
+   change of it, and of the grade that tilts the bed underneath. */
+function skirtRock(m,o){
+  const base=m.userData.base; if(!base) return;
+  const pa=m.geometry.attributes.position, a=pa.array, extra=rockSkirt(o);
+  /* Always cut from the ORIGINAL vertices, never from the last cut, or every
+     tick of the Obstacle height slider stretches the rock a little further. */
+  for(let i=0;i<a.length;i+=3) a[i+1]=base[i+1]-(base[i+1]<0?extra:0);
+  pa.needsUpdate=true;
+  m.geometry.computeVertexNormals();
+}
 function placeObstacles(){
   for(let i=0;i<OBST.length;i++){const o=OBST[i];
+    if(o.kind==='rock') skirtRock(obstMeshes[i],o);
     obstMeshes[i].position.set(o.x,bedY(o.x,o.z)+o.h*P.obstHeight,o.z);}
 }
 placeObstacles();
@@ -4691,6 +4770,9 @@ class Trout{
     this.strikePrev=new THREE.Vector3();this.broke=false;this.strikeHead=0;
     this.risePitch=0;this.riseRoll=0;this.riseMark=0;
     this.held=false;this.inspect=new THREE.Quaternion();
+    /* where a landed fish is parked, the way it is heading to get there, and
+       the card that goes under it */
+    this.bank=new THREE.Vector3();this.bankHead=0;this.trophy=0;this.label=null;
     this.run=new THREE.Vector3(-1,0,0);this.runT=0;
     this.beh='cruise';this.behT=0;this.effort=0.5;this.v=new THREE.Vector3();
     /* a cruiser works a circuit instead of holding a lie: [rx, rz, rad/s] */
@@ -4785,6 +4867,77 @@ class Trout{
         this.riseKind===1?'head and tail\u2026':'he\u2019s charging it');
   }
   bodyMass(){ return 0.30*Math.pow(this.len/0.30,3); }
+  /* ── LANDED ────────────────────────────────────────────────────────────
+     A netted fish used to float up in front of your face for four seconds and
+     then vanish back to its lie, which is the one moment of the whole game you
+     want to take your time over. Now it goes to the nearest margin and STAYS
+     there, finning in the shallows with its length and weight on a card under
+     it, so you can carry on fishing and go back and look at it whenever you
+     like — or wade over and pick it up, which still works exactly as it did.
+     The river is only four or five fish deep, so the bank cannot become a
+     permanent graveyard: past MAX_TROPHY the oldest one kicks off and swims
+     back to its lie. */
+  land(){
+    this.state='landed';this.held=false;this.timer=0;this.trophy=++trophySeq;
+    this.pickBank();
+    this.showLabel();
+    /* Keep the shallows from silting up with everything you have caught. The
+       oldest goes first, and one in your hands is never the one taken away. */
+    const parked=fishes.filter(f=>f.state==='landed').sort((a,b)=>a.trophy-b.trophy);
+    while(parked.length>MAX_TROPHY){
+      const old=parked.find(f=>!f.held);
+      if(!old) break;
+      parked.splice(parked.indexOf(old),1);
+      old.reseat();
+      say('the first one kicked off and went back');
+    }
+  }
+  /* The nearest margin to where you are STANDING, found by walking in from the
+     waterline until there is enough water to hold a fish upright — a fish left
+     on a dry gravel bar reads as a bug, not a trophy. Fixed at the moment of
+     landing, so it does not trail you around the reach afterwards. */
+  pickBank(){
+    camera.getWorldPosition(_bankTmp);
+    const x=Math.max(-48,Math.min(48,_bankTmp.x))+((this.trophy%3)-1)*0.55;
+    const cz=CZ+SC.dz(x), side=_bankTmp.z>=cz?1:-1;
+    let u=0.98, z=cz+side*SC.hw(x)*u;
+    while(u>0.45&&bedDepth(x,z)<0.22){u-=0.03;z=cz+side*SC.hw(x)*u;}
+    this.bank.set(x,Math.max(bedY(x,z)+0.06,surfY(x)-0.11),z);
+  }
+  lengthIn(){ return this.len*39.3701; }
+  /* pounds and ounces off the same body mass the fight is fought with, so the
+     card cannot disagree with what the fish felt like on the rod */
+  weightOz(){ return this.bodyMass()*35.274; }
+  weightText(){
+    /* Round ONCE and then split. Rounding the ounces after taking the pounds
+       out is how a 15.6 oz fish gets written up as 0 lb 16 oz. And nobody
+       weighs a half-pounder in pounds, so the 0 comes off below one. */
+    const oz=Math.round(this.weightOz()), lb=Math.floor(oz/16);
+    return lb?lb+' lb '+(oz-lb*16)+' oz':oz+' oz';
+  }
+  showLabel(){
+    if(!this.label){
+      /* makePanel already builds exactly this: a canvas on a plane that draws
+         over everything, which is what lets you find your fish from across the
+         river instead of hunting the margin for it. */
+      this.label=makePanel(0.30,0.135,256,116);
+      this.label.mesh.renderOrder=19;
+      fishGroup.add(this.label.mesh);
+    }
+    const c=this.label.cx, W=256, H=116;
+    c.clearRect(0,0,W,H);
+    c.fillStyle='rgba(12,22,26,0.86)';c.fillRect(0,0,W,H);
+    c.fillStyle='#b5713f';c.fillRect(0,0,W,3);
+    c.textAlign='center';
+    c.fillStyle='#e8e3d4';c.font='700 40px "Space Mono",monospace';
+    c.fillText(this.lengthIn().toFixed(1)+'″',W/2,54);
+    c.fillStyle='#9fb0ae';c.font='700 26px "Space Mono",monospace';
+    c.fillText(this.weightText(),W/2,94);
+    c.textAlign='left';
+    this.label.tex.needsUpdate=true;
+    this.label.mesh.visible=true;
+  }
+  hideLabel(){ if(this.label) this.label.mesh.visible=false; }
   /* A hooked fish is its own rigid body, NOT a heavy node on the line.
      Hanging 0.7 kg off a 1.5 microgram tippet node is a 60,000:1 mass ratio and
      Gauss-Seidel simply cannot transmit force across it — the line could neither
@@ -4903,18 +5056,28 @@ class Trout{
       if(this.p.y>fm-0.03) this.p.y=fm-0.03;
       this.riseAnim=0;
     } else if(this.state==='landed'){
-      /* A landed fish floats up in front of you so it can be looked at, and can
-         be taken in the left hand and turned over. Pinch to hold, release to
-         let it float again. The despawn timer only runs while it is NOT held,
-         so a fish never vanishes out of your hand mid-look. */
+      /* A landed fish swims to the nearest margin and waits there. It can be
+         taken in the left hand and turned over — pinch to hold, let go and it
+         drifts back to its spot in the shallows. Nothing times out: the only
+         thing that sends it home is another fish needing the room. */
       if(this.held){
         this.p.copy(_inspP);
-        this.timer=Math.max(this.timer,2.0);
       } else {
-        _inspP.set(0,-0.16,-0.46).applyQuaternion(_camQW).add(_camW);
-        this.p.lerp(_inspP,Math.min(1,dt*2.6));
-        this.timer-=dt;
-        if(this.timer<=0)this.reseat();
+        /* The bob goes in the TARGET, not on top of the position: adding it to
+           p every frame is an integral, not an offset, and the fish would
+           wander half a metre up and down the margin. */
+        _bankTmp.copy(this.bank);
+        _bankTmp.y+=Math.sin(t*1.3+this.lie.x)*0.012;
+        /* It SWIMS there, at a beaten fish's pace. A lerp on the distance
+           would have launched it off the net at eight metres a second, which
+           is the one speed a fish that has just been played cannot do. */
+        const dx=_bankTmp.x-this.p.x, dy=_bankTmp.y-this.p.y, dz=_bankTmp.z-this.p.z;
+        const d=Math.hypot(dx,dy,dz);
+        if(d>1e-4){
+          const step=Math.min(d,Math.max(0.30,Math.min(1.20,d))*dt);
+          this.p.x+=dx/d*step;this.p.y+=dy/d*step;this.p.z+=dz/d*step;
+          if(Math.hypot(dx,dz)>1e-3) this.bankHead=Math.atan2(dz,-dx);
+        }
       }
     } else {
       this.feedT-=dt;
@@ -4977,13 +5140,39 @@ class Trout{
     if(this.state==='landed'){
       /* held: the fish takes the hand's orientation through the offset captured
          at the grab, so it turns in your hand rather than snapping to it.
-         floating: a slow turn so both flanks come round on their own. */
+         parked: nose into the current with a slow sway, which is what a fish
+         being rested in the margin actually does. It used to spin on the spot
+         so both flanks came round on their own — worth losing, because you can
+         now walk round it instead. */
       if(this.held) m.quaternion.copy(_inspQ).multiply(this.inspect);
       else{
-        _fishQA.setFromEuler(_fishE.set(Math.sin(t*0.7)*0.12,t*0.55,Math.sin(t*0.9)*0.20,'YZX'));
+        /* nose on the way it is swimming while it is still going, easing round
+           into the current over the last metre */
+        const away=Math.max(0,Math.min(1,this.p.distanceTo(this.bank)/0.90));
+        _fishQA.setFromEuler(_fishE.set(Math.sin(t*0.9+this.lie.x)*0.05,
+                                        (this.bankHead||0)*away
+                                          +Math.sin(t*0.45+this.lie.x)*0.20*(1-away),
+                                        Math.sin(t*0.7)*0.06,'YZX'));
         m.quaternion.slerp(_fishQA,Math.min(1,dt*1.6));
       }
       this.marker.visible=false;
+      /* still breathing: the same tail drive the swimming fish use, idled down */
+      {
+        const uu=m.userData.swim.userData.u;
+        uu.uT.value=t; uu.uSpd.value=1.8;
+        uu.uAmp.value+=(0.45-uu.uAmp.value)*Math.min(1,dt*2);
+        const w=Math.sin(7.0-t*uu.uSpd.value+uu.uPh.value);
+        const wPrev=Math.sin(7.0-(t-0.02)*uu.uSpd.value+uu.uPh.value);
+        m.userData.tail.position.z=w*0.075*uu.uAmp.value;
+        m.userData.tail.rotation.y=-(w-wPrev)*7.0*uu.uAmp.value;
+      }
+      /* the card sits under the fish and squares up to whoever is reading it */
+      if(this.label){
+        const lm=this.label.mesh;
+        lm.visible=!this.held;
+        lm.position.set(this.p.x,this.p.y-0.11-this.len*0.22,this.p.z);
+        lm.quaternion.copy(_camQW);
+      }
       return;
     }
     /* nose is local -X. Holding, a trout points into the current, which runs
@@ -5054,7 +5243,9 @@ class Trout{
   }
   reseat(){
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
-    this.badT=0;
+    this.badT=0;this.trophy=0;
+    this.hideLabel();
+    if(this.held){this.held=false;if(fishHeld===this)fishHeld=null;}
     this.p.copy(this.lie);this.p.y=this.restY();
     if(hooked===this){hooked=null;rebuildMasses();}
   }
@@ -5071,8 +5262,13 @@ for(const l of LIES) fishes.push(new Trout(l));
 /* scratch for the landed-fish inspection, filled by the controller pass */
 const _inspP=new THREE.Vector3(),_inspQ=new THREE.Quaternion(),
       _camQW=new THREE.Quaternion(),_fishQA=new THREE.Quaternion(),
-      _fishE=new THREE.Euler();
+      _fishE=new THREE.Euler(),_bankTmp=new THREE.Vector3();
 let fishHeld=null;
+/* How many caught fish may be resting in the margin at once. A venue is four
+   or five fish deep, so this is the line between a bank you can go back and
+   look at and a river you have emptied into it. */
+const MAX_TROPHY=2;
+let trophySeq=0;
 
 const ringPool=[];
 for(let i=0;i<10;i++){
@@ -6015,16 +6211,38 @@ function recenterPanel(m){
   m.position.set(c.x-Math.sin(e.y)*off+Math.cos(e.y)*side, c.y-0.10, c.z-Math.cos(e.y)*off-Math.sin(e.y)*side);
   m.rotation.set(0,e.y,0);
 }
+/* Is this hit on one of the stats panel's own controls — the drag handle or
+   the two scale buttons — rather than on the numbers? That strip is the only
+   part of it that answers the pointer with the menu shut. */
+function hudChrome(hit){
+  if(!hit||!hit.uv||hit.object!==hud.mesh) return false;
+  const hx=hit.uv.x*HW, hy=(1-hit.uv.y)*HH;
+  for(const b of [HHANDLE,HSC_M,HSC_P])
+    if(hx>=b.x&&hx<=b.x+b.w&&hy>=b.y&&hy<=b.y+b.h) return true;
+  return false;
+}
 function menuPointer(trigPressed, trigEdge){
-  if(!menuOpen||!rodGrip){
+  if(!rodGrip){
     pointerDot.visible=false;rayLine.visible=false;dragKey=null;panelDrag=false;recDrag=null;
     return false;
   }
   rodGrip.getWorldPosition(_rayOrigin);
   _rayDir.set(0,0,-1).applyQuaternion(_q).normalize();
   _ray.set(_rayOrigin,_rayDir);
-  const hits=_ray.intersectObjects(recOpen?[menu.mesh,hud.mesh,rec.mesh]:[menu.mesh,hud.mesh],false);
+  /* The stats panel is movable with the menu SHUT. Wanting it out of the way
+     is exactly the moment you do not want to open a panel three times its size
+     in front of it, and the old rule made the settings menu the only way to
+     reach its handle. With the menu shut only the handle strip and the scale
+     buttons answer, and only they light the pointer: the trigger the reel
+     needs is never swallowed by the rod happening to sweep across the numbers
+     mid-fight, and there is no ray hanging off the rod while you cast. */
+  const hits=_ray.intersectObjects(
+    menuOpen?(recOpen?[menu.mesh,hud.mesh,rec.mesh]:[menu.mesh,hud.mesh]):[hud.mesh],false);
   const hit=hits[0];
+  if(!menuOpen&&!panelDrag&&!hudChrome(hit)){
+    pointerDot.visible=false;rayLine.visible=false;dragKey=null;recDrag=null;
+    return false;
+  }
   rayLine.visible=true;
   const rp=rayLine.geometry.attributes.position.array;
   rp[0]=_rayOrigin.x;rp[1]=_rayOrigin.y;rp[2]=_rayOrigin.z;
@@ -6867,13 +7085,17 @@ renderer.setAnimationLoop(()=>{
       netMouth.getWorldPosition(_netP);
       const d=Math.hypot(fx-_netP.x,fy-_netP.y,fz-_netP.z);
       if(d<P.netRadius){
-        hooked.state='landed';hooked.timer=4;
-        say('netted him \u2014 '+(hooked.len*100).toFixed(0)+' cm');
+        const f=hooked;
         hooked=null;fishTension=0;rebuildMasses();pulse(0.6);
+        f.land();
+        say('netted him \u2014 '+f.lengthIn().toFixed(1)+' in, '+f.weightText());
       }
     }
     M.drift=0;
   }
+  /* the parked fish square their cards up to you, so this is needed whether or
+     not there is a left hand tracked to fill it in the controller pass */
+  camera.getWorldQuaternion(_camQW);
   for(const f of fishes) f.update(dt,t);
 
   /* ---- sound ---- */
