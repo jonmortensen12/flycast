@@ -25,9 +25,16 @@
   .cols h2{font-size:.66rem;letter-spacing:.26em;text-transform:uppercase;color:var(--copper);margin:0 0 .55rem}
   .cols p{margin:0 0 .4rem;font-size:.75rem;line-height:1.6;color:#c3ccca}
   .cols b{color:var(--mayfly);font-weight:700}
-#preview{background:#2a3a44;color:#dfe8ea;border:1px solid #46606c;border-radius:8px;
+#preview,#remoteBtn{background:#2a3a44;color:#dfe8ea;border:1px solid #46606c;border-radius:8px;
   padding:12px 20px;font:600 15px/1 system-ui,sans-serif;margin-top:10px;cursor:pointer}
-#preview:active{background:#354b57}
+#preview:active,#remoteBtn:active{background:#354b57}
+#remoteBox{display:none;max-width:34rem;margin-top:2px;padding:14px 16px;border-radius:8px;
+  background:#16232a;border:1px solid #35505c}
+#remoteBox b{display:block;font:700 2.6rem/1 "Space Mono",monospace;color:#e0a45e;
+  letter-spacing:.22em}
+#remoteBox span{display:block;margin-top:8px;font:400 .78rem/1.6 system-ui,sans-serif;color:#a9b5b3}
+#remoteBox code{color:#dfe8ea;font-family:ui-monospace,monospace;word-break:break-all}
+#remoteBox i{color:#8fd0a8;font-style:normal}
 #pvbar{position:fixed;left:0;right:0;bottom:0;display:none;gap:8px;padding:10px;
   justify-content:center;background:linear-gradient(transparent,rgba(0,0,0,0.55));z-index:60;
   flex-wrap:wrap}
@@ -125,6 +132,8 @@
 
   <button id="enter">Enter VR</button>
   <button id="preview">Look around (no headset)</button>
+  <button id="remoteBtn">Phone remote &mdash; change settings from another device</button>
+  <div id="remoteBox"></div>
 
   <p class="note" id="hint">
     Nothing pushes the line anywhere. Every metre that leaves the spool or the tiptop does so because
@@ -200,6 +209,7 @@ const MENU=[
   ['Stats scale','hudScale',0.40,3.00,0.05,'Size of the statistics window. It has its own drag handle and plus/minus buttons in its top corners, and unlike this panel they work with the menu SHUT: point the rod at the handle strip along the top of the stats window and hold the trigger to move it anywhere you like, including behind you. Nothing else on that window answers the pointer, so the trigger still reels.'],
   ['Panel scale','menuScale',0.40,3.00,0.05,'Size of this panel. The plus and minus buttons in its top right do the same thing, and the handle at the top left drags it around.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
+  ['Phone remote','!remote',0,0,0,'Push right to open a room a phone can join, so whoever is running the demo can change any setting on this list from outside the headset while somebody else fishes. The four-letter code appears along the top of this panel and in this strip. On the phone, open this page\u2019s address with remote.html on the end and type the code in. Push right again to close the room.'],
   ['— ROD MODEL —',null,0,0,0,''],
   ['Rod model','rodModel',0,1,1,'0 is the original position-based rod with an empirical stiffness curve. 1 is an XPBD beam whose compliance comes from the blank\u2019s real second moment of area and modulus, so stiffness and frequency both follow from physics instead of being tuned separately.'],
   ['Rod modulus GPa','rodE',40.0,400.0,5.00,'Flexural modulus of the blank, XPBD model only. Carbon is roughly 70-230 GPa. Higher is stiffer and faster. At 200 the static bend matches a real rod but the first mode sits near 2.4 Hz, which is slower than the rod you liked.'],
@@ -5966,6 +5976,7 @@ function runAction(key){
   else if(key==='!record'){recOpen=!recOpen;rec.mesh.visible=recOpen;if(recOpen)recenterPanel(rec.mesh);say(recOpen?'recorder open':'recorder closed');}
   else if(key==='!recenter'){recenterPanel(menu.mesh);recenterPanel(hud.mesh);if(recOpen)recenterPanel(rec.mesh);say('panels recentred');}
   else if(key==='!copy'){copySettings();say('settings copied');}
+  else if(key==='!remote'){remoteStart();}
 }
 let menuOpen=false, menuSel=1;
 /* per-row range expansion, so no setting can ever be out of reach */
@@ -6056,6 +6067,16 @@ function drawMenu(){
   c.fillText('\u2725  DRAG TO MOVE',HANDLE.x+20,HANDLE.y+20);
   c.fillStyle='#7d8b8c';c.font='700 11px "Space Mono",monospace';
   c.fillText('POINT WITH THE ROD HAND, TRIGGER TO DRAG. LEFT HAND STILL FISHES. Y CLOSES.',HANDLE.w+30,34);
+  /* the phone's code, where it can be read without hunting for the row */
+  if(REMOTE.state!=='off'){
+    c.font='700 15px "Space Mono",monospace';
+    c.fillStyle=REMOTE.state==='error'?'#d07a5a':(REMOTE.phone?'#8fd0a8':'#e0a45e');
+    c.textAlign='right';
+    c.fillText(REMOTE.state==='ready'
+      ? 'PHONE '+REMOTE.code+(REMOTE.phone?' \u2022 CONNECTED':' \u2022 WAITING')
+      : 'PHONE '+REMOTE.state.toUpperCase(), SCALE_M.x-24, 34);
+    c.textAlign='left';
+  }
   /* scale buttons */
   for(const [b,lab] of [[SCALE_M,'\u2212'],[SCALE_P,'+']]){
     c.fillStyle='#1b262a';c.fillRect(b.x,b.y,b.w,b.h);
@@ -6111,7 +6132,9 @@ function drawMenu(){
   c.font='700 13px "Space Mono",monospace';c.fillStyle='#b5713f';
   c.fillText(sel[0],26,MH-64);
   c.font='400 13px "Space Mono",monospace';c.fillStyle='#a9b5b3';
-  const body=(sel[1]==='!copy'&&copyState)?('Settings '+copyState+'. '+sel[5]):(sel[5]||'');
+  const body=(sel[1]==='!copy'&&copyState)?('Settings '+copyState+'. '+sel[5])
+            :(sel[1]==='!remote')?(remoteStatus()+' '+sel[5])
+            :(sel[5]||'');
   const lines=wrapText(c,body,MW-80);
   for(let i=0;i<lines.length&&i<3;i++) c.fillText(lines[i],26,MH-45+i*17);
   menu.tex.needsUpdate=true;
@@ -7574,6 +7597,247 @@ addEventListener('resize',()=>{
 });
 
 /* ════════════════════════════════════════════════════════════
+   8b. PHONE REMOTE
+
+   A second pair of hands. Someone who has never held a fly rod has the
+   headset on and both hands full; whoever is running the demo has a
+   phone. This opens a channel between the two so every row of MENU can
+   be reached from `remote.html` — without rendering a second copy of the
+   river. The phone draws sliders, not water: there is no Three.js on it,
+   no solver, and nothing to keep in step but numbers.
+
+   Same transport family-smash uses for its phone controller: PeerJS to
+   introduce the two devices, then a WebRTC data channel that runs over
+   the local wifi. The broker sees the four-letter code and nothing else.
+
+   The phone is a VIEW of P, never a second owner of it. Everything it
+   sends lands through the same `P[key]` / `onSettingChanged(key)` pair
+   the in-headset menu and the flat preview panel already use, so a
+   setting has exactly one place it is applied and the three surfaces
+   cannot drift apart. What travels the other way is a DIFF of P, which
+   is what makes a venue swap or a preset load show up on the phone
+   without either end having to know it happened.
+   ════════════════════════════════════════════════════════════ */
+const REMOTE={peer:null, conn:null, code:'', state:'off', err:'',
+              phone:false, timer:null, last:{}, q:[], pumping:false, seq:0};
+const REMOTE_CHUNK=7000;      /* comfortably under any data-channel message cap */
+const REMOTE_PUSH_MS=350;
+const REMOTE_HIGH=131072;     /* stop feeding the channel past this backlog */
+
+/* remote.html sits beside index.html, so the address is this one with the
+   file swapped and the code in the hash. */
+function remoteUrl(code){
+  const base=location.href.split('#')[0].split('?')[0].replace(/[^/]*$/,'');
+  return base+'remote.html'+(code?'#'+code:'');
+}
+function remoteCodeGen(){
+  const L='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   /* no O/0, no I/1: it gets read aloud */
+  let s='';
+  for(let i=0;i<4;i++) s+=L[Math.floor(Math.random()*L.length)];
+  return s;
+}
+/* Two CDNs. A demo that dies because one of them blinked is still a demo
+   that died, and the phone page hedges the same way. */
+function remoteLoadPeer(cb){
+  if(window.Peer) return cb();
+  const srcs=['https://unpkg.com/peerjs@1/dist/peerjs.min.js',
+              'https://cdn.jsdelivr.net/npm/peerjs@1/dist/peerjs.min.js'];
+  let i=0;
+  (function next(){
+    if(i>=srcs.length) return cb();
+    const sc=document.createElement('script');
+    sc.src=srcs[i++]; sc.crossOrigin='anonymous';
+    sc.onload=()=>cb();
+    sc.onerror=()=>{ try{sc.remove();}catch(e){} next(); };
+    (document.head||document.documentElement).appendChild(sc);
+  })();
+}
+function remoteStatus(){
+  if(REMOTE.state==='off')     return 'Phone remote is off.';
+  if(REMOTE.state==='loading') return 'Fetching the connection library…';
+  if(REMOTE.state==='opening') return 'Registering room '+REMOTE.code+'…';
+  if(REMOTE.state==='error')   return 'Phone remote problem: '+REMOTE.err;
+  return (REMOTE.phone?'Phone connected. ':'Waiting for a phone. ')+
+         'Code '+REMOTE.code+', at '+remoteUrl('').replace(/^https?:\/\//,'');
+}
+
+function remoteStart(){
+  if(REMOTE.peer){ remoteStop(); return; }      /* the row is a toggle */
+  REMOTE.state='loading'; REMOTE.err='';
+  say('phone remote: loading…');
+  remoteLoadPeer(()=>{
+    if(!window.Peer){
+      REMOTE.state='error';
+      REMOTE.err='the connection library did not load — this headset needs internet once';
+      say('phone remote failed'); return;
+    }
+    remoteOpen(0);
+  });
+}
+function remoteOpen(tries){
+  const code=remoteCodeGen();
+  REMOTE.code=code; REMOTE.state='opening';
+  const peer=new Peer('flycast-'+code,{pingInterval:4000});
+  REMOTE.peer=peer;
+  peer.on('open',()=>{
+    if(REMOTE.peer!==peer) return;
+    REMOTE.state='ready';
+    say('phone remote open — code '+code);
+  });
+  /* say so rather than sitting on 'Registering' forever */
+  setTimeout(()=>{
+    if(REMOTE.peer===peer&&REMOTE.state==='opening'){
+      REMOTE.state='error';
+      REMOTE.err='the room never finished opening — check this headset has internet';
+    }
+  },15000);
+  peer.on('error',e=>{
+    if(REMOTE.peer!==peer) return;
+    const t=(e&&e.type)||'unknown';
+    if(t==='unavailable-id'&&tries<5){         /* code collision: take another */
+      try{peer.destroy();}catch(x){}
+      REMOTE.peer=null; remoteOpen(tries+1); return;
+    }
+    if(t==='peer-unavailable') return;          /* a phone that walked away */
+    REMOTE.state='error'; REMOTE.err=t;
+  });
+  peer.on('connection',conn=>{
+    /* One phone at a time, and the newest wins — the usual way a second
+       connection appears is the same phone coming back after its screen
+       slept, with the old channel not yet aware it is dead. */
+    if(REMOTE.conn&&REMOTE.conn!==conn){ try{REMOTE.conn.close();}catch(x){} }
+    REMOTE.conn=conn; REMOTE.phone=false; REMOTE.q=[];
+    conn.on('open',()=>{
+      if(REMOTE.conn!==conn) return;
+      REMOTE.phone=true;
+      remoteHandshake();
+      say('phone connected');
+    });
+    conn.on('data',d=>{ try{ remoteData(d); }catch(e){ console.error('remote:',e); } });
+    conn.on('close',()=>remoteDrop(conn));
+    conn.on('error',()=>remoteDrop(conn));
+  });
+}
+function remoteHandshake(){
+  REMOTE.q=[];
+  remoteSendBig(remoteSchema());
+  /* seed the diff from what the schema just carried, so the first push
+     after a join is stats only rather than all of P a second time */
+  REMOTE.last=remoteVals();
+  remoteTimerStart();
+}
+function remoteDrop(conn){
+  if(REMOTE.conn!==conn) return;
+  REMOTE.conn=null; REMOTE.phone=false; REMOTE.q=[];
+  remoteTimerStop();
+  say('phone disconnected');
+}
+function remoteStop(){
+  remoteTimerStop();
+  try{ if(REMOTE.conn) REMOTE.conn.close(); }catch(e){}
+  try{ if(REMOTE.peer) REMOTE.peer.destroy(); }catch(e){}
+  REMOTE.conn=null; REMOTE.peer=null; REMOTE.phone=false;
+  REMOTE.state='off'; REMOTE.code=''; REMOTE.q=[];
+  say('phone remote closed');
+}
+/* A timer, not the frame loop. Nothing here belongs in the solver's budget,
+   and window timers keep running inside an XR session. */
+function remoteTimerStart(){
+  if(REMOTE.timer!==null) return;
+  REMOTE.timer=setInterval(()=>{ try{ remotePush(); }catch(e){} },REMOTE_PUSH_MS);
+}
+/* !==null, not truthiness: a timer id of 0 is a legal id, and a falsy test
+   leaves it running forever while claiming there is nothing to stop. */
+function remoteTimerStop(){
+  if(REMOTE.timer!==null){ clearInterval(REMOTE.timer); REMOTE.timer=null; }
+}
+
+function remoteVals(){ const o={}; for(const k in P) o[k]=P[k]; return o; }
+/* Labels, ranges, steps and help text all come straight out of MENU, so a
+   setting added to MENU appears on the phone with no second list to keep.
+   Same rule the flat preview panel is built on. */
+function remoteSchema(){
+  return {t:'schema', venue:SCENE_ID, venueName:SC.name,
+          menu:MENU, tabs:TABS.map(t=>({name:t.name,rows:t.rows})),
+          vals:remoteVals()};
+}
+function remoteSend(o){
+  const c=REMOTE.conn;
+  if(!c||!c.open) return;
+  try{ c.send(o); }catch(e){}
+}
+/* The schema is about 40 kB of labels and help text. Pushing that in one
+   loop is what fills the send buffer and drops the channel, so it goes in
+   numbered pieces paced against the channel's own backlog. */
+function remoteSendBig(obj){
+  let s='';
+  try{ s=JSON.stringify(obj); }catch(e){ return; }
+  const id=++REMOTE.seq, n=Math.ceil(s.length/REMOTE_CHUNK)||1;
+  for(let i=0;i<n;i++)
+    REMOTE.q.push({t:'part', id, i, n, s:s.substr(i*REMOTE_CHUNK,REMOTE_CHUNK)});
+  if(!REMOTE.pumping) remotePump();
+}
+function remotePump(){
+  REMOTE.pumping=false;
+  const c=REMOTE.conn;
+  if(!c||!c.open){ REMOTE.q=[]; return; }
+  const buffered=()=>{ try{ return c.dataChannel?c.dataChannel.bufferedAmount:0; }catch(e){ return 0; } };
+  while(REMOTE.q.length&&buffered()<REMOTE_HIGH){
+    try{ c.send(REMOTE.q.shift()); }catch(e){ break; }
+  }
+  if(REMOTE.q.length){ REMOTE.pumping=true; setTimeout(remotePump,60); }
+}
+/* The same numbers the stats window shows, because the person on the phone
+   cannot see the stats window — or anything else the angler is looking at. */
+function remoteStats(){
+  const slack=Math.max(0,offSpool-lineOut-rodArc);
+  return {t:'hud',
+    fps:Math.round(M.fps), nodes:nAct, venue:SC.name,
+    lineOut:+lineOut.toFixed(2), slack:+slack.toFixed(2),
+    offSpool:+offSpool.toFixed(2), total:Math.round(TOTAL_LINE),
+    tension:+M.tension.toFixed(1), tippet:+P.tippet.toFixed(1),
+    drift:hooked?null:Math.round(M.drift),
+    hand:HANDTXT[handMode]+(rodPinch?' / cork':''),
+    feeding:fishes.filter(f=>f.feeding&&f.state==='holding').length,
+    fish:fishes.length,
+    hooked:hooked?{pct:Math.round(hooked.stamina*100), beh:String(hooked.beh||''),
+                   len:Math.round(hooked.len*100)}:null,
+    note:noteT>0?note:''};
+}
+function remotePush(){
+  const c=REMOTE.conn;
+  if(!c||!c.open) return;
+  /* only what actually moved: a settled game sends stats and nothing else */
+  const d={}; let n=0;
+  for(const k in P) if(P[k]!==REMOTE.last[k]){ d[k]=P[k]; REMOTE.last[k]=P[k]; n++; }
+  if(n) remoteSend({t:'vals', v:d, venue:SCENE_ID, venueName:SC.name});
+  remoteSend(remoteStats());
+}
+function remoteData(d){
+  if(!d||typeof d!=='object') return;
+  if(d.t==='hello'){ remoteHandshake(); return; }
+  if(d.t==='set'){
+    const k=d.k, v=+d.v;
+    if(typeof k!=='string'||!(k in P)||!Number.isFinite(v)) return;
+    P[k]=v;
+    REMOTE.last[k]=v;              /* ours already: do not echo it back */
+    onSettingChanged(k);
+    return;
+  }
+  if(d.t==='act'){
+    /* it has to BE a row of the menu. The phone cannot invent an action. */
+    if(typeof d.k!=='string'||d.k.charAt(0)!=='!') return;
+    if(!MENU.some(r=>r[1]===d.k)) return;
+    runAction(d.k);
+    /* a preset or a venue rewrites most of P at once; resend the lot
+       rather than trusting the next diff to be small */
+    REMOTE.last={}; remotePush();
+    return;
+  }
+  if(d.t==='get'){ REMOTE.last={}; remotePush(); return; }
+}
+
+/* ════════════════════════════════════════════════════════════
    9. ENTER VR
    ════════════════════════════════════════════════════════════ */
 /* ── FLAT PREVIEW ─────────────────────────────────────────────────────────
@@ -7852,6 +8116,38 @@ function previewUpdate(dt){
 
 const overlay=document.getElementById('overlay'),enterBtn=document.getElementById('enter'),hint=document.getElementById('hint');
 document.getElementById('preview').addEventListener('click',previewStart);
+
+/* ── the phone remote, from the flat page ────────────────────────────────
+   The realistic order of events at a demo is: open the room here, where a
+   four-letter code is easy to read off a big screen, hand the headset over,
+   and press Enter VR. The room outlives the overlay — nothing about it is
+   tied to being out of VR — and the same toggle lives in the in-headset
+   menu under PRESETS for when it is remembered too late. */
+(function remoteOverlay(){
+  const btn=document.getElementById('remoteBtn'), box=document.getElementById('remoteBox');
+  if(!btn||!box) return;
+  let poll=null;
+  function draw(){
+    if(REMOTE.state==='off'){
+      box.style.display='none';
+      btn.textContent='Phone remote \u2014 change settings from another device';
+      return;
+    }
+    box.style.display='block';
+    btn.textContent='Close the phone remote';
+    const url=remoteUrl('').replace(/^https?:\/\//,'');
+    box.innerHTML = REMOTE.state==='ready'
+      ? '<b>'+REMOTE.code+'</b><span>On the phone, open <code>'+url+'</code> and type that code. '+
+        'Both devices need to be on the same wifi.'+
+        (REMOTE.phone?' <i>Phone connected.</i>':' <i>Waiting for the phone\u2026</i>')+'</span>'
+      : '<span>'+remoteStatus()+'</span>';
+  }
+  btn.addEventListener('click',()=>{
+    if(REMOTE.state==='off') remoteStart(); else remoteStop();
+    draw();
+    if(!poll) poll=setInterval(draw,600);
+  });
+})();
 if(!navigator.xr){
   enterBtn.disabled=true;enterBtn.textContent='WebXR unavailable';
   hint.innerHTML='<b>No WebXR here.</b> Mouse aims, Space reels, F routes / Shift pinches line, '+

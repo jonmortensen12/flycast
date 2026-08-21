@@ -874,4 +874,100 @@ if(!tp.standable.bank||tp.standable.middle||tp.standable.onRock||
    tp.offMode.owns||tp.offMode.arc||tp.offMode.ring||!tp.onHalf)
   console.log('  *** TELEPORT FAILURE ***');
 
+/* ── phone remote ────────────────────────────────────────────────────────
+   No Peer here, so a fake conn is dropped straight into REMOTE and the
+   protocol is driven by hand. What this is actually guarding is the rule
+   that the phone is a VIEW of P: everything it sends must land through
+   P[key]/onSettingChanged(key), it must not be able to name anything that
+   is not a row of MENU, and a value it just set must not be echoed back at
+   it mid-drag — that echo is what makes a slider fight the thumb. */
+const rem=vm.runInContext(`(()=>{
+  const sent=[];
+  const before={}; for(const k in P) before[k]=P[k];
+  REMOTE.conn={open:true, send(o){sent.push(o);}, close(){}, dataChannel:{bufferedAmount:0}};
+  REMOTE.phone=true;
+  remoteHandshake();
+
+  /* the schema went out in numbered pieces and comes back whole */
+  const parts=sent.filter(m=>m.t==='part');
+  const ids={};
+  for(const m of parts){ (ids[m.id]=ids[m.id]||[])[m.i]=m.s; }
+  const first=Object.keys(ids)[0];
+  let schema=null, whole=false;
+  try{ schema=JSON.parse(ids[first].join('')); whole=true; }catch(e){}
+  const chunked={parts:parts.length, whole,
+                 rows:schema?schema.menu.length:0, tabs:schema?schema.tabs.length:0,
+                 vals:schema?Object.keys(schema.vals).length:0};
+
+  /* every non-action row of MENU must name a real setting, or the phone
+     draws a slider over undefined — the same drift the flat panel hit */
+  const orphan=MENU.filter(r=>r[1]&&r[1].charAt(0)!=='!'&&typeof P[r[1]]!=='number')
+                   .map(r=>r[1]);
+  /* and every row must be reachable: a row in no tab cannot be tapped */
+  const inTab=new Set(); for(const t of TABS) for(const i of t.rows) inTab.add(i);
+  const unreachable=MENU.map((r,i)=>[r,i]).filter(([r,i])=>r[1]&&!inTab.has(i)).length;
+
+  /* a set lands, and the push after it carries no echo of that key */
+  sent.length=0;
+  const was=P.tippet;
+  remoteData({t:'set',k:'tippet',v:33});
+  const landed=P.tippet;
+  remotePush();
+  const vals=sent.filter(m=>m.t==='vals');
+  const echoed=vals.some(m=>'tippet' in m.v);
+  const stats=sent.filter(m=>m.t==='hud').length;
+
+  /* junk is refused rather than poked into P */
+  remoteData({t:'set',k:'tippet',v:'NaN'});
+  remoteData({t:'set',k:'__proto__',v:1});
+  remoteData({t:'set',k:'notASetting',v:1});
+  const junkHeld=P.tippet===33 && !('notASetting' in P);
+
+  /* an action the menu does not list is refused; one it lists runs, and
+     the wholesale rewrite it caused reaches the phone */
+  const fakeRan=(()=>{ try{ remoteData({t:'act',k:'!wipeEverything'}); return false; }catch(e){ return true; } })();
+  sent.length=0;
+  remoteData({t:'act',k:'!classicrod'});
+  const after=sent.filter(m=>m.t==='vals');
+  const preset={moved:after.length?Object.keys(after[0].v).length:0,
+                massMul:+P.massMul.toFixed(2)};
+
+  /* stats carry what the person on the phone cannot see */
+  const hud=remoteStats();
+  const hudKeys=['fps','venue','lineOut','tension','tippet','hand','feeding','hooked'];
+  const hudOK=hudKeys.every(k=>k in hud);
+
+  /* the in-headset surface of it: the row exists, it is reachable, and the
+     panel draws with a live code in the header and a status in the strip */
+  const row=MENU.findIndex(r=>r[1]==='!remote');
+  const wasSel=menuSel, wasTab=selTab;
+  menuSel=row; selTab=TABS.findIndex(t=>t.rows.indexOf(row)>=0);
+  REMOTE.state='ready'; REMOTE.code='K7QP';
+  let drew=true; try{ drawMenu(); }catch(e){ drew=false; }
+  const line=remoteStatus();
+  REMOTE.state='off';
+  let drewOff=true; try{ drawMenu(); }catch(e){ drewOff=false; }
+  menuSel=wasSel; selTab=wasTab;
+  const inMenu={row:row>=0, tab:selTab>=0, drew, drewOff,
+                code:line.indexOf('K7QP')>=0, url:line.indexOf('remote.html')>=0};
+
+  /* closing takes the timer and the channel with it */
+  remoteStop();
+  const closed=REMOTE.conn===null&&REMOTE.state==='off'&&REMOTE.timer===null;
+
+  P.tippet=was;
+  applyPreset(before);          /* the preset above rewrote most of P */
+  return {chunked, orphan, unreachable, landed, echoed, stats, junkHeld,
+          fakeRan, preset, hudOK, closed, inMenu,
+          url:remoteUrl('WXYZ').slice(-16)};
+})()`,sandbox);
+console.log('phone remote',rem);
+if(!rem.chunked.whole||rem.chunked.parts<2||rem.chunked.rows<100||rem.chunked.tabs<8||
+   rem.chunked.vals<100||rem.orphan.length||rem.unreachable||
+   rem.landed!==33||rem.echoed||!rem.stats||!rem.junkHeld||rem.fakeRan||
+   rem.preset.moved<5||!rem.hudOK||!rem.closed||
+   !rem.inMenu.row||!rem.inMenu.tab||!rem.inMenu.drew||!rem.inMenu.drewOff||
+   !rem.inMenu.code||!rem.inMenu.url)
+  console.log('  *** PHONE REMOTE FAILURE ***');
+
 console.log('OK');

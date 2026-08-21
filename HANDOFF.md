@@ -16,10 +16,13 @@ Read it alongside `index.html`.
 - Right hand holds the rod. Left hand handles line, or the net.
 - Everything tunable lives in an in-VR settings panel; settings can be copied to the
   clipboard and to the page URL hash, and restoring that URL restores the configuration.
+- `remote.html` is the second page in the repo: a phone joins the headset over a data
+  channel and drives that same settings panel from outside. See section 4b.
 
 ### Deployment
 Repo → `index.html` at root → Settings → Pages → deploy from `main`, root folder.
 Updating is: edit the file in GitHub's web editor, commit, hard-refresh in the headset.
+`remote.html` sits beside it and is found by URL, so it deploys with everything else.
 
 ---
 
@@ -290,6 +293,88 @@ and that window is frozen so the slider does not slide out from under you mid-dr
 
 ---
 
+## 4b. The phone remote
+
+Somebody who has never held a fly rod has the headset on and both hands full. Whoever is
+running the demo has a phone, cannot see what the angler sees, and does not want to talk
+anyone through a menu they cannot reach. `remote.html` is that phone: **every row of
+`MENU`, and none of the river.** No Three.js on it, no solver, nothing to render — it
+draws sliders over numbers.
+
+### Opening it
+Two doors, same room. On the flat front page, **Phone remote** — which is where a
+four-letter code is easiest to read off a big screen, before the headset is handed over.
+In VR, **Phone remote** under PRESETS, and the code then shows along the top of the menu
+panel and in its description strip. Either way the room outlives the overlay and survives
+a venue swap, because venues no longer reload the page.
+
+### Transport
+PeerJS to introduce the two devices, then a WebRTC data channel over the local wifi —
+the same arrangement family-smash uses for its phone controller, and the reason that
+project's `controller.html` is worth reading next to this one. The broker sees a room id
+of `flycast-XXXX` and nothing else. Both ends load the library from unpkg with jsdelivr
+behind it; a demo that dies because one CDN blinked is still a demo that died.
+
+### The rule that keeps it honest
+**The phone is a view of `P`, never a second owner of it.** Everything it sends lands
+through the same `P[key]` / `onSettingChanged(key)` pair the in-headset menu and the flat
+preview panel already use, so a setting has exactly one place it is applied. And the panel
+is built from the `MENU` and `TABS` the headset sends — labels, ranges, steps, help text
+and grouping all still have one definition, in the game. **Add a row to `MENU` and it
+appears on the phone with nothing to update.** That is the same rule the flat preview panel
+was rewritten to follow after its hand-kept key list had drifted twice.
+
+| Message | Direction | Purpose |
+|---|---|---|
+| `{t:'hello'}` | phone → headset | joined; send me everything |
+| `{t:'set', k, v}` | phone → headset | one setting moved |
+| `{t:'act', k}` | phone → headset | an action row, e.g. `!hookfish`, `!venue:pond` |
+| `{t:'get'}` | phone → headset | resend the lot (the Resync button) |
+| `{t:'part', id, i, n, s}` | headset → phone | one piece of a big message |
+| `{t:'schema', menu, tabs, vals, venue}` | headset → phone | the whole panel, chunked |
+| `{t:'vals', v}` | headset → phone | **only what changed** since the last push |
+| `{t:'hud', …}` | headset → phone | the stats window, four times a second |
+
+Three things in there are load-bearing:
+
+- **The schema is chunked.** It is ~40 kB of labels and help text, and pushing it in one
+  loop fills the channel's send buffer and drops the connection. It goes out in 7 kB
+  pieces paced against `dataChannel.bufferedAmount`, and there is one reassembler at the
+  other end. Family Beatdown learned this with an 888 kB roster; the number is smaller
+  here and the failure is identical.
+- **What comes back is a diff.** A settled game sends stats and nothing else. It also
+  means a preset load, a venue swap or a slider dragged in VR reaches the phone without
+  either end having to know it happened — which is why an action forces `REMOTE.last={}`
+  and a full resend rather than trusting the next diff.
+- **A value the phone just sent must not be echoed onto the slider under the thumb.**
+  That echo is what makes a control fight the finger holding it. The headset writes its
+  own `REMOTE.last[k]` when it applies a `set`, so the diff never contains it; the phone
+  additionally goes deaf on a key for 700 ms after touching it, and for as long as it is
+  held. The release that clears the hold is listened for on the slider, on the window in
+  the capture phase, and on `visibilitychange` — a touch can end without the element it
+  started on ever hearing, and a row left held stays deaf forever.
+
+`runAction` is reachable from the phone, so it is checked: the key has to start with `!`
+**and** be a row of `MENU`. The phone cannot invent an action.
+
+### Stats
+The person holding the phone cannot see the stats window, or anything else. So the same
+numbers go to them: fps, whether a fish is on and what it is doing, tension against
+tippet, line out, slack, drift, what the left hand is doing, and whatever `say()` last
+put on screen. This is what makes remote tuning possible at all — otherwise you are
+adjusting a river you cannot see.
+
+### Testing it
+`node remotecheck.mjs` runs `remote.html`'s script blocks against a small real DOM, feeds
+it the **actual** `MENU` out of `index.html`, and drives the whole thing: tags balance, no
+global shadows a window property, the schema reassembles, a slider for every setting, a
+drag sends one value, the echo does not move it, a lost touch still releases it, an action
+sends its action, search reaches rows in tabs that are shut. The headset half is covered
+in `smoke.mjs` under *phone remote*, including that every non-action row of `MENU` names a
+real setting and every row lives in a tab.
+
+---
+
 ## 5. Bugs that shipped, and their root causes
 
 Recorded because each one was mis-diagnosed at least once.
@@ -348,6 +433,9 @@ vm context — an earlier version wrapped the global in a Proxy whose `has` trap
 which made every undeclared read resolve to `undefined` instead of throwing, hiding exactly the
 bug class the test exists for. `diag.mjs` and `diag2.mjs` drive real scenarios and were what
 actually caught the last undeclared variable.
+
+**And `remotecheck.mjs` for the phone page**, which has no simulation to fall over and so
+never appears in `smoke.mjs` — see section 4b.
 
 **Therefore: run `smoke.mjs` before shipping.** It stubs Three.js and the DOM with real
 Vector3/Quaternion maths, executes the module, **connects a left and right controller with

@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c1418">
+<title>Flycast — phone remote</title>
+<style>
+  :root{--slate:#0c1418;--slate2:#16232a;--line:#2c4048;--copper:#cf8a4a;
+        --mayfly:#dfe8ea;--dim:#93a7ad;--good:#8fd0a8;--bad:#d07a5a}
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:var(--slate);color:var(--mayfly);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-text-size-adjust:100%}
+  body{padding-bottom:env(safe-area-inset-bottom)}
+  .screen{display:none}
+  .screen.on{display:block}
+
+  /* ---------- join ---------- */
+  #join{padding:26px 20px 40px;max-width:32rem;margin:0 auto}
+  h1{font:300 2.1rem/1 Georgia,serif;margin:0 0 4px;letter-spacing:-.01em}
+  h1 em{font-style:italic;color:var(--copper)}
+  .sub{color:var(--dim);font-size:.82rem;line-height:1.6;margin:0 0 22px}
+  label{display:block;color:var(--dim);font-size:.7rem;letter-spacing:.18em;
+    text-transform:uppercase;margin:18px 0 7px}
+  #code{width:100%;background:var(--slate2);border:1px solid var(--line);border-radius:10px;
+    color:var(--mayfly);font:700 2rem/1 ui-monospace,monospace;letter-spacing:.34em;
+    text-align:center;padding:16px 10px;text-transform:uppercase}
+  #code:focus{outline:2px solid var(--copper);outline-offset:1px}
+  #joinBtn{width:100%;margin-top:18px;background:var(--copper);color:#1b120a;border:0;
+    border-radius:10px;padding:17px;font:700 1rem/1 system-ui,sans-serif;cursor:pointer}
+  #joinBtn[disabled]{background:#3a4a50;color:#7b8b90}
+  #joinMsg{margin-top:14px;color:var(--copper);font-size:.82rem;line-height:1.6;min-height:1.2em}
+  .how{margin-top:26px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--dim);font-size:.76rem;line-height:1.7}
+  .how b{color:var(--mayfly);font-weight:600}
+  .tiny{margin-top:16px;color:#5c6d72;font:400 .68rem/1.5 ui-monospace,monospace}
+
+  /* ---------- the panel ---------- */
+  #barTop{position:sticky;top:0;z-index:5;background:rgba(12,20,24,.97);
+    border-bottom:1px solid var(--line);padding:8px 12px 0}
+  .liveRow{display:flex;align-items:center;gap:8px;font-size:.74rem;color:var(--dim)}
+  #dot{width:9px;height:9px;border-radius:50%;background:var(--good);flex:0 0 auto}
+  #dot.off{background:var(--bad)}
+  #venue{color:var(--mayfly);font-weight:600}
+  #barTop .spacer{flex:1 1 auto}
+  #resync{background:#22333b;color:#8fb3bd;border:1px solid #3c5560;border-radius:7px;
+    padding:6px 10px;font:600 .7rem/1 system-ui,sans-serif;cursor:pointer}
+  #stats{display:flex;gap:6px;overflow-x:auto;padding:8px 0 2px;scrollbar-width:none}
+  #stats::-webkit-scrollbar{display:none}
+  .stat{flex:0 0 auto;background:#16232a;border:1px solid #24363e;border-radius:7px;
+    padding:5px 9px;font:600 .72rem/1.35 ui-monospace,monospace;color:var(--mayfly);
+    white-space:nowrap}
+  .stat u{display:block;color:#6d8288;font:600 .58rem/1.4 system-ui,sans-serif;
+    letter-spacing:.12em;text-transform:uppercase;text-decoration:none}
+  .stat.hot{border-color:var(--copper);color:var(--copper)}
+  #note{color:var(--copper);font:600 .74rem/1.5 system-ui,sans-serif}
+  #note:not(:empty){padding:2px 0 6px}
+  #search{width:100%;background:#16232a;border:1px solid var(--line);border-radius:9px;
+    color:var(--mayfly);font:400 .95rem/1 system-ui,sans-serif;padding:12px 12px;margin:4px 0 8px}
+  #tabs{display:flex;gap:6px;overflow-x:auto;padding:0 0 9px;scrollbar-width:none}
+  /* while a search is running the pills are lying — none of them is the
+     section you are looking at, because you are looking at all of them */
+  #tabs.searching{display:none}
+  #tabs::-webkit-scrollbar{display:none}
+  #tabs button{flex:0 0 auto;background:#1d2a31;color:#8fb3bd;border:1px solid #344a54;
+    border-radius:999px;padding:10px 15px;font:600 .85rem/1 system-ui,sans-serif;
+    white-space:nowrap;cursor:pointer}
+  #tabs button.on{background:var(--copper);color:#1b120a;border-color:var(--copper)}
+
+  #rows{padding:2px 12px 40vh}
+  .group{display:none}
+  .group.on{display:block}
+  .group h4{color:#8fb3bd;font:700 .66rem/1 system-ui,sans-serif;letter-spacing:.16em;
+    text-transform:uppercase;margin:16px 0 2px}
+  .row{padding:8px 0 11px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .row.hide{display:none}
+  .rtop{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .lab{color:var(--mayfly);font:600 .95rem/1.3 system-ui,sans-serif;flex:1 1 auto}
+  .val{color:var(--good);font:700 .95rem/1.3 ui-monospace,monospace;min-width:64px;text-align:right}
+  .mul{background:#22333b;color:#8fb3bd;border:1px solid #3c5560;border-radius:7px;
+    padding:8px 9px;min-width:50px;font:700 .78rem/1 ui-monospace,monospace;cursor:pointer}
+  .mul.on{background:var(--copper);color:#1b120a;border-color:var(--copper)}
+  .act{flex:1 1 auto;min-width:0;background:#2a3a44;color:var(--mayfly);border:1px solid #46606c;
+    border-radius:9px;padding:14px 12px;font:600 .95rem/1.25 system-ui,sans-serif;
+    text-align:left;cursor:pointer}
+  .act:active{background:#3a5160}
+  .tip{color:var(--dim);font:400 .76rem/1.5 system-ui,sans-serif;margin-top:6px;display:none}
+  .row.open .tip{display:block}
+  .help{background:none;border:0;color:#6d8288;font:700 .9rem/1 system-ui,sans-serif;
+    padding:6px 8px;cursor:pointer}
+  /* a 44 px target is the smallest thing a thumb hits reliably */
+  .row input[type=range]{width:100%;height:44px;margin:0;background:transparent;
+    -webkit-appearance:none;appearance:none}
+  .row input[type=range]::-webkit-slider-runnable-track{height:7px;border-radius:4px;background:#2f4650}
+  .row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:30px;height:30px;
+    border-radius:50%;background:var(--copper);border:2px solid #1b262b;margin-top:-12px}
+  .row input[type=range]::-moz-range-track{height:7px;border-radius:4px;background:#2f4650}
+  .row input[type=range]::-moz-range-thumb{width:30px;height:30px;border:2px solid #1b262b;
+    border-radius:50%;background:var(--copper)}
+  #lost{display:none;position:fixed;left:0;right:0;bottom:0;z-index:9;
+    background:#3a1f16;border-top:1px solid #6b3a25;padding:14px 16px;
+    display:none;align-items:center;gap:12px}
+  #lost.on{display:flex}
+  #lost span{flex:1 1 auto;color:#f0c8b4;font:600 .82rem/1.4 system-ui,sans-serif}
+  #lost button{background:var(--copper);color:#1b120a;border:0;border-radius:8px;
+    padding:11px 16px;font:700 .82rem/1 system-ui,sans-serif;cursor:pointer}
+  #err{color:var(--bad);font:400 .7rem/1.5 ui-monospace,monospace;padding:0 12px}
+</style>
+</head>
+<body>
+
+<div id="join" class="screen on">
+  <h1>Flycast <em>remote</em></h1>
+  <p class="sub">Every setting the headset menu has, on this phone, so you can
+     adjust the river for somebody who has never held a fly rod without talking
+     them through a menu they cannot reach.</p>
+
+  <label for="code">Code from the game screen</label>
+  <input id="code" maxlength="4" autocomplete="off" autocapitalize="characters"
+         autocorrect="off" spellcheck="false" inputmode="text" placeholder="····">
+  <button id="joinBtn" onclick="window.joinTap&&window.joinTap()">Connect</button>
+  <p id="joinMsg"></p>
+
+  <div class="how">
+    <p><b>On the headset:</b> press <b>Phone remote</b> on the front page before
+       handing it over, or open the in-VR menu with <b>Y</b> and push right on
+       <b>Phone remote</b> under PRESETS. A four-letter code appears along the
+       top of the panel.</p>
+    <p>Both devices need to be on the same wifi. The code changes every time the
+       room is opened.</p>
+  </div>
+  <p class="tiny" id="stage">stage: loading</p>
+  <p class="tiny" id="err"></p>
+</div>
+
+<div id="panel" class="screen">
+  <div id="barTop">
+    <div class="liveRow">
+      <i id="dot"></i>
+      <span id="venue">—</span>
+      <span class="spacer"></span>
+      <button id="resync">Resync</button>
+    </div>
+    <div id="stats"></div>
+    <div id="note"></div>
+    <input id="search" type="search" autocomplete="off" autocorrect="off"
+           spellcheck="false" placeholder="Search all settings…">
+    <div id="tabs"></div>
+  </div>
+  <div id="rows"></div>
+</div>
+
+<div id="lost"><span>Lost the game.</span><button id="again">Reconnect</button></div>
+
+<script>
+/* ── connection library ────────────────────────────────────────────────────
+   Two CDNs, because one of them being down should not end a demo. Only the
+   handshake needs it: once the channel is up the traffic is peer to peer. */
+(function loadLib(){
+  const mark = t => { const e = document.getElementById('stage'); if(e) e.textContent = 'stage: ' + t; };
+  const sources = [
+    'https://unpkg.com/peerjs@1/dist/peerjs.min.js',
+    'https://cdn.jsdelivr.net/npm/peerjs@1/dist/peerjs.min.js'
+  ];
+  let i = 0;
+  (function tryNext(){
+    if(i >= sources.length){ mark('connection library unavailable — this phone needs internet once'); return; }
+    const sc = document.createElement('script');
+    sc.src = sources[i++];
+    sc.crossOrigin = 'anonymous';
+    sc.onload = () => mark('ready, enter the code');
+    sc.onerror = () => { sc.remove(); tryNext(); };
+    document.head.appendChild(sc);
+  })();
+})();
+</script>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   Core: join the room, and speak the protocol.
+
+   Separate <script> blocks on purpose, the way family-smash's controller is
+   built: if one of them fails to parse the others still run, so a broken
+   panel cannot take the Connect button down with it.
+
+   The phone holds no simulation. It holds MENU, TABS and a copy of P, all
+   sent by the headset, and it draws sliders over them. Nothing here knows
+   what a leader is.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Phones have no console, so anything that goes wrong goes on the screen. */
+window.onerror = function(msg, src, line){
+  const e = document.getElementById('err');
+  if(e) e.textContent = 'error: ' + msg + ' (line ' + line + ')';
+  const b = document.getElementById('joinBtn');
+  if(b) b.disabled = false;
+  return false;
+};
+
+// Exported straight away, so nothing further down can stop the button working.
+window.joinTap = onJoinTap;
+
+var conn = null, peer = null, joinTimer = null;
+var SCHEMA = null;                    /* {menu, tabs, vals, venue, venueName} */
+var VALS = {};                        /* our copy of the headset's P */
+const $ = id => document.getElementById(id);
+const shows = id => ['join','panel'].forEach(s => $(s).classList.toggle('on', s === id));
+function say(m){ $('joinMsg').textContent = m; }
+function stage(m){ $('stage').textContent = 'stage: ' + m; }
+
+function onJoinTap(){
+  const code = ($('code').value || '').trim().toUpperCase();
+  if(code.length !== 4){ say('Enter the four-letter code shown on the game screen.'); return; }
+  if(typeof Peer === 'undefined'){
+    say('The connection library did not load. This phone needs internet for the first step — check its signal and reload.');
+    return;
+  }
+  try { if(peer) peer.destroy(); } catch(e){}
+  peer = null; conn = null;
+  clearTimeout(joinTimer);
+
+  $('joinBtn').disabled = true;
+  say('Step 1 of 2 — getting an address…');
+
+  joinTimer = setTimeout(() => {
+    fail('Timed out. The game must have its room open showing this same code, and both devices need to be on the same wifi.');
+  }, 15000);
+
+  peer = new Peer({pingInterval: 4000});
+
+  peer.on('open', () => {
+    say('Step 2 of 2 — looking for room ' + code + '…');
+    conn = peer.connect('flycast-' + code);      /* reliable channel */
+    conn.on('open', () => {
+      clearTimeout(joinTimer);
+      conn.send({t:'hello'});
+      say('');
+      $('joinBtn').disabled = false;
+      $('lost').classList.remove('on');
+      $('dot').classList.remove('off');
+      shows('panel');
+      keepAwake();
+    });
+    conn.on('data', onData);
+    conn.on('close', dropped);
+    conn.on('error', e => fail('Room error: ' + ((e && e.type) || 'unknown')));
+  });
+
+  peer.on('error', err => {
+    const t = (err && err.type) || 'unknown';
+    if(t === 'peer-unavailable')
+      fail('No room called ' + code + '. Check the code on the game screen — it changes each time the room is opened.');
+    else if(t === 'network' || t === 'server-error' || t === 'socket-error')
+      fail('Could not reach the matchmaking server (' + t + '). This step needs internet.');
+    else
+      fail('Connection problem: ' + t);
+  });
+}
+
+function fail(msg){
+  clearTimeout(joinTimer);
+  say(msg);
+  $('joinBtn').disabled = false;
+  try { if(peer) peer.destroy(); } catch(e){}
+  peer = null; conn = null;
+}
+/* The panel stays on screen when the channel drops — the values on it are
+   still the last truth, and hiding them mid-demo helps nobody. A banner says
+   so and offers the way back. */
+function dropped(){
+  clearTimeout(joinTimer);
+  conn = null;
+  $('dot').classList.add('off');
+  if($('panel').classList.contains('on')) $('lost').classList.add('on');
+  else { shows('join'); say('Disconnected. Press Connect to try again.'); }
+  $('joinBtn').disabled = false;
+}
+function send(m){ try { if(conn && conn.open) conn.send(m); } catch(e){} }
+
+/* ---- inbound ---------------------------------------------------------- */
+/* The schema is ~40 kB and arrives in numbered pieces. One reassembler,
+   keyed by message id, the way the game sends it. */
+var partBuf = {};
+function reassemble(d){
+  if(d.i === 0) partBuf[d.id] = [];
+  if(!partBuf[d.id]) return undefined;
+  partBuf[d.id].push(d.s);
+  if(d.i < d.n - 1) return undefined;
+  let out = null;
+  try { out = JSON.parse(partBuf[d.id].join('')); } catch(e){}
+  delete partBuf[d.id];
+  return out;
+}
+function onData(d){
+  if(!d || typeof d !== 'object') return;
+  if(d.t === 'part'){
+    const whole = reassemble(d);
+    if(whole) onData(whole);
+    return;
+  }
+  if(d.t === 'schema'){
+    SCHEMA = d;
+    VALS = d.vals || {};
+    stage('connected');
+    if(typeof buildPanel === 'function') buildPanel();
+    if(typeof setVenue === 'function') setVenue(d.venueName || d.venue);
+    return;
+  }
+  if(d.t === 'vals'){
+    for(const k in d.v) VALS[k] = d.v[k];
+    if(typeof applyVals === 'function') applyVals(d.v);
+    if(d.venueName && typeof setVenue === 'function') setVenue(d.venueName);
+    return;
+  }
+  if(d.t === 'hud'){
+    if(typeof drawStats === 'function') drawStats(d);
+    return;
+  }
+}
+
+/* A phone that sleeps mid-demo is a phone that has to be woken, unlocked and
+   reconnected while somebody stands there with a rod in their hand. */
+function keepAwake(){
+  try {
+    if(!('wakeLock' in navigator)) return;
+    const ask = () => { try { navigator.wakeLock.request('screen').catch(()=>{}); } catch(e){} };
+    ask();
+    document.addEventListener('visibilitychange', ()=>{
+      if(document.visibilityState === 'visible') ask();
+    });
+  } catch(e){}
+}
+
+/* A link like .../remote.html#ABCD arrives with the room already filled in. */
+(function fromLink(){
+  const raw = (location.hash || location.search || '').replace(/[^A-Za-z0-9]/g, '');
+  const code = raw.toUpperCase().slice(0, 4);
+  if(code.length === 4){
+    $('code').value = code;
+    $('joinBtn').textContent = 'Connect to ' + code;
+  }
+})();
+$('again').addEventListener('click', ()=>{ $('lost').classList.remove('on'); onJoinTap(); });
+$('resync').addEventListener('click', ()=>send({t:'get'}));
+/* The loader's own message wins if it never finished — saying "ready" over
+   the top of "library unavailable" is how a dead Connect button looks fine. */
+if(typeof Peer !== 'undefined') stage('ready, enter the code');
+else say('Heads up: the connection library has not loaded. This phone needs internet for the first step.');
+</script>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   The panel.
+
+   Built entirely from the MENU and TABS the headset sent — labels, ranges,
+   steps, help text and grouping all have exactly one definition, in the game.
+   A setting added there appears here with nothing to update, which is the
+   same rule the flat preview panel is built on and the reason it stopped
+   drifting.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* The range multiplier is the phone's own. Cycling it changes what this
+   slider can reach and nothing else, so there is no state to agree on with
+   the headset — the value sent is a value either way. Same steps and the
+   same frozen zoom window as the game, so a row behaves the way it does in
+   VR. */
+const RANGE_STEPS = [0.01, 0.1, 1, 10, 100];
+const RANGEX = {}, RANGEWIN = {};
+const rx = k => RANGEX[k] || 1;
+function rowRange(key, mn, mx){
+  const m = rx(key);
+  if(m >= 1) return [mn > 0 ? mn / m : mn * m, mx * m];
+  return RANGEWIN[key] || [mn, mx];
+}
+function cycleRange(key, mn, mx){
+  const i = RANGE_STEPS.indexOf(rx(key));
+  const m = RANGE_STEPS[(i + 1) % RANGE_STEPS.length];
+  RANGEX[key] = m;
+  if(m < 1){
+    const span = (mx - mn) * m, v = VALS[key];
+    let lo = v - span / 2;
+    if(lo < mn - span) lo = mn;
+    RANGEWIN[key] = [lo, lo + span];
+  } else delete RANGEWIN[key];
+  return m;
+}
+
+/* Sends are coalesced. A drag fires `input` far faster than anything needs
+   to travel, and the headset only ever wants the latest value of a key. */
+const pending = {}, holdUntil = {};
+let flushTimer = null;
+const SEND_MS = 55, HOLD_MS = 700;
+function queueSet(key, v){
+  pending[key] = v;
+  holdUntil[key] = Date.now() + HOLD_MS;
+  if(flushTimer === null) flushTimer = setTimeout(flushSets, SEND_MS);
+}
+function flushSets(){
+  flushTimer = null;
+  for(const k in pending){
+    send({t:'set', k, v:pending[k]});
+    delete pending[k];
+  }
+}
+/* An echo of a value we just sent must never land back on the slider under
+   the thumb — that is what makes a control fight the finger holding it. So a
+   key we touched is deaf for HOLD_MS, and the one being dragged is deaf for
+   as long as it is held. */
+let dragKey = null;
+function deaf(key){
+  return key === dragKey || (holdUntil[key] || 0) > Date.now();
+}
+
+const rowByKey = {};
+let groupEls = [], tabEls = [], allRows = [];
+
+function fmtFor(step){
+  return v => step >= 1 ? String(Math.round(v)) : v.toFixed(2);
+}
+
+function buildPanel(){
+  const host = $('rows'), tabBar = $('tabs');
+  host.innerHTML = ''; tabBar.innerHTML = '';
+  groupEls = []; tabEls = []; allRows = [];
+  for(const k in rowByKey) delete rowByKey[k];
+
+  const MENU = SCHEMA.menu, TABS = SCHEMA.tabs;
+  const showTab = n => {
+    groupEls.forEach((g, i) => g.classList.toggle('on', i === n));
+    tabEls.forEach((b, i) => b.classList.toggle('on', i === n));
+    /* fourteen pills do not fit across a phone, so the one that is lit has
+       to be brought to where it can be seen — otherwise picking a section
+       off the end of the strip leaves every visible pill looking unselected */
+    const t = tabEls[n];
+    if (t && tabBar.scrollTo) tabBar.scrollTo({left: Math.max(0, t.offsetLeft - 12)});
+    scrollTo(0, 0);
+  };
+
+  TABS.forEach((tab, idx) => {
+    const group = document.createElement('div');
+    group.className = 'group';
+    const h = document.createElement('h4');
+    h.textContent = tab.name;
+    group.appendChild(h);
+    groupEls.push(group); host.appendChild(group);
+
+    const tb = document.createElement('button');
+    tb.textContent = tab.name;
+    tb.addEventListener('click', () => { $('search').value = ''; filter(''); showTab(idx); });
+    tabBar.appendChild(tb); tabEls.push(tb);
+
+    for(const i of tab.rows){
+      const r = MENU[i];
+      if(!r || !r[1]) continue;
+      const el = r[1].charAt(0) === '!' ? actionRow(r) : settingRow(r);
+      if(!el) continue;
+      group.appendChild(el);
+      allRows.push({el, group, hay: ((r[0] || '') + ' ' + (r[1] || '')).toLowerCase()});
+    }
+  });
+
+  /* PRESETS first: the venues, the tackle presets and Hook a test fish are
+     what a demo actually reaches for, and they all live in the front two tabs. */
+  if(groupEls.length) showTab(0);
+}
+
+function actionRow(r){
+  const [label, key, , , , tip] = r;
+  const row = document.createElement('div'); row.className = 'row';
+  const b = document.createElement('button'); b.className = 'act';
+  b.textContent = label;
+  b.addEventListener('click', () => {
+    send({t:'act', k:key});
+    /* the headset resends the whole of P after an action, so there is
+       nothing to predict here — just do not let a stale hold block it */
+    for(const k in holdUntil) delete holdUntil[k];
+    b.textContent = label + '  ✓';
+    setTimeout(() => { b.textContent = label; }, 900);
+  });
+  const t = document.createElement('div'); t.className = 'tip'; t.textContent = tip || '';
+  const q = document.createElement('button'); q.className = 'help'; q.textContent = '?';
+  q.addEventListener('click', () => row.classList.toggle('open'));
+  const wrap = document.createElement('div'); wrap.className = 'rtop';
+  wrap.appendChild(b); wrap.appendChild(q);
+  row.appendChild(wrap); row.appendChild(t);
+  return row;
+}
+
+function settingRow(r){
+  const [label, key, lo, hi, st, tip] = r;
+  if(typeof VALS[key] !== 'number') return null;   /* no value, no slider */
+  const step = st || 0.01, fmt = fmtFor(step);
+  const row = document.createElement('div'); row.className = 'row';
+  const rtop = document.createElement('div'); rtop.className = 'rtop';
+  const lab = document.createElement('span'); lab.className = 'lab'; lab.textContent = label;
+  const val = document.createElement('span'); val.className = 'val';
+  const mul = document.createElement('button'); mul.className = 'mul';
+  const inp = document.createElement('input');
+  inp.type = 'range'; inp.step = step;
+  const t = document.createElement('div'); t.className = 'tip'; t.textContent = tip || '';
+
+  const applyRange = () => {
+    const [a, b] = rowRange(key, lo, hi);
+    inp.min = a; inp.max = b; inp.value = VALS[key];
+    const m = rx(key);
+    mul.textContent = (m >= 1 ? m : m === 0.1 ? '0.1' : '0.01') + '×';
+    mul.classList.toggle('on', m !== 1);
+  };
+  applyRange();
+  val.textContent = fmt(VALS[key]);
+
+  mul.addEventListener('click', e => { e.stopPropagation(); cycleRange(key, lo, hi); applyRange(); });
+  const grab = () => { dragKey = key; };
+  const drop = () => { if(dragKey === key) dragKey = null; flushSets(); };
+  inp.addEventListener('pointerdown', grab);
+  inp.addEventListener('touchstart', grab, {passive:true});
+  /* the release can arrive anywhere, including nowhere: every one of these
+     has to be able to let the key go or it stays deaf for the rest of the
+     session and stops answering the headset */
+  inp.addEventListener('pointerup', drop);
+  inp.addEventListener('pointercancel', drop);
+  inp.addEventListener('touchend', drop);
+  inp.addEventListener('touchcancel', drop);
+  inp.addEventListener('change', drop);
+  inp.addEventListener('input', () => {
+    let v = parseFloat(inp.value);
+    if(!Number.isFinite(v)) return;
+    if(step >= 1) v = Math.round(v / step) * step;
+    VALS[key] = v;
+    val.textContent = fmt(v);
+    queueSet(key, v);
+  });
+  lab.addEventListener('click', () => row.classList.toggle('open'));
+
+  rtop.appendChild(lab); rtop.appendChild(val); rtop.appendChild(mul);
+  row.appendChild(rtop); row.appendChild(inp); row.appendChild(t);
+  rowByKey[key] = {inp, val, fmt, applyRange};
+  return row;
+}
+
+/* Values changed in VR, or by a preset, or by a venue swap. */
+function applyVals(v){
+  for(const k in v){
+    const r = rowByKey[k];
+    if(!r || deaf(k)) continue;
+    r.inp.value = v[k];
+    r.val.textContent = r.fmt(v[k]);
+  }
+}
+
+/* Search across every tab at once. A hundred and fifty settings is more than
+   anybody can find by remembering which section they live in. */
+function filter(q){
+  q = (q || '').trim().toLowerCase();
+  $('tabs').classList.toggle('searching', !!q);
+  if(!q){
+    const on = tabEls.findIndex(b => b.classList.contains('on'));
+    groupEls.forEach((g, i) => g.classList.toggle('on', i === Math.max(0, on)));
+    allRows.forEach(r => r.el.classList.remove('hide'));
+    return;
+  }
+  groupEls.forEach(g => g.classList.add('on'));
+  const seen = new Set();
+  allRows.forEach(r => {
+    const hit = r.hay.indexOf(q) >= 0;
+    r.el.classList.toggle('hide', !hit);
+    if(hit) seen.add(r.group);
+  });
+  groupEls.forEach(g => g.classList.toggle('on', seen.has(g)));
+}
+
+function setVenue(name){ $('venue').textContent = name || '—'; }
+
+/* What the person on the phone cannot see, because they are not the one
+   wearing the headset: whether a fish is on, how hard the tippet is being
+   pulled, and whether the frame rate has been spent. */
+function drawStats(d){
+  const box = $('stats');
+  box.textContent = '';
+  /* built as nodes rather than markup: this is text off the wire, and
+     nothing off the wire has any business being parsed as HTML */
+  const push = (u, v, hot) => {
+    const c = document.createElement('div');
+    c.className = 'stat' + (hot ? ' hot' : '');
+    const t = document.createElement('u'); t.textContent = u;
+    c.appendChild(t); c.appendChild(document.createTextNode(String(v)));
+    box.appendChild(c);
+  };
+  push('fps', d.fps, d.fps < 60);
+  if(d.hooked)
+    push('fish on', d.hooked.len + ' cm \u00b7 ' + d.hooked.pct + '% \u00b7 ' + d.hooked.beh, true);
+  else
+    push('feeding', d.feeding + ' of ' + d.fish);
+  push('tension', d.tension + ' / ' + d.tippet + ' N',
+       d.tippet > 0 && d.tension > d.tippet * 0.7);
+  push('line out', d.lineOut + ' m');
+  push('slack', d.slack + ' m');
+  if(d.drift !== null && d.drift !== undefined) push('drift', d.drift + ' %');
+  push('left hand', d.hand);
+  push('nodes', d.nodes);
+  if(d.venue) setVenue(d.venue);
+  $('note').textContent = d.note || '';
+}
+
+/* A touch can end without the element it started on ever hearing — the
+   phone locking, a system gesture, the capture being taken away. If that
+   left dragKey set, the row would stay deaf to the headset forever. */
+function releaseDrag(){ dragKey = null; flushSets(); }
+addEventListener('blur', releaseDrag);
+addEventListener('pointerup', releaseDrag, true);
+addEventListener('pointercancel', releaseDrag, true);
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState !== 'visible') releaseDrag();
+});
+
+$('search').addEventListener('input', e => filter(e.target.value));
+</script>
+</body>
+</html>
