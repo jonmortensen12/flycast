@@ -885,8 +885,6 @@ const tp=vm.runInContext(`(()=>{
 
   /* the hop itself: head onto the ring, dark on the frame it moves */
   tpHit.set(0,tpTop(0,bankZ-4),bankZ-4); tpOK=true;
-  const head0={x:camera.position.x,z:camera.position.z};
-  const rig0={x:player.position.x,z:player.position.z};
   blinkTo_(tpHit.x,tpHit.z);
   let darkAtMove=-1, moved=false, peak=0;
   for(let f=0;f<60&&blinkT>0;f++){
@@ -895,10 +893,15 @@ const tp=vm.runInContext(`(()=>{
     peak=Math.max(peak,d);
     if(!moved&&(player.position.x!==bx||player.position.z!==bz)){ moved=true; darkAtMove=d; }
   }
-  /* the rig moved by the error at the HEAD, so the head is now on the ring */
-  const headLand={x:+(head0.x+(player.position.x-rig0.x)).toFixed(2),
-                  z:+(head0.z+(player.position.z-rig0.z)).toFixed(2)};
-  const onRing=Math.hypot(headLand.x-tpHit.x,headLand.z-tpHit.z)<0.01;
+  /* The rig moves by the error at the HEAD, so the head must end up ON the
+     ring. Measured in WORLD terms: this used to rebuild the landing from
+     camera.position -- which is LOCAL to the rig -- plus the rig's delta, an
+     identity that holds only while the rig sits at the origin. Ask the camera
+     where it is instead. (No backticks in here: this comment lives inside a
+     template literal, and one backtick ends the whole test.) */
+  const _hl=camera.getWorldPosition(new THREE.Vector3());
+  const headLand={x:+_hl.x.toFixed(2), z:+_hl.z.toFixed(2)};
+  const onRing=Math.hypot(_hl.x-tpHit.x,_hl.z-tpHit.z)<0.01;
 
   /* snap turn: yaw advances, the head does not move. The camera's position is
      LOCAL to the rig, so standing the head away from the rig origin — which is
@@ -1038,7 +1041,13 @@ console.log('tackle through a hop',hop);
      !o.carried||!o.kept||o.dry||
      !f.hookedBefore||!f.stillOn||f.wet<=0.05||
      f.after.st>f.base.st+1.5 ||
-     f.after.T>f.base.T+15 || f.after.T>=f.tippet*0.8)
+     /* Against the TIPPET, not against the baseline. A fight's own tension
+        swings between nothing and everything run to run, so a baseline of 0 N
+        makes any relative margin either fragile or meaningless. The claim
+        worth holding is the one that cost fish: a hop must not take the line
+        near breaking strain. 89 N against a 40 N tippet fires this; the 20 N
+        a fish pulls on its own does not. */
+     f.after.T>=f.tippet*0.8)
     console.log('  *** TACKLE-THROUGH-A-HOP FAILURE ***');
 }
 
@@ -1136,15 +1145,36 @@ const guide=vm.runInContext(`(()=>{
   P.teleport=wasTP; P.handGuide=0; guideStep();
   const hidden=GUIDE.hands.every(h=>!h.grp.visible);
   P.handGuide=was;
+  /* THE GHOST HAS TO POINT THE WAY THE ROD DOES. Both are drawn in grip
+     space, and the rod runs along Z (butt at +BUTT_Z, blank out toward -Z),
+     so a controller held in that hand has its handle along Z too. The first
+     version laid it down -Y — a quarter turn out, and that is exactly what it
+     looked like in the headset. CapsuleGeometry is built about Y, so the
+     handle's axis is (0,1,0) turned by its own rotation.x. */
+  const handleAxis=(()=>{
+    const b=GUIDE.hands[0].grp.userData.handle;
+    const rx=b?b.rotation.x:0;
+    return {x:0, y:Math.cos(rx), z:Math.sin(rx)};
+  })();
+  /* the rod's own direction in the same space, straight out of handTargets */
+  const rodAxis={x:0,y:0,z:(NEXT_Z-BUTT_Z)<0?-1:1};
+  const align=Math.abs(handleAxis.x*rodAxis.x+handleAxis.y*rodAxis.y+
+                       handleAxis.z*rodAxis.z);
   return {lazy, hands, blank, hidden,
+          handleAxis:{x:+handleAxis.x.toFixed(2),y:+handleAxis.y.toFixed(2),
+                      z:+handleAxis.z.toFixed(2)},
+          rodAxis, alignDeg:+(Math.acos(Math.min(1,align))*180/Math.PI).toFixed(1),
           stick:{tp:tp.split('|')[0], walk:walk.split('|')[0], wade:wade.split('|')[0]}};
 })()`,sandbox);
 console.log('control guide',{lazy:guide.lazy, blank:guide.blank, hidden:guide.hidden,
-  stick:guide.stick, rows:guide.hands.map(h=>h.name+':'+h.rows+(h.shown?' shown':' hidden'))});
+  handleAxis:guide.handleAxis, rodAxis:guide.rodAxis,
+  handleVsRod:guide.alignDeg+' deg', stick:guide.stick,
+  rows:guide.hands.map(h=>h.name+':'+h.rows+(h.shown?' shown':' hidden'))});
 console.log('  callouts:',guide.hands.map(h=>h.words.map(w=>w.split('|')[0]).join(', ')).join('  |  '));
 if(guide.blank||!guide.hidden||
    guide.hands.length!==2||guide.hands.some(h=>h.rows<4||!h.shown)||
-   guide.stick.tp!=='TELEPORT'||guide.stick.walk!=='WALK'||guide.stick.wade!=='WADE')
+   guide.stick.tp!=='TELEPORT'||guide.stick.walk!=='WALK'||guide.stick.wade!=='WADE'||
+   guide.alignDeg>30)
   console.log('  *** CONTROL GUIDE FAILURE ***');
 
 /* ── the fish you can see ────────────────────────────────────────────────

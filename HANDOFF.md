@@ -289,8 +289,8 @@ of each controller over your hands with a callout on every button that does some
 
 ### Moving: teleport or slide
 
-**PLAYER → Teleport move.** 1 (the default) is the hop; 0 goes back to sliding the rig
-around on the stick, unchanged from before teleport existed. It is a live toggle — nothing
+**PLAYER → Teleport move.** 0, **the default**, slides the rig around on the stick; 1 is
+the hop. It is a live toggle — nothing
 is rebuilt — and it is reachable from the phone remote as well.
 
 With it on, pushing the stick forward throws a real ballistic arc off the **left** hand
@@ -336,7 +336,7 @@ and that window is frozen so the slider does not slide out from under you mid-dr
 
 ### The control guide
 
-**PLAYER → Control labels**, shipped ON. A ghost of each controller drawn where the
+**PLAYER → Controller labels**, shipped ON. A ghost of each controller drawn where the
 real one is, with a callout on every button that does something. There is no tutorial
 in this game and no button prompt anywhere else, and *"now squeeze the left trigger"*
 is a sentence you should not have to say out loud while somebody is holding a fly rod.
@@ -347,6 +347,12 @@ Three things about it are deliberate:
   the rod, the cork and the reel, and a shape that is plainly a diagram reads as an
   instruction rather than as a second object in the world. It is also the only version
   that stays correct if the hardware changes.
+- **The handle runs along Z**, because the rod does. Both are drawn in grip space and
+  the blank is built butt-at-`+BUTT_Z` running out toward −Z; the hand is holding that
+  rod, so the controller in it lies along the same axis. The first version laid the
+  handle down −Y, a quarter turn out, and looked exactly like that in the headset.
+  `smoke.mjs` now measures the handle's axis against the rod's — *"it looks rotated"*
+  should not need a headset to establish.
 - **The labels billboard; their anchors do not.** The leader stays pinned to the part
   it names while the text is square-on from wherever you are looking. The leaders are
   thin cylinders, not GL lines — same reason the teleport arc is beads.
@@ -575,6 +581,29 @@ Recorded because each one was mis-diagnosed at least once.
    single vertex rewritten.** Both now stand 2.4 mm proud. `assetcheck.mjs` is
    the guard, and it fails on the file as it shipped.
 
+19. **A pull at the tiptop went into one 1.85 g node.** Reported as the rod folding in
+   half on hookup. The line's reaction on the blank was applied as
+   `rvel[tip] -= dir * fishTension * rinvM[RN-1] * h` — the RAW pull, into the single
+   lightest node of the rod. 26 N on 1.85 g is **32 m/s of velocity change per substep**,
+   195 m/s across a frame, and at the old 600 N ceiling it was 750 m/s. The bend and
+   distance constraints then argue it back down on each of six iterations, which is why
+   a clean harness shows only 3.6° of bend and a tip at 0.8 m/s — but what is happening
+   there is a force and a constraint fighting to a draw every substep, and a fight is
+   not a rod.
+
+   A line pulling on a tiptop loads the **tip section**. The same impulse is now shared
+   over the last four nodes by mass — 12.4 g instead of 1.85 g — and it uses
+   `fishCarried` rather than the raw pull, so the worst case is about a hundredfold
+   gentler. Measured over a fight: total bend 7.0° → 4.1°, worst single joint 1.5° → 0.5°.
+
+   **Not reproduced, and that matters.** No combination of fish behaviour, tippet, reel
+   or rod movement made the blank fold in the harness; the worst seen was 29° at one
+   joint, and that was the rod sweep, not the fish. So this is the same shape as bug 15:
+   a genuinely indefensible number, fixed, without a demonstration that it was *the*
+   number. If the fold is still there, it is not the tip reaction — look next at
+   `solveGuide()`, which couples every guide to the line **both ways** while a hooked
+   fish holds `invM[0] = 0`, i.e. an infinitely heavy end on a chain of 1.5 µg nodes.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
@@ -596,6 +625,13 @@ loader, no headset — walks the node hierarchy, bakes the transforms and measur
 result. Today it checks that both of the trout's eyes stand proud of a head that is not
 symmetric; the point is that a model fault is a measurable fact, not a matter of
 squinting at it in the headset.
+
+**A test that reconstructs a value is a test that will lie to you.** The teleport
+check worked out where the head had landed from `camera.position` — which is LOCAL to
+the rig — plus the rig's delta. That identity holds only while the rig is at the origin,
+which it was, until an earlier test left it somewhere else and a perfectly good hop
+started failing. Both that and the snap-turn check now ask the camera where it is.
+**Measure the thing; do not rebuild it from parts.**
 
 **A stub that answers wrongly is worse than one that throws.** Every one of the
 harness's worst misses has been this shape: the Proxy `has` trap that made every
