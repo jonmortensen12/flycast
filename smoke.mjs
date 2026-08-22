@@ -75,7 +75,15 @@ class Obj3D{
     this.scale=new V3(1,1,1);this.children=[];this.visible=true;this.userData={};
     this.matrixWorld={elements:new Array(16).fill(0)};this.material=null;this.geometry=null;}
   add(...o){for(const c of o) if(c){c.parent=this;this.children.push(c);}return this;}
-  remove(){return this;} clear(){this.children.length=0;return this;}
+  /* Real. `remove()` returning `this` and doing nothing is the third stub in
+     this file to answer wrongly rather than fail — after the `has` trap and
+     applyQuaternion — and it hid the same class of bug: code that takes a mesh
+     out of one parent and puts it in another could not be checked at all,
+     because nothing ever came out. */
+  remove(...o){for(const c of o){const i=this.children.indexOf(c);
+    if(i>=0){this.children.splice(i,1);c.parent=null;}} return this;}
+  clear(){for(const c of this.children) c.parent=null;
+    this.children.length=0;return this;}
   /* Walk the parents. This used to return the LOCAL position, which pinned
      every hand, panel and reel to the world origin however far the rig had
      walked — so moving the rig reached nothing the simulation can feel, and a
@@ -1138,6 +1146,53 @@ if(guide.blank||!guide.hidden||
    guide.hands.length!==2||guide.hands.some(h=>h.rows<4||!h.shown)||
    guide.stick.tp!=='TELEPORT'||guide.stick.walk!=='WALK'||guide.stick.wade!=='WADE')
   console.log('  *** CONTROL GUIDE FAILURE ***');
+
+/* ── the fish you can see ────────────────────────────────────────────────
+   Two faults reported from the headset, both geometric, both measurable.
+
+   1. A procedural twin standing in the water beside the asset fish, never
+      swimming — and sometimes one hanging in the air. rebuildMesh() called
+      scene.remove() on a mesh built into fishGroup, which removes nothing,
+      then added the replacement to the scene. So every model load and every
+      toggle of Use model assets left one more frozen fish behind, in a group
+      buildFish() no longer clears.
+   2. The mouth: two fixed-radius ellipsoids on a snout far narrower than they
+      were, standing 32 mm proud on each side — a dark biscuit held crosswise.
+      Both are sized from prof() now, and the check is that they stay inside
+      the hull over their WHOLE length, because an ellipsoid tapers as a circle
+      and a snout tapers faster. */
+const fishy=vm.runInContext(`(()=>{
+  /* every mesh a fish owns lives in fishGroup, and nothing it replaced is
+     left anywhere */
+  const before={group:fishGroup.children.length, scene:scene.children.length};
+  for(const f of fishes){ f.rebuildMesh(); f.rebuildMesh(); }
+  const after={group:fishGroup.children.length, scene:scene.children.length};
+  const parented=fishes.every(f=>f.mesh.parent===fishGroup);
+  const orphans=scene.children.filter(o=>fishes.some(f=>f.mesh===o)).length;
+
+  /* the mouth against the body it is set into */
+  const bodyW=t=>0.125*prof(t)*0.52;
+  const sweep=(t,halfLen,k)=>{
+    const w=bodyW(t)*k; let worstOut=-1e9;
+    for(let i=0;i<=200;i++){
+      const dx=(i/200*2-1)*halfLen, x=t+dx;
+      if(x<0) continue;
+      const ez=w*Math.sqrt(Math.max(0,1-(dx/halfLen)**2));
+      worstOut=Math.max(worstOut,ez-bodyW(x));
+    }
+    return {halfW:+w.toFixed(4), snoutW:+bodyW(0.030).toFixed(4),
+            proud:+worstOut.toFixed(4)};
+  };
+  /* the same numbers makeTrout uses — see the MOUTH block there */
+  const gape=sweep(0.052,0.048,0.80), jaw=sweep(0.045,0.042,0.74);
+  return {before, after, parented, orphans, gape, jaw};
+})()`,sandbox);
+console.log('the fish you can see',fishy);
+if(fishy.after.group!==fishy.before.group || fishy.after.scene!==fishy.before.scene ||
+   !fishy.parented || fishy.orphans ||
+   fishy.gape.proud>0 || fishy.jaw.proud>0 ||
+   fishy.gape.halfW>fishy.gape.snoutW*1.25 || fishy.jaw.halfW>fishy.jaw.snoutW*1.25)
+  console.log('  *** FISH-MESH FAILURE ***');
 
 /* ── phone remote ────────────────────────────────────────────────────────
    No Peer here, so a fake conn is dropped straight into REMOTE and the

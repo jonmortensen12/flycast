@@ -2666,16 +2666,17 @@ scene.add(obstGroup); scene.add(canopyGroup); scene.add(weedGroup);
    is flagged with markShared() at the point it is created and skipped here. */
 function markShared(o){ if(o&&typeof o==='object'){o.userData=o.userData||{};o.userData.shared=true;} return o; }
 const _owned=o=>o&&o.dispose&&!(o.userData&&o.userData.shared);
+function disposeTree(m){
+  if(!m||!m.traverse) return;
+  m.traverse(c=>{
+    if(_owned(c.geometry)) c.geometry.dispose();
+    const mt=c.material;
+    if(Array.isArray(mt)){ for(const q of mt) if(_owned(q)) q.dispose(); }
+    else if(_owned(mt)) mt.dispose();
+  });
+}
 function emptyGroup(g){
-  for(const m of g.children){
-    if(!m.traverse) continue;
-    m.traverse(c=>{
-      if(_owned(c.geometry)) c.geometry.dispose();
-      const mt=c.material;
-      if(Array.isArray(mt)){ for(const q of mt) if(_owned(q)) q.dispose(); }
-      else if(_owned(mt)) mt.dispose();
-    });
-  }
+  for(const m of g.children) disposeTree(m);
   g.clear();
 }
 let obstMeshes=[];
@@ -4738,25 +4739,41 @@ function makeTrout(len){
     mh.setPosition(eyeT-0.5-0.0075,eyeH*0.60,eyeW*0.97*s);
     headParts.push({geo:new THREE.SphereGeometry(eyeH*0.055,6,5),mat:mh,col:SPARK});
   }
-  /* MOUTH. The body is a closed sweep, so the nose was a blank bullet. A trout
-     has a long jaw hinged back under the eye — a dark gape running from the
-     snout to below the front of the eye, with a pale lower jaw beneath it. */
-  /* MOUTH. Two mistakes here. The tilt was POSITIVE, which lifts the back of
-     the gape and drops the snout — the opposite of a trout, whose jaw hinges
-     back and BELOW the eye while the snout tip rides higher. And the matrix
-     was built scale-then-rotate (M = S*R), so the rotation happened first and
-     the 0.24 vertical squash then sheared it, cutting an intended 0.16 rad
-     tilt down to about 0.04 and skewing the shape on the way. Rotating the
-     already-squashed ellipsoid (M = R*S) is the order that means anything. */
-  const noseT=0.030, noseH=0.125*prof(noseT), noseW=noseH*0.52;
+  /* MOUTH. A trout has a long jaw hinged back under the eye — a dark gape
+     running from the snout to below the front of the eye, with a pale lower
+     jaw beneath it. Tilt is NEGATIVE, so the hinge sits back and below while
+     the snout tip rides higher, and the matrix is rotate-after-scale (M = R*S)
+     so the tilt means what it says instead of shearing the squashed ellipsoid.
+
+     THE SIZE IS THE PART THAT WAS WRONG. Both pieces were fixed-radius spheres
+     — the gape 0.054 scaled 0.92 in z, so 0.0497 of half-width on a snout
+     whose half-width at that station is 0.0179. Two point eight times the
+     width of the head it was mounted on, standing 32 mm proud on each side,
+     with a paler disc of the same kind under it: a dark biscuit held crosswise
+     in the mouth, which is exactly what it looked like.
+
+     So both are now sized FROM the body profile, the same `prof()` the hull is
+     swept from, at their own station. Change the profile and the mouth follows
+     it; there is no second copy of the head's width to keep in step.
+
+     The 0.80 and 0.74 are not taste. An ellipsoid tapers as a circle and the
+     snout tapers faster than that, so matching the width at the CENTRE still
+     leaves the front third poking through the skin — measured at +1.7 mm with
+     a factor of 0.94. These are the largest factors that keep both pieces
+     inside the hull over their whole length, with a little margin. smoke.mjs
+     sweeps them and checks it. */
+  const gapeT=0.052, gapeHalf=0.048;
+  const gapeH=0.125*prof(gapeT);
   const gape=new THREE.Matrix4().makeRotationZ(-0.22);
-  gape.multiply(new THREE.Matrix4().makeScale(1,0.24,0.92));
-  gape.setPosition(noseT-0.5+0.030,-noseH*0.06,0);
-  headParts.push({geo:new THREE.SphereGeometry(0.054,12,8),mat:gape,col:GAPE});
+  gape.multiply(new THREE.Matrix4().makeScale(gapeHalf,0.0115,gapeH*0.52*0.80));
+  gape.setPosition(gapeT-0.5,-gapeH*0.10,0);
+  headParts.push({geo:new THREE.SphereGeometry(1,12,8),mat:gape,col:GAPE});
+  const jawT=0.045, jawHalf=0.042;
+  const jawH=0.125*prof(jawT);
   const jaw=new THREE.Matrix4().makeRotationZ(-0.16);
-  jaw.multiply(new THREE.Matrix4().makeScale(1,0.34,0.86));
-  jaw.setPosition(noseT-0.5+0.032,-noseH*0.50,0);
-  headParts.push({geo:new THREE.SphereGeometry(0.050,12,8),mat:jaw,col:LIP});
+  jaw.multiply(new THREE.Matrix4().makeScale(jawHalf,0.0130,jawH*0.52*0.74));
+  jaw.setPosition(jawT-0.5,-jawH*0.46,0);
+  headParts.push({geo:new THREE.SphereGeometry(1,12,8),mat:jaw,col:LIP});
   g.add(new THREE.Mesh(mergeGeos(headParts),
     new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.10,metalness:0.35})));
   g.rotation.order='YZX';        /* yaw, then pitch, then roll */
@@ -5283,8 +5300,26 @@ class Trout{
   /* swap the mesh for a freshly built one — used when a model finishes
      loading after the fish already exist */
   rebuildMesh(){
-    if(this.mesh){scene.remove(this.mesh);}
-    this.mesh=makeTrout(this.len);scene.add(this.mesh);
+    /* REMOVE IT FROM WHEREVER IT IS, and put the new one back where the old
+       one lived. This said `scene.remove(this.mesh)` — and Object3D.remove()
+       only removes a child of the object you call it on, while the constructor
+       builds the mesh into `fishGroup`. So the old mesh was never removed at
+       all: it stayed in fishGroup, visible, frozen at the position it had when
+       the model finished loading, and the replacement went into the scene
+       instead. That is the procedural twin standing in the water beside your
+       asset fish and never swimming.
+
+       It is also the fish hanging in the air. buildFish() empties fishGroup on
+       a venue change, and the live meshes were no longer in it — so they were
+       never cleared, and they stayed at their old coordinates over a reach
+       with a different bed and a different surface. And every toggle of Use
+       model assets called this again, adding one more of each. */
+    if(this.mesh){
+      if(this.mesh.parent) this.mesh.parent.remove(this.mesh);
+      disposeTree(this.mesh);
+    }
+    this.mesh=makeTrout(this.len);
+    fishGroup.add(this.mesh);
   }
   reseat(){
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;

@@ -537,6 +537,44 @@ Recorded because each one was mis-diagnosed at least once.
    Both are real now, and with identity quaternions they are exact no-ops, so nothing
    that was passing changed.
 
+16. **The frozen twin, and the fish in the air.** Both the same line.
+   `Trout.rebuildMesh()` — which runs when the model finishes loading and on
+   every toggle of **Use model assets** — did `scene.remove(this.mesh)` on a
+   mesh the constructor had built into `fishGroup`. `Object3D.remove()` only
+   removes a child of the object you call it on, so **it removed nothing**: the
+   old mesh stayed in `fishGroup`, visible, frozen at whatever position it held
+   at that instant, while the replacement was added to the scene. That is the
+   procedural trout standing in the water beside the asset one and never
+   swimming. And because `buildFish()` empties `fishGroup` on a venue change
+   while the live meshes were no longer in it, they were never cleared either —
+   so they stayed at their old coordinates over a reach with a different bed.
+   That is the fish hanging in the air. Every asset toggle added one more of
+   each. Now: removed from whatever parent it actually has, disposed, and the
+   replacement goes back into `fishGroup`.
+
+17. **The Oreo.** The procedural trout's mouth was two fixed-radius ellipsoids:
+   the gape a sphere of 0.054 scaled 0.92 in z, so **0.0497 of half-width on a
+   snout whose half-width at that station is 0.0179**. Two point eight times
+   the width of the head it was mounted on, standing 32 mm proud on each side,
+   with a paler disc of the same kind beneath it — a dark biscuit held
+   crosswise in the mouth, which is precisely what it looked like. Both pieces
+   are now sized from `prof()`, the same profile the hull is swept from, at
+   their own station. The width factors (0.80, 0.74) are not taste: an
+   ellipsoid tapers as a circle and a snout tapers faster, so matching the
+   width at the centre still left the front third poking through the skin at
+   +1.7 mm. They are the largest factors that keep both pieces inside the hull
+   over their whole length. `smoke.mjs` sweeps them and checks it.
+
+18. **One eye, and nothing wrong with the eyes.** `trout.glb` has two eyes,
+   correctly mirrored, both double-sided, both with a positive determinant. The
+   **head** is what is lopsided: at the eye station the hull runs z −0.0411 to
+   +0.0622, so its midline sits at +0.0105 while the eyes are symmetric about
+   zero. That left the +z eye **18 mm under the skin** and the −z one standing
+   2.4 mm proud. Fixed by mirroring the buried eye about the head's own
+   midline — **one node translation in the GLB, BIN chunk byte-identical, not a
+   single vertex rewritten.** Both now stand 2.4 mm proud. `assetcheck.mjs` is
+   the guard, and it fails on the file as it shipped.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
@@ -553,11 +591,21 @@ actually caught the last undeclared variable.
 **And `remotecheck.mjs` for the phone page**, which has no simulation to fall over and so
 never appears in `smoke.mjs` — see section 4b.
 
+**And `assetcheck.mjs` for the models.** It parses the GLBs directly — no GPU, no
+loader, no headset — walks the node hierarchy, bakes the transforms and measures the
+result. Today it checks that both of the trout's eyes stand proud of a head that is not
+symmetric; the point is that a model fault is a measurable fact, not a matter of
+squinting at it in the headset.
+
 **A stub that answers wrongly is worse than one that throws.** Every one of the
 harness's worst misses has been this shape: the Proxy `has` trap that made every
 undeclared read resolve to `undefined`; `getWorldPosition()` returning a local position,
 so the rig could never move; `applyQuaternion()` returning its input, so the rod could
-never turn. None of them failed; all of them quietly reported health. When adding a stub, prefer
+never turn; `remove()` returning `this` and removing nothing, so no code that moves a
+mesh between parents could be checked at all. None of them failed; all of them quietly
+reported health. Three of the four were found while chasing a bug the harness should
+have caught years earlier. **When you add a stub, make it obviously incomplete rather
+than plausibly wrong.** When adding a stub, prefer
 one that is obviously incomplete to one that is plausibly wrong.
 
 **Therefore: run `smoke.mjs` before shipping.** It stubs Three.js and the DOM with real
