@@ -189,6 +189,9 @@ const P = {
   ripple:0.95, rippleSpan:60, rippleScale:1.7,
   ripOpacity:0.26, ripR:0, ripG:0, ripB:0, ripStain:1,
   riseAggro:0.35, wetShine:1, fishDetail:1,
+  fishSize:1,
+  /* which species are in the water, and whether they behave differently */
+  spRainbow:1, spBrown:1, spBrook:0, spCutt:0, spSalmon:0, spTraits:1,
   showZones:1, showMarkers:1,
   takeRadius:0.7, maxSlip:0.32, latTol:1.2, upMax:6,
   splashV:4.5, lineRad:0.5, spookT:5, fatigue:1,
@@ -349,6 +352,14 @@ const MENU=[
   ['Feeding chance','feedChance',0.00,1.00,0.05,'Odds a fish is actively feeding when he re-evaluates. Feeding fish are the catchable ones.'],
   ['Non-feeder mult','nonFeedMult',0.00,1.00,0.05,'Take chance multiplier for a fish that is not feeding.'],
   ['Fish power','fishPower',0.30,2.50,0.05,'How hard a hooked fish pulls and runs.'],
+  ['Fish size','fishSize',0.30,3.00,0.05,'Multiplier on the length of every fish in the reach, on top of the length the venue gives each lie and the size the species runs to. Weight follows length CUBED, off the same body mass the fight is fought with, so 1.5x length is a fish three and a half times heavier that pulls correspondingly harder \u2014 this is the one knob that changes the card, the fight and the silhouette together. 1.00 is the venue as tuned.'],
+  ['\u2014 SPECIES \u2014',null,0,0,0,''],
+  ['Rainbows','spRainbow',0,1,1,'Whether rainbow trout are in the water. The reference fish: heavy small spotting right down over the flank and onto the tail, a pink lateral band and a hot red gill plate. Every constant in the game was tuned against this one, so all the multipliers below are relative to a rainbow. Turn every species off and rainbows come back anyway \u2014 the river is never empty.'],
+  ['Browns','spBrown',0,1,1,'Whether brown trout are in the water. Buttery gold flanks, big black spots with pale halos and red-orange spots with blue halos along the side, a square unspotted tail. The wariest fish here: he refuses far more drifts, spooks off line and splash from further away, holds deeper and closer to the bottom, and runs bigger than a rainbow. Hooked, he bores DOWN and uses his weight instead of jumping.'],
+  ['Brookies','spBrook',0,1,1,'Whether brook trout are in the water. A char, not a trout: dark olive back with cream wavy vermiculation, red spots ringed in blue, orange flanks and white-edged lower fins. The smallest and most gullible fish in the game \u2014 he feeds more often, comes up for far more of what goes over him and refuses very little. Hooked, he is a short scrappy fight that tires fast.'],
+  ['Cutthroat','spCutt',0,1,1,'Whether cutthroat trout are in the water. Brassy gold with large dark spots crowding the rear third and the orange-red slash under the jaw. Famously willing on a dry fly \u2014 nearly as easy to fool as a brookie \u2014 but the rise is a slow deliberate sip rather than a slash, so he gives you time to strike too early. An ordinary fight.'],
+  ['Salmon','spSalmon',0,1,1,'Whether salmon are in the water. Chrome flanks over a blue-green back, sparse X-shaped spots above the lateral line and almost none below, a forked tail. He is not really feeding in fresh water, so takes are rare and mostly temper \u2014 but he is far and away the biggest and strongest fish here, and a hooked one makes long runs and repeated jumps. On a 5wt and a trout tippet he will break you off; raise Tippet strength or lower Fish power if you would rather land one.'],
+  ['Species traits','spTraits',0,1,1,'Whether the species differ in anything but paint. At 1 each one carries its own size, willingness, wariness, holding depth, rise style, strength and fight. At 0 every fish behaves exactly like a rainbow and the species are purely cosmetic, which is the setting to use when you are tuning the FISH numbers above and want one variable at a time.'],
   ['\u2014 STILLWATER \u2014',null,0,0,0,''],
   ['Fly sink m/s','flySink',0.00,1.20,0.02,'Terminal sink rate of the fly. At 0 the fly is a dry fly and rides the film exactly as it always has. Above 0 it sinks at this rate and takes line down with it — the film lets go from the fly BACKWARDS, up the tippet, then the leader, and finally a couple of metres of fly line before the line’s own float stops it. So the sag deepens into a curve as the fly goes down instead of dropping plumb off a line pinned flat, and the rest of the line stays on top. The pond ships at 0.32; a river venue ships at 0.'],
   ['Cruise speed','cruiseSpeed',0.10,3.00,0.10,'How fast a stillwater fish works its beat. Cruisers have no lie to hold, so this is what you are leading when you cast in front of one.'],
@@ -3015,6 +3026,11 @@ function placeTrees(){
 }
 
 let troutAsset=null;   /* set if a fish model is found */
+/* Species that have a model of their own. Anything missing falls back to the
+   generic 'trout' slot, and anything with neither stays procedural — so you
+   can drop in one salmon and leave the trout as they are. */
+const troutAssets={};
+const speciesAsset=sp=>troutAssets[sp.id]||troutAsset;
 
 /* ── MODEL ASSETS ─────────────────────────────────────────────────────────
    Every slot in the game that can take a model. Drop a file at one of these
@@ -3035,7 +3051,20 @@ const ASSET_SLOTS={
   tree:  {files:['tree1','tree2','tree3','trees'], fit:4.50,  axis:'y', kind:'scatter'},
   rock:  {files:['rock1','rock2','rocks'],         fit:0.55,  axis:'y', kind:'scatter'},
   bush:  {files:['bush1','bushes'],                fit:0.65,  axis:'y', kind:'scatter'},
-  trout: {files:['trout','fish'],                  fit:1.00,  axis:'x', kind:'trout'},
+  /* The fish. One slot per species, all normalised to a metre nose-to-tail
+     along X with the nose at -X and the back at +Y — the same frame the
+     procedural body uses, which is what lets a loaded model inherit the swim
+     shader untouched. A species with no file of its own falls back to 'trout',
+     and 'trout' itself is the rainbow. */
+  trout: {files:['trout','rainbow','rainbow-trout','fish'],
+                                                  fit:1.00,  axis:'x', kind:'trout'},
+  brown: {files:['brown-trout','browntrout','brown'],
+                                                  fit:1.00,  axis:'x', kind:'trout'},
+  brook: {files:['brook-trout','brooktrout','brook','brookie'],
+                                                  fit:1.00,  axis:'x', kind:'trout'},
+  cutthroat:{files:['cutthroat-trout','cutthroat','cutty'],
+                                                  fit:1.00,  axis:'x', kind:'trout'},
+  salmon:{files:['salmon','atlantic-salmon'],     fit:1.00,  axis:'x', kind:'trout'},
   reel:  {files:['reel'],                          fit:0.090, axis:'y', kind:'attach'},
   grip:  {files:['grip','handle'],                 fit:0.280, axis:'z', kind:'attach'},
   net:   {files:['net'],                           fit:0.560, axis:'z', kind:'attach'},
@@ -3157,15 +3186,10 @@ function applyAssetToggle(){
     group.visible=on;
     for(const ch of anchor.children) if(ch!==group) ch.visible=!on;
   }
-  if(troutAsset){
+  if(troutAsset||Object.keys(troutAssets).length){
     for(const f of fishes) f.rebuildMesh();
     /* the display fish is a plain mesh, not a Trout, so it needs its own swap */
-    if(pvFish){
-      const vis=pvFish.visible, pos=pvFish.position.clone();
-      scene.remove(pvFish);pvFish=null;
-      pvFishEnsure();
-      if(pvFish){pvFish.visible=vis;pvFish.position.copy(pos);}
-    }
+    pvFishReset();
   }
   placeTrees();placeRocks();
 }
@@ -3223,16 +3247,22 @@ async function loadSceneAssets(){
        exactly what the normaliser produces. The separate tail pivot is
        dropped — a real model has its tail attached, and the body wave carries
        it. Every fin and eye comes from the model, so nothing is added. */
-    const fv=await loadSlot('trout');
-    if(fv&&fv.length){
+    let fishModels=0;
+    for(const sp of SPECIES_ORDER){
+      const S=SPECIES[sp];
+      const fv=await loadSlot(S.slot);
+      if(!fv||!fv.length) continue;
       const G=fv[0];
-      troutAsset={geo:G.items[0].geo,mat:G.items[0].mat,extra:G.items.slice(1)};
+      const a={geo:G.items[0].geo,mat:G.items[0].mat,extra:G.items.slice(1)};
       /* shared by every fish built from the asset — see emptyGroup */
-      markShared(troutAsset.geo); markShared(troutAsset.mat);
-      for(const it of troutAsset.extra){ markShared(it.geo); markShared(it.mat); }
-      for(const f of fishes) f.rebuildMesh();
-      say('trout model loaded, '+G.tris+' tris');
+      markShared(a.geo); markShared(a.mat);
+      for(const it of a.extra){ markShared(it.geo); markShared(it.mat); }
+      troutAssets[S.id]=a;
+      if(S.id==='rainbow') troutAsset=a;       /* the fallback for the rest */
+      fishModels++;
+      say(S.label+' model loaded, '+G.tris+' tris');
     }
+    if(fishModels) for(const f of fishes) f.rebuildMesh();
 
     /* ── RIG PARTS ───────────────────────────────────────────────────────
        Static meshes hung on an anchor. The procedural version is hidden
@@ -4423,8 +4453,163 @@ function reskinVenueShaders(){
    work on. The gap was texture fidelity, and a canvas is nearly free. Both maps
    are generated here: base colour, and a normal map differenced from a height
    field carrying scale rows, spot relief and the lateral crease. */
+/* ── THE SPECIES ──────────────────────────────────────────────────────────
+   Five fish out of one body. Everything that differs between them lives in
+   this table and nowhere else: the paint, the shape of the tail, how deep
+   the body is, and the handful of multipliers that make a brown refuse what
+   a brookie eats. Add a sixth and the menu row, the texture, the mesh, the
+   phone panel and the trophy card all follow from the entry — there is no
+   second list to keep in step.
+
+   The UV runs AROUND the body: v=0 and v=1 are the dorsal midline, v=0.5 is
+   the belly, so the two flanks sit at v=0.25 and v=0.75 and `dB=|v-0.5|` is
+   how far up the flank a point is. dB>0.25 is above the lateral line. Every
+   paint pass below is written in those terms, which is why one routine can
+   put spots all over a rainbow and keep them off a salmon's belly.
+
+   THE BEHAVIOUR NUMBERS ARE ALL RELATIVE TO A RAINBOW, which is 1.00 across
+   the board — the reference fish every constant in the FISH tab was tuned
+   against. Species traits off makes every fish read these as 1.00. */
+const SPECIES={
+  rainbow:{
+    id:'rainbow', label:'rainbow', key:'spRainbow', slot:'trout',
+    body:{depth:1.00, tail:[[0,0],[0.13,0.115],[0.085,0],[0.13,-0.115],[0,0]]},
+    beh:{size:1.00,take:1.00,feed:1.00,rise:1.00,aggro:1.00,wary:1.00,deep:1.00,
+         power:1.00,tire:1.00,chase:1.00,fight:[1,1,1,1,1]},
+    paint:{
+      ramp:['#33452f','#3d5340','#5c7355','#8b9a89','#b3bcb0','#d6d8cd','#efe9dc'],
+      worm:{n:520,col:'#2b3a26',a:0.18,reach:0.30,len:[8,40],thick:[2,5]},
+      band:{col:[222,74,80],edge:[196,80,96],peak:0.88,half:42},
+      spot:{n:7200,dark:'#141d12',mid:'#232f1e',rMin:1.25,rVar:2.4,
+            rBack:0.80,rBackVar:1.9,halo:'soft',low:1.00,aft:0.58,belly:0.055,x:0},
+      red:null, pale:null,
+      cheek:{stops:[[0,'rgba(214,58,44,0.94)'],[0.34,'rgba(198,64,58,0.80)'],
+                    [0.68,'rgba(176,96,102,0.34)'],[1,'rgba(190,90,96,0)']],
+             rx:104,ry:74,sheen:0.30},
+      slash:null, chrome:0,
+      fin:{a:'#7d8763',b:'#6a7455',c:'#4d5740',ray:'rgba(40,48,36,0.40)',
+           fleck:'#1b2417',flecks:150,edge:null},
+      rough:0.34, metal:0.20 }
+  },
+  brown:{
+    id:'brown', label:'brown trout', key:'spBrown', slot:'brown',
+    /* square, essentially unspotted tail — the ID that carries at ten yards */
+    body:{depth:1.06, tail:[[0,0],[0.125,0.108],[0.115,0],[0.125,-0.108],[0,0]]},
+    /* The wary one. He refuses most of what a rainbow eats, is put down from
+       half again the distance, holds hard on the bottom, and fights by boring
+       DOWN rather than jumping. He also runs the biggest of the trout. */
+    beh:{size:1.20,take:0.62,feed:0.80,rise:0.70,aggro:0.75,wary:1.45,deep:1.35,
+         power:1.15,tire:0.85,chase:0.85,fight:[1.0,1.9,0.35,1.0,1.1]},
+    paint:{
+      ramp:['#3a3320','#4a4026','#6b5a2e','#977f3a','#c0a253','#dcc27a','#f0e6c4'],
+      worm:{n:260,col:'#2e2a18',a:0.10,reach:0.34,len:[10,34],thick:[2,5]},
+      band:null,
+      /* big spots, well spaced, each in a pale halo, and nearly none on the tail
+         end of the back — the opposite of a rainbow's crowded aft peppering */
+      spot:{n:2400,dark:'#20180e',mid:'#2c2416',rMin:2.0,rVar:3.2,
+            rBack:1.7,rBackVar:2.6,halo:'pale',low:0.75,aft:0.00,belly:0.075,x:0},
+      /* the red spots, ringed in pale blue, gathered along the lateral line */
+      red:{n:560,col:'#c2372b',halo:'rgba(158,186,208,0.60)',centre:0.25,spread:0.14,
+           rMin:1.6,rVar:1.9},
+      pale:null,
+      cheek:{stops:[[0,'rgba(190,150,58,0.70)'],[0.45,'rgba(176,142,64,0.42)'],
+                    [1,'rgba(170,140,70,0)']],rx:98,ry:70,sheen:0.16},
+      slash:null, chrome:0,
+      fin:{a:'#8a7434',b:'#6f5b28',c:'#4e401c',ray:'rgba(44,36,16,0.42)',
+           fleck:'#241c0e',flecks:70,edge:null},
+      rough:0.32, metal:0.16 }
+  },
+  brook:{
+    id:'brook', label:'brook trout', key:'spBrook', slot:'brook',
+    /* a char: deeper in the body, square tail, and the smallest fish here */
+    body:{depth:1.12, tail:[[0,0],[0.115,0.105],[0.108,0],[0.115,-0.105],[0,0]]},
+    /* Gullible and eager. He feeds more of the time, comes up for far more of
+       what goes over him, refuses very little — and is beaten in a minute. */
+    beh:{size:0.68,take:1.55,feed:1.30,rise:1.45,aggro:1.25,wary:0.70,deep:0.80,
+         power:0.75,tire:1.55,chase:1.35,fight:[0.7,0.9,0.5,1.3,1.6]},
+    paint:{
+      ramp:['#18251a','#213020','#2f4229','#4a5a34','#8a6a3c','#c06a34','#e08a4a'],
+      /* the signature: pale wavy worm-tracks over the back and the head */
+      worm:{n:900,col:'#cfd8b0',a:0.42,reach:0.26,len:[14,52],thick:[1.4,3.0],proud:1},
+      band:null,
+      spot:null,
+      /* red spots in blue haloes — the other half of the signature */
+      red:{n:420,col:'#d63a2e',halo:'rgba(96,140,210,0.78)',centre:0.24,spread:0.16,
+           rMin:1.8,rVar:2.0},
+      /* cream and yellow spots scattered over the olive flank */
+      pale:{n:1400,col:'#dde3a4',rMin:1.2,rVar:2.2,low:0.55},
+      cheek:{stops:[[0,'rgba(120,142,96,0.55)'],[0.5,'rgba(110,130,92,0.28)'],
+                    [1,'rgba(110,130,92,0)']],rx:96,ry:72,sheen:0.14},
+      slash:null, chrome:0,
+      /* white leading edge, then black, then orange — the char's lower fins */
+      fin:{a:'#c0632c',b:'#a04a24',c:'#6d3418',ray:'rgba(60,24,10,0.40)',
+           fleck:'#5e2a12',flecks:40,edge:'#f4efe2'},
+      rough:0.36, metal:0.12 }
+  },
+  cutthroat:{
+    id:'cutthroat', label:'cutthroat', key:'spCutt', slot:'cutthroat',
+    body:{depth:1.00, tail:[[0,0],[0.13,0.112],[0.09,0],[0.13,-0.112],[0,0]]},
+    /* Willing on a dry the way a brookie is, but the rise is a slow deliberate
+       sip rather than a slash — which is what makes him easy to strike early. */
+    beh:{size:0.95,take:1.30,feed:1.15,rise:1.25,aggro:0.55,wary:0.85,deep:0.95,
+         power:0.85,tire:1.20,chase:1.00,fight:[0.9,1.0,0.55,1.2,1.3]},
+    paint:{
+      ramp:['#3c4230','#4a5236','#6b6b3f','#96905a','#bfb384','#d8cfa8','#efe6cc'],
+      worm:{n:300,col:'#33361f',a:0.12,reach:0.32,len:[9,30],thick:[2,5]},
+      band:{col:[196,104,96],edge:[188,120,110],peak:0.34,half:38},
+      /* large spots that crowd the rear third and thin out ahead of the dorsal,
+         with very few below the lateral line */
+      spot:{n:2600,dark:'#161c10',mid:'#232a16',rMin:1.9,rVar:3.0,
+            rBack:1.5,rBackVar:2.4,halo:'none',low:0.35,aft:1.15,belly:0.07,x:0},
+      red:null, pale:null,
+      cheek:{stops:[[0,'rgba(194,90,62,0.55)'],[0.5,'rgba(186,110,80,0.28)'],
+                    [1,'rgba(186,110,80,0)']],rx:98,ry:70,sheen:0.22},
+      /* the cut: a red-orange bar under each side of the lower jaw */
+      slash:{col:'rgba(216,58,34,0.92)',x0:22,x1:112,v:[0.40,0.60],h:15},
+      chrome:0,
+      fin:{a:'#8f8a4e',b:'#6f6a38',c:'#4c4926',ray:'rgba(38,36,18,0.40)',
+           fleck:'#1e2212',flecks:90,edge:null},
+      rough:0.33, metal:0.22 }
+  },
+  salmon:{
+    id:'salmon', label:'salmon', key:'spSalmon', slot:'salmon',
+    /* sleeker through the body and the one forked tail in the game */
+    body:{depth:0.92, tail:[[0,0],[0.155,0.130],[0.070,0],[0.155,-0.130],[0,0]]},
+    /* He is not feeding in fresh water, so a take is temper rather than
+       hunger and comes rarely — but he is twice the fish and fights like it:
+       long runs, repeated jumps, and stamina a trout does not have. */
+    beh:{size:1.65,take:0.35,feed:0.45,rise:0.45,aggro:1.15,wary:1.10,deep:1.50,
+         power:1.75,tire:0.55,chase:1.20,fight:[2.2,0.9,2.0,0.7,0.5]},
+    paint:{
+      ramp:['#2b4358','#33546c','#4a7189','#7d9caa','#b4c6cc','#d8e2e4','#f2f4f2'],
+      worm:null, band:null,
+      /* sparse X-shaped spots, almost all of them above the lateral line */
+      spot:{n:900,dark:'#1a2630',mid:'#25313a',rMin:1.7,rVar:2.4,
+            rBack:1.5,rBackVar:2.0,halo:'none',low:0.06,aft:0.00,belly:0.10,x:1},
+      red:null, pale:null,
+      cheek:{stops:[[0,'rgba(70,92,108,0.42)'],[0.5,'rgba(96,118,132,0.20)'],
+                    [1,'rgba(96,118,132,0)']],rx:96,ry:70,sheen:0.42},
+      slash:null,
+      /* chrome. A fresh fish is a mirror, and this is most of what says so. */
+      chrome:0.55,
+      fin:{a:'#5c6f78',b:'#44565f',c:'#2e3c44',ray:'rgba(24,34,40,0.42)',
+           fleck:'#1a2630',flecks:40,edge:null},
+      rough:0.22, metal:0.45 }
+  },
+};
+const SPECIES_ORDER=['rainbow','brown','brook','cutthroat','salmon'];
+/* Traits off means every fish reads a rainbow's numbers. One place, so nothing
+   downstream has to remember to check the setting. */
+const RAINBOW_BEH=SPECIES.rainbow.beh;
+const beh=(f,k)=>P.spTraits>0.5?f.sp.beh[k]:RAINBOW_BEH[k];
+
 const TROUT_W=1024, TROUT_H=512;
-const troutMaps=(()=>{
+/* One species in, one pair of maps out: base colour, and a normal map
+   differenced from a height field carrying scale rows, spot relief and the
+   lateral crease. Built on demand — a river with two species in it pays for
+   two, not for five. */
+function troutMapsFor(sp){
+  const K=sp.paint;
   const W=TROUT_W,H=TROUT_H;
   const c=document.createElement('canvas');c.width=W;c.height=H;
   const g=c.getContext('2d');
@@ -4439,87 +4624,187 @@ const troutMaps=(()=>{
     }
   };
 
-  /* dorsal-to-belly gradient, countershaded the way a real fish is */
+  /* dorsal-to-belly gradient, countershaded the way a real fish is. Seven
+     bands from the dorsal midline down: the species table supplies the colours
+     and the shape of the ramp is common to all of them, because countershading
+     is not what tells two trout apart. */
+  const RB=K.ramp, CUT=[0.44,0.38,0.31,0.24,0.16,0.08];
   for(let y=0;y<H;y++){
     const v=y/H,dB=Math.abs(v-0.5);
-    let col;
-    if(dB>0.44)      col='#33452f';
-    else if(dB>0.38) col='#3d5340';
-    else if(dB>0.31) col='#5c7355';
-    else if(dB>0.24) col='#8b9a89';
-    else if(dB>0.16) col='#b3bcb0';
-    else if(dB>0.08) col='#d6d8cd';
-    else             col='#efe9dc';
-    g.fillStyle=col;g.fillRect(0,y,W,1);
+    let k=6; for(let j=0;j<6;j++) if(dB>CUT[j]){k=j;break;}
+    g.fillStyle=RB[k];g.fillRect(0,y,W,1);
   }
-  /* olive vermiculation over the back only */
-  g.globalAlpha=0.18;g.fillStyle='#2b3a26';
-  for(let i=0;i<520;i++){
-    const v=Math.random(),dB=Math.abs(v-0.5);
-    if(dB<0.30)continue;
-    const x=Math.random()*W,y=v*H,w=8+Math.random()*40,hh=2+Math.random()*5;
-    g.beginPath();g.ellipse(x,y,w,hh,Math.random()*0.6-0.3,0,Math.PI*2);g.fill();
-  }
-  g.globalAlpha=1;
-
-  /* the pink lateral stripe, brightest at the gill plate and fading to the tail */
-  for(const cv of [0.25,0.75]){
-    const y=cv*H,lg=g.createLinearGradient(0,y-42,0,y+42);
-    lg.addColorStop(0,'rgba(196,80,96,0)');
-    lg.addColorStop(0.30,'rgba(206,74,84,0.52)');
-    lg.addColorStop(0.5,'rgba(222,74,80,0.88)');
-    lg.addColorStop(0.70,'rgba(206,74,84,0.52)');
-    lg.addColorStop(1,'rgba(196,80,96,0)');
-    const hg=g.createLinearGradient(60,0,W,0);
-    hg.addColorStop(0,'rgba(255,255,255,1)');hg.addColorStop(1,'rgba(255,255,255,0)');
-    g.save();g.fillStyle=lg;g.fillRect(60,y-42,W-60,84);g.restore();
-    g.save();g.globalCompositeOperation='destination-out';g.restore();
-  }
-
-  /* Spotting on a rainbow is far heavier than the old pass allowed: small and
-     crowded over the back, continuing right down over the lateral band and
-     onto the caudal peduncle, thinning only on the belly. Density also rises
-     toward the tail, which is what makes the rear third read as a trout. */
-  for(let i=0;i<7200;i++){
-    const v=Math.random(),dB=Math.abs(v-0.5),u=Math.random();
-    if(dB<0.055)continue;                             /* clean belly         */
-    const rear=0.42+0.58*u;                           /* denser aft          */
-    const vertical=Math.min(1,(dB-0.045)*4.2);
-    if(Math.random()>vertical*rear)continue;
-    const x=52+u*(W-70),y=v*H;
-    const r=(dB>0.33?0.8:1.25)+Math.random()*(dB>0.33?1.9:2.4);
-    g.globalAlpha=0.42+Math.random()*0.48;
-    if(dB<0.34){
-      const hl=g.createRadialGradient(x,y,r*0.55,x,y,r*2.1);
-      hl.addColorStop(0,'rgba(24,34,22,0.80)');hl.addColorStop(1,'rgba(206,210,196,0)');
-      g.fillStyle=hl;g.beginPath();g.arc(x,y,r*2.1,0,Math.PI*2);g.fill();
+  /* vermiculation over the back: olive blotching on a rainbow, the pale wavy
+     worm-tracks that identify a brook trout, nothing at all on a salmon */
+  if(K.worm){
+    const wm=K.worm;
+    g.globalAlpha=wm.a;g.fillStyle=wm.col;
+    for(let i=0;i<wm.n;i++){
+      const v=Math.random(),dB=Math.abs(v-0.5);
+      if(dB<wm.reach)continue;
+      const x=Math.random()*W,y=v*H,
+            w=wm.len[0]+Math.random()*(wm.len[1]-wm.len[0]),
+            hh=wm.thick[0]+Math.random()*(wm.thick[1]-wm.thick[0]);
+      g.beginPath();g.ellipse(x,y,w,hh,Math.random()*0.6-0.3,0,Math.PI*2);g.fill();
+      if(wm.proud) bump(x,y,hh*1.6,0.16);   /* worm-tracks stand proud of the back */
     }
-    g.fillStyle=dB>0.36?'#141d12':'#232f1e';
-    g.beginPath();g.ellipse(x,y,r,r*0.80,Math.random()*1.5,0,Math.PI*2);g.fill();
-    bump(x,y,r*1.5,-0.30);
+    g.globalAlpha=1;
   }
-  g.globalAlpha=1;
+
+  /* the lateral stripe, brightest at the gill plate and fading to the tail.
+     A rainbow's is the loud pink one; a cutthroat carries a soft rose; a
+     brown, a brookie and a salmon have none. */
+  if(K.band){
+    const B=K.band, hf=B.half;
+    const rgb=B.col.join(','), eg=B.edge.join(',');
+    for(const cv of [0.25,0.75]){
+      const y=cv*H,lg=g.createLinearGradient(0,y-hf,0,y+hf);
+      lg.addColorStop(0,'rgba('+eg+',0)');
+      lg.addColorStop(0.30,'rgba('+eg+','+(B.peak*0.59).toFixed(2)+')');
+      lg.addColorStop(0.5,'rgba('+rgb+','+B.peak+')');
+      lg.addColorStop(0.70,'rgba('+eg+','+(B.peak*0.59).toFixed(2)+')');
+      lg.addColorStop(1,'rgba('+eg+',0)');
+      g.save();g.fillStyle=lg;g.fillRect(60,y-hf,W-60,hf*2);g.restore();
+    }
+  }
+
+  /* THE DARK SPOTS, and the pass that does most of the work of telling the
+     species apart. `low` is how far the spotting carries below the lateral
+     line — 1 on a rainbow, which is peppered right onto the belly, and 0.06
+     on a salmon, which is clean below it. `aft` is how much the density rises
+     toward the tail: flat on a brown, steep on a cutthroat, which is what
+     makes his rear third read the way it does. `x` draws the X-shaped spot
+     that is the salmon's own mark rather than a round one. */
+  if(K.spot){
+    const S=K.spot;
+    for(let i=0;i<S.n;i++){
+      const v=Math.random(),dB=Math.abs(v-0.5),u=Math.random();
+      if(dB<S.belly)continue;                           /* clean belly         */
+      const rear=(1-S.aft)+S.aft*u;                     /* denser aft          */
+      /* fade out below the lateral line at the species' own rate. At low=1 and
+         aft=0.58 this is exactly the rainbow pass this grew out of. */
+      const vertical=Math.min(1,(dB-S.belly*0.82)*4.2)*(dB>=0.25?1:S.low);
+      if(Math.random()>Math.max(0,vertical)*Math.max(0,rear))continue;
+      const x=52+u*(W-70),y=v*H;
+      const back=dB>0.33;
+      const r=(back?S.rBack:S.rMin)+Math.random()*(back?S.rBackVar:S.rVar);
+      g.globalAlpha=0.42+Math.random()*0.48;
+      if(S.halo==='soft'&&dB<0.34){
+        const hl=g.createRadialGradient(x,y,r*0.55,x,y,r*2.1);
+        hl.addColorStop(0,'rgba(24,34,22,0.80)');hl.addColorStop(1,'rgba(206,210,196,0)');
+        g.fillStyle=hl;g.beginPath();g.arc(x,y,r*2.1,0,Math.PI*2);g.fill();
+      } else if(S.halo==='pale'){
+        /* the brown's light ring — a real halo, painted under the spot */
+        const hl=g.createRadialGradient(x,y,r*0.9,x,y,r*2.3);
+        hl.addColorStop(0,'rgba(244,232,182,0.62)');
+        hl.addColorStop(1,'rgba(244,232,182,0)');
+        g.fillStyle=hl;g.beginPath();g.arc(x,y,r*2.3,0,Math.PI*2);g.fill();
+      }
+      g.fillStyle=dB>0.36?S.dark:S.mid;
+      if(S.x){
+        /* an X, drawn as two crossed bars at a random tilt */
+        g.save();g.translate(x,y);g.rotate(Math.random()*1.2-0.6);
+        g.fillRect(-r*1.5,-r*0.34,r*3,r*0.68);
+        g.fillRect(-r*0.34,-r*1.5,r*0.68,r*3);
+        g.restore();
+      } else {
+        g.beginPath();g.ellipse(x,y,r,r*0.80,Math.random()*1.5,0,Math.PI*2);g.fill();
+      }
+      bump(x,y,r*1.5,-0.30);
+    }
+    g.globalAlpha=1;
+  }
+
+  /* RED SPOTS IN HALOES. A brown's are red-orange in a pale blue ring; a
+     brook trout's are the same idea with a much stronger blue. Both gather
+     along the lateral line rather than scattering over the whole flank. */
+  if(K.red){
+    const R=K.red;
+    for(let i=0;i<R.n;i++){
+      const side=Math.random()<0.5?0.25:0.75;
+      const v=side+(Math.random()*2-1)*R.spread, u=Math.random();
+      if(v<0.02||v>0.98)continue;
+      const x=64+u*(W-90),y=v*H;
+      const r=R.rMin+Math.random()*R.rVar;
+      g.globalAlpha=0.55+Math.random()*0.40;
+      const hl=g.createRadialGradient(x,y,r*0.85,x,y,r*2.6);
+      hl.addColorStop(0,R.halo);hl.addColorStop(1,R.halo.replace(/[\d.]+\)$/,'0)'));
+      g.fillStyle=hl;g.beginPath();g.arc(x,y,r*2.6,0,Math.PI*2);g.fill();
+      g.fillStyle=R.col;
+      g.beginPath();g.ellipse(x,y,r,r*0.9,0,0,Math.PI*2);g.fill();
+      bump(x,y,r*1.4,0.18);
+    }
+    g.globalAlpha=1;
+  }
+
+  /* the brook trout's cream and yellow spots, scattered over the olive flank */
+  if(K.pale){
+    const Q=K.pale;
+    g.fillStyle=Q.col;
+    for(let i=0;i<Q.n;i++){
+      const v=Math.random(),dB=Math.abs(v-0.5),u=Math.random();
+      if(dB<0.09)continue;
+      if(dB<0.25&&Math.random()>Q.low)continue;
+      const x=52+u*(W-70),y=v*H,r=Q.rMin+Math.random()*Q.rVar;
+      g.globalAlpha=0.30+Math.random()*0.45;
+      g.beginPath();g.ellipse(x,y,r,r*0.85,Math.random()*1.5,0,Math.PI*2);g.fill();
+      bump(x,y,r*1.4,0.14);
+    }
+    g.globalAlpha=1;
+  }
 
   /* The gill plate. On a coloured-up rainbow this is the loudest thing on the
      fish — a hot red-orange cheek, brighter than the lateral band and sharply
-     bounded at the operculum. */
-  for(const cv of [0.25,0.75]){
-    const y=H*cv;
-    const gg=g.createRadialGradient(64,y,4,64,y,104);
-    gg.addColorStop(0,'rgba(214,58,44,0.94)');
-    gg.addColorStop(0.34,'rgba(198,64,58,0.80)');
-    gg.addColorStop(0.68,'rgba(176,96,102,0.34)');
-    gg.addColorStop(1,'rgba(190,90,96,0)');
-    g.fillStyle=gg;g.beginPath();g.ellipse(64,y,104,74,0,0,Math.PI*2);g.fill();
-    /* operculum edge */
-    g.strokeStyle='rgba(70,78,74,0.42)';g.lineWidth=3;
-    g.beginPath();g.ellipse(40,y,86,70,0,-1.15,1.15);g.stroke();
-    /* silver sheen over the top of it */
-    const sh=g.createLinearGradient(0,y-60,0,y+60);
-    sh.addColorStop(0,'rgba(196,208,214,0.30)');
-    sh.addColorStop(0.5,'rgba(226,232,232,0.10)');
-    sh.addColorStop(1,'rgba(196,208,214,0.28)');
-    g.fillStyle=sh;g.fillRect(0,y-60,150,120);
+     bounded at the operculum. On the others it is a brassy or olive wash, and
+     on a salmon it is chrome with a faint blue-grey shadow behind the jaw. */
+  if(K.cheek){
+    const C=K.cheek;
+    for(const cv of [0.25,0.75]){
+      const y=H*cv;
+      const gg=g.createRadialGradient(64,y,4,64,y,C.rx);
+      for(const [at,col] of C.stops) gg.addColorStop(at,col);
+      g.fillStyle=gg;g.beginPath();g.ellipse(64,y,C.rx,C.ry,0,0,Math.PI*2);g.fill();
+      /* operculum edge */
+      g.strokeStyle='rgba(70,78,74,0.42)';g.lineWidth=3;
+      g.beginPath();g.ellipse(40,y,86,70,0,-1.15,1.15);g.stroke();
+      /* silver sheen over the top of it */
+      const sh=g.createLinearGradient(0,y-60,0,y+60);
+      sh.addColorStop(0,'rgba(196,208,214,'+C.sheen.toFixed(2)+')');
+      sh.addColorStop(0.5,'rgba(226,232,232,'+(C.sheen*0.33).toFixed(2)+')');
+      sh.addColorStop(1,'rgba(196,208,214,'+(C.sheen*0.93).toFixed(2)+')');
+      g.fillStyle=sh;g.fillRect(0,y-60,150,120);
+    }
+  }
+
+  /* THE CUT. A red-orange bar under each side of the lower jaw, and the one
+     mark that names the fish on its own. */
+  if(K.slash){
+    const S=K.slash;
+    for(const cv of S.v){
+      const y=H*cv;
+      g.fillStyle=S.col;
+      g.beginPath();g.ellipse((S.x0+S.x1)/2,y,(S.x1-S.x0)/2,S.h,0.06*(cv<0.5?-1:1),0,Math.PI*2);
+      g.fill();
+      bump((S.x0+S.x1)/2,y,S.h*1.4,0.10);
+    }
+  }
+
+  /* CHROME. A fresh-run salmon is a mirror with a blue back, and a flat silver
+     wash over the whole flank is most of what says so — the countershading
+     underneath still shows through and keeps it from going to grey card. */
+  if(K.chrome>0){
+    const cg=g.createLinearGradient(0,0,0,H);
+    const a=K.chrome;
+    /* brightest on the two flanks at v=0.25 and 0.75, backing off over the
+       dark back and over a belly that is already white */
+    cg.addColorStop(0,'rgba(190,206,214,0)');
+    cg.addColorStop(0.25,'rgba(238,246,248,'+a.toFixed(2)+')');
+    cg.addColorStop(0.42,'rgba(226,238,242,'+(a*0.40).toFixed(2)+')');
+    cg.addColorStop(0.5,'rgba(226,238,242,'+(a*0.18).toFixed(2)+')');
+    cg.addColorStop(0.58,'rgba(226,238,242,'+(a*0.40).toFixed(2)+')');
+    cg.addColorStop(0.75,'rgba(238,246,248,'+a.toFixed(2)+')');
+    cg.addColorStop(1,'rgba(190,206,214,0)');
+    g.fillStyle=cg;g.fillRect(0,0,W,H);
   }
 
   /* scale rows: a diagonal lattice, relief only, no paint — paint at this pitch
@@ -4560,15 +4845,35 @@ const troutMaps=(()=>{
   nx2.putImageData(nimg,0,0);
   const nrm=new THREE.CanvasTexture(nc);
   return {base,nrm};
-})();
-const troutTex=troutMaps.base, troutNrm=troutMaps.nrm;
-const troutBodyMat=new THREE.MeshStandardMaterial({map:troutTex,normalMap:troutNrm,
-  normalScale:new THREE.Vector2(P.fishDetail,P.fishDetail),
-  roughness:0.34,metalness:0.20});
+}
+/* Built the first time a fish of that species is made, and kept. A reach with
+   two species in it pays for two sets of maps, not for five — which matters
+   because each one is a megapixel of canvas work at startup. */
+const _spBody={};
+function speciesBodyMat(sp){
+  let m=_spBody[sp.id];
+  if(!m){
+    const maps=troutMapsFor(sp);
+    m=new THREE.MeshStandardMaterial({map:maps.base,normalMap:maps.nrm,
+      normalScale:new THREE.Vector2(P.fishDetail,P.fishDetail),
+      roughness:sp.paint.rough,metalness:sp.paint.metal});
+    /* the per-fish swim materials are clones of this one and get disposed with
+       their mesh; this original is never in the scene and must survive that */
+    markShared(m); markShared(maps.base); markShared(maps.nrm);
+    _spBody[sp.id]=m;
+  }
+  return m;
+}
 /* a real trout holds by undulating, not by sitting rigid. Each fish gets its
    own material so it can carry its own phase, amplitude and beat rate. */
-function makeSwimMaterial(base){
-  const m=(base||troutBodyMat).clone();
+function makeSwimMaterial(base,sp){
+  const m=(base||speciesBodyMat(sp||SPECIES.rainbow)).clone();
+  /* a clone inherits userData BY REFERENCE, including the shared flag — which
+     would make every fish's material undisposable. It is its own material. */
+  m.userData={};
+  /* the dry finish this species starts from. Wetness moves AWAY from these, so
+     a chrome salmon does not come out of the water duller than it went in. */
+  m.userData.rough0=m.roughness; m.userData.metal0=m.metalness;
   m.normalScale=new THREE.Vector2(P.fishDetail,P.fishDetail);
   m.userData.wet=0;
   m.userData.u={uT:{value:Math.random()*10},uAmp:{value:1},uSpd:{value:3},uPh:{value:Math.random()*6.28}};
@@ -4591,37 +4896,58 @@ function makeSwimMaterial(base){
 }
 const SWIM={amp:0,spd:0};
 function swimPhase(mat,t){ return Math.sin(1.0*7.0-t*mat.userData.u.uSpd.value+mat.userData.u.uPh.value); }
-/* Fins on a rainbow carry the same spotting the back does, and are thin enough
-   to pass light. A tiny canvas gets both for one texture. */
-const finTex=(()=>{
+/* Fins carry the same spotting the back does, and are thin enough to pass
+   light. A tiny canvas gets both for one texture. The fin's own u runs along
+   the body, so a stripe at u=0 is a LEADING edge — which is how a brook trout
+   gets the white-then-black margin on its lower fins that names it as a char. */
+function finTexFor(sp){
+  const F=sp.paint.fin;
   const S=128,cv=document.createElement('canvas');cv.width=S;cv.height=S;
   const g=cv.getContext('2d');
   const bg=g.createLinearGradient(0,0,S,S);
-  bg.addColorStop(0,'#7d8763');bg.addColorStop(0.55,'#6a7455');bg.addColorStop(1,'#4d5740');
+  bg.addColorStop(0,F.a);bg.addColorStop(0.55,F.b);bg.addColorStop(1,F.c);
   g.fillStyle=bg;g.fillRect(0,0,S,S);
-  g.strokeStyle='rgba(40,48,36,0.40)';g.lineWidth=1.4;
+  g.strokeStyle=F.ray;g.lineWidth=1.4;
   for(let i=0;i<16;i++){                       /* fin rays */
     g.beginPath();g.moveTo(S*0.5,S);g.lineTo((i/15)*S*1.4-S*0.2,0);g.stroke();}
-  g.fillStyle='#1b2417';
-  for(let i=0;i<150;i++){
+  g.fillStyle=F.fleck;
+  for(let i=0;i<F.flecks;i++){
     g.globalAlpha=0.35+Math.random()*0.45;
     const x=Math.random()*S,y=Math.random()*S,r=0.8+Math.random()*1.8;
     g.beginPath();g.ellipse(x,y,r,r*0.85,0,0,Math.PI*2);g.fill();}
   g.globalAlpha=1;
+  if(F.edge){
+    g.fillStyle='rgba(20,16,12,0.75)';g.fillRect(S*0.10,0,S*0.10,S);
+    g.fillStyle=F.edge;g.fillRect(0,0,S*0.10,S);
+  }
   const t=new THREE.CanvasTexture(cv);t.colorSpace=THREE.SRGBColorSpace;return t;
-})();
-const finMat=new THREE.MeshStandardMaterial({map:finTex,vertexColors:true,
-  roughness:0.62,transparent:true,opacity:0.92,side:THREE.DoubleSide});
-/* body profile, shared by the mesh and by anything that has to sit ON the mesh */
+}
+const _spFin={};
+function speciesFinMat(sp){
+  let m=_spFin[sp.id];
+  if(!m){
+    m=new THREE.MeshStandardMaterial({map:finTexFor(sp),vertexColors:true,
+      roughness:0.62,transparent:true,opacity:0.92,side:THREE.DoubleSide});
+    /* one fin material per species, worn by every fish of it — emptying
+       fishGroup must not dispose it out from under the next one */
+    markShared(m); markShared(m.map);
+    _spFin[sp.id]=m;
+  }
+  return m;
+}
+/* body profile, shared by the mesh and by anything that has to sit ON the mesh.
+   `depth` is the species' body depth: a brookie is a deep little fish and a
+   salmon is a sleek long one, and the mouth, the eye and the fin stations all
+   come off the same profile, so they follow it without a second copy. */
 const prof=t=>{
   const base=Math.pow(Math.sin(Math.PI*Math.min(1,t*0.99+0.01)),0.62);
   const ped=t>0.78?1-((t-0.78)/0.22)*0.78:1;
   return base*ped;
 };
-function troutGeometry(){
+function troutGeometry(depth){
   const NX=30,NR=14,p=[],uv=[],idx=[];
   for(let i=0;i<=NX;i++){
-    const t=i/NX,h=0.125*prof(t),w=h*0.52,cx=(t-0.5)*1.0;
+    const t=i/NX,h=0.125*depth*prof(t),w=h*0.52,cx=(t-0.5)*1.0;
     for(let j=0;j<=NR;j++){
       const a=j/NR*Math.PI*2;
       p.push(cx,Math.cos(a)*h,Math.sin(a)*w);uv.push(t,j/NR);
@@ -4640,7 +4966,13 @@ function troutGeometry(){
   g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
   g.setIndex(idx);g.computeVertexNormals();return g;
 }
-const TROUT_GEO=markShared(troutGeometry());   /* one body, every fish */
+/* one body per body depth, shared by every fish that wears it */
+const _spGeo={};
+function speciesGeo(depth){
+  const k=depth.toFixed(3);
+  return _spGeo[k]||(_spGeo[k]=markShared(troutGeometry(depth)));
+}
+const TROUT_GEO=speciesGeo(1);
 function finShape(pts){
   const s=new THREE.Shape();s.moveTo(pts[0][0],pts[0][1]);
   for(let i=1;i<pts.length;i++)s.lineTo(pts[i][0],pts[i][1]);
@@ -4659,30 +4991,36 @@ function finShape(pts){
   uv.needsUpdate=true;
   return g;
 }
-function makeTrout(len){
+function makeTrout(len,sp){
+  sp=sp||SPECIES.rainbow;
+  const B=sp.body, dep=B.depth, finMat=speciesFinMat(sp);
   const g=new THREE.Group();
-  if(troutAsset&&useAssets()){
+  g.userData.species=sp.id;
+  const asset=speciesAsset(sp);
+  if(asset&&useAssets()){
     /* the model's own material inherits the swim shader, so a loaded fish
        still undulates and still goes glossy the moment it clears the water */
-    const mat=makeSwimMaterial(troutAsset.mat);
+    const mat=makeSwimMaterial(asset.mat,sp);
     g.userData.swim=mat;
-    g.add(new THREE.Mesh(troutAsset.geo,mat));
-    for(const it of troutAsset.extra) g.add(new THREE.Mesh(it.geo,it.mat));
+    g.add(new THREE.Mesh(asset.geo,mat));
+    for(const it of asset.extra) g.add(new THREE.Mesh(it.geo,it.mat));
     g.userData.tail={position:{z:0},rotation:{y:0}};   /* no separate tail */
     g.rotation.order='YZX';
     g.scale.setScalar(len);
     return g;
   }
-  const mat=makeSwimMaterial();
+  const mat=makeSwimMaterial(null,sp);
   g.userData.swim=mat;
-  g.add(new THREE.Mesh(TROUT_GEO,mat));
+  g.add(new THREE.Mesh(speciesGeo(dep),mat));
   const WHITE0=new THREE.Color(0xffffff);
   const tailPivot=new THREE.Group();tailPivot.position.x=0.485;
   /* Built through mergeGeos even though it is a single part, because finMat
      now carries vertexColors — a geometry with no colour attribute renders
      BLACK under that material, which is what the tail was doing. */
+  /* the tail is the species' own: square and barely notched on a brown or a
+     brookie, forked on a salmon. It is the ID that carries at ten yards. */
   tailPivot.add(new THREE.Mesh(mergeGeos([
-    {geo:finShape([[0,0],[0.13,0.115],[0.085,0],[0.13,-0.115],[0,0]]),
+    {geo:finShape(B.tail.map(q=>[q[0],q[1]*dep])),
      mat:new THREE.Matrix4(),col:WHITE0}]),finMat));
   g.add(tailPivot);g.userData.tail=tailPivot;
   /* Every fin that does not animate goes into ONE geometry, and so do all four
@@ -4701,16 +5039,18 @@ function makeTrout(len){
      shapes are drawn in XY with x running along the fish, so a dorsal, adipose,
      anal or pelvic fin needs NO rotation at all — same as the tail. Only the
      paired fins, which genuinely stick out sideways, get rotated. */
-  place(finShape([[-0.05,0],[0.02,0.090],[0.075,0]]),  0.02, 0.098,0, 0,0,0);   /* dorsal  */
-  place(finShape([[-0.02,0],[0,0.030],[0.024,0]]),     0.33, 0.070,0, 0,0,0);   /* adipose */
-  place(finShape([[-0.03,0],[0.01,-0.062],[0.052,0]]), 0.24,-0.073,0, 0,0,0);   /* anal    */
+  /* every median fin rides the body profile, so a deep-bodied brookie's fins
+     sit out on its own skin rather than half inside it */
+  place(finShape([[-0.05,0],[0.02,0.090*dep],[0.075,0]]),  0.02, 0.098*dep,0, 0,0,0);   /* dorsal  */
+  place(finShape([[-0.02,0],[0,0.030*dep],[0.024,0]]),     0.33, 0.070*dep,0, 0,0,0);   /* adipose */
+  place(finShape([[-0.03,0],[0.01,-0.062*dep],[0.052,0]]), 0.24,-0.073*dep,0, 0,0,0);   /* anal    */
   for(const s of [1,-1]){
     /* pectorals: swept back and angled down and out from behind the gill plate */
     place(finShape([[0,0],[0.075,-0.048],[0.095,0.012]]),
-          -0.235,-0.026,0.030*s, s*1.15,0,-0.28);
+          -0.235,-0.026*dep,0.030*s, s*1.15,0,-0.28);
     /* pelvics: smaller, lower, further aft */
     place(finShape([[0,0],[0.050,-0.034],[0.066,0.009]]),
-          -0.020,-0.080,0.024*s, s*1.32,0,-0.16);
+          -0.020,-0.080*dep,0.024*s, s*1.32,0,-0.16);
   }
   g.add(new THREE.Mesh(mergeGeos(finParts),finMat));
   /* The eye was at z=0.042 where the body is only 0.033 half-wide, so it hung
@@ -4720,7 +5060,7 @@ function makeTrout(len){
      single draw call. A trout's eye is a dark pupil in a brassy iris under a
      wet, almost mirror-like cornea, and the highlight is what makes it read as
      alive rather than as a painted dot. */
-  const eyeT=0.115, eyeH=0.125*prof(eyeT), eyeW=eyeH*0.52;
+  const eyeT=0.115, eyeH=0.125*dep*prof(eyeT), eyeW=eyeH*0.52;
   const IRIS=new THREE.Color(0xc0a049), PUPIL=new THREE.Color(0x080f0c),
         SPARK=new THREE.Color(0xffffff), GAPE=new THREE.Color(0x2a1417),
         LIP=new THREE.Color(0x6d6a58);
@@ -4765,13 +5105,13 @@ function makeTrout(len){
      inside the hull over their whole length, with a little margin. smoke.mjs
      sweeps them and checks it. */
   const gapeT=0.052, gapeHalf=0.048;
-  const gapeH=0.125*prof(gapeT);
+  const gapeH=0.125*dep*prof(gapeT);
   const gape=new THREE.Matrix4().makeRotationZ(-0.22);
   gape.multiply(new THREE.Matrix4().makeScale(gapeHalf,0.0115,gapeH*0.52*0.80));
   gape.setPosition(gapeT-0.5,-gapeH*0.10,0);
   headParts.push({geo:new THREE.SphereGeometry(1,12,8),mat:gape,col:GAPE});
   const jawT=0.045, jawHalf=0.042;
-  const jawH=0.125*prof(jawT);
+  const jawH=0.125*dep*prof(jawT);
   const jaw=new THREE.Matrix4().makeRotationZ(-0.16);
   jaw.multiply(new THREE.Matrix4().makeScale(jawHalf,0.0130,jawH*0.52*0.74));
   jaw.setPosition(jawT-0.5,-jawH*0.46,0);
@@ -4784,6 +5124,31 @@ function makeTrout(len){
 /* The lies are the venue's, so they move with it; `fishes` is kept as the same
    array object throughout because half the engine closes over it. */
 let LIES=SC.lies.map(l=>({x:l.x,z:CZ+l.z,len:l.len,cr:l.cr}));
+/* ── WHO IS IN WHICH LIE ──────────────────────────────────────────────────
+   A lie carries a fixed draw taken from where it is, so the same lie holds
+   the same fish across a rebuild, an asset load or a settings change. Turn a
+   species off and only the lies that held it change hands; the rest of the
+   reach stays exactly as you learned it. Turn everything off and rainbows
+   come back — an empty river is never what anybody meant. */
+/* An integer mix, NOT the sin-fract hash. `fract(sin(dot(p,k))*43758.5)` is a
+   GLSL trick that works because float32 wraps hard at that magnitude; run it
+   in doubles on coordinates a few metres apart and it barely moves — Cedar's
+   four lies drew 0.14, 0.01, 0.35, 0.16, so with all five species on the reach
+   still came out three rainbows and a brown. This is flat to within a
+   percentage point across the whole bed. */
+const lieDraw=l=>{
+  let h=Math.imul(Math.round(l.x*100)|0,374761393)+Math.imul(Math.round(l.z*100)|0,668265263);
+  h=Math.imul(h^(h>>>13),1274126177); h^=h>>>16;
+  return (h>>>0)/4294967296;
+};
+function enabledSpecies(){
+  const on=SPECIES_ORDER.filter(k=>P[SPECIES[k].key]>0.5);
+  return on.length?on:['rainbow'];
+}
+function speciesFor(l){
+  const on=enabledSpecies();
+  return SPECIES[on[Math.min(on.length-1,Math.floor(lieDraw(l)*on.length))]];
+}
 const fishes=[];
 const fishGroup=new THREE.Group();
 function makeMarker(){
@@ -4798,8 +5163,14 @@ function makeMarker(){
 }
 class Trout{
   constructor(l){
-    this.lie=new THREE.Vector3(l.x,0,l.z);this.len=l.len;
-    this.p=this.lie.clone();this.feeding=Math.random()<P.feedChance;
+    this.lie=new THREE.Vector3(l.x,0,l.z);
+    /* The venue sets how big a fish this lie holds; the species sets what it
+       runs to on top of that, and Fish size scales the whole reach. Weight
+       comes off `len` cubed, so all three land on the card and on the rod. */
+    this.sp=speciesFor(l);
+    this.baseLen=l.len;
+    this.len=l.len*this.sp.beh.size*Math.max(0.05,P.fishSize);
+    this.p=this.lie.clone();this.feeding=Math.random()<P.feedChance*this.sp.beh.feed;
     this.p.y=this.restY();
     this.state='holding';this.stamina=1;this.timer=0;
     this.feedT=4+Math.random()*8;
@@ -4816,14 +5187,16 @@ class Trout{
     this.beh='cruise';this.behT=0;this.effort=0.5;this.v=new THREE.Vector3();
     /* a cruiser works a circuit instead of holding a lie: [rx, rz, rad/s] */
     this.cr=l.cr||null; this.cruA=Math.random()*6.2832; this.cruHead=0; this.badT=0;
-    this.mesh=makeTrout(l.len);fishGroup.add(this.mesh);
+    this.mesh=makeTrout(this.len,this.sp);fishGroup.add(this.mesh);
     this.marker=makeMarker();fishGroup.add(this.marker);
   }
   restY(){
     const x=this.p?this.p.x:this.lie.x,z=this.p?this.p.z:this.lie.z;
     /* stillwater fish sit deeper than river fish, because nothing is
        delivering food to a fixed spot near the surface */
-    const hf=SC.holdDeep||1;
+    /* a brown lies hard on the bottom and a brookie hangs high in the water,
+       which is most of why one of them is easy to see and the other is not */
+    const hf=(SC.holdDeep||1)*beh(this,'deep');
     return surfY(x)-Math.min(0.42*hf,bedDepth(x,z)*(this.feeding?0.36:0.62)*hf);
   }
   newRunDir(){
@@ -4832,26 +5205,36 @@ class Trout{
     const an=Math.random()*Math.PI*2;
     this.run.set(ax*0.75+Math.cos(an)*0.85,0,az*0.75+Math.sin(an)*0.85).normalize();
   }
+  /* HOW HE FIGHTS. The five moves are the same for every fish; what differs
+     is how often he picks each one, which is the whole of the difference
+     between a salmon and a brookie on the end of a line. The rainbow's
+     weights ARE the numbers this always used — 0.28 run, 0.20 sound, 0.10
+     jump, 0.22 cruise, 0.20 easy — so with traits off nothing changes. */
   pickBehaviour(){
     const s=this.stamina, r=Math.random();
-    if(s<0.22){ this.beh=r<0.75?'easy':'cruise'; this.behT=1.6+Math.random()*2.2; }
-    else if(r<0.28){ this.beh='run';    this.behT=1.0+Math.random()*1.8; this.newRunDir(); }
-    else if(r<0.48){ this.beh='sound';  this.behT=1.2+Math.random()*1.6; }
-    else if(r<0.58&&s>0.5){
+    if(s<0.22){ this.beh=r<0.75?'easy':'cruise'; this.behT=1.6+Math.random()*2.2; say('fish: '+this.beh); return; }
+    const F=P.spTraits>0.5?this.sp.beh.fight:RAINBOW_BEH.fight;
+    const w=[0.28*F[0], 0.20*F[1], (s>0.5?0.10*F[2]:0), 0.22*F[3], 0.20*F[4]];
+    let tot=0; for(const q of w) tot+=q;
+    let pick=r*tot, k=0;
+    while(k<4&&pick>w[k]){pick-=w[k];k++;}
+    if(k===0){ this.beh='run';    this.behT=1.0+Math.random()*1.8; this.newRunDir(); }
+    else if(k===1){ this.beh='sound';  this.behT=1.2+Math.random()*1.6; }
+    else if(k===2){
       this.beh='jump'; this.behT=0.45; this.newRunDir();
       /* One impulse, then ballistic. The old version held 3.2x the swim force
          for 0.6 s, which is ~13 m/s at release and an apex near 8 m. */
       this.v.y=3.0+Math.random()*1.2;
       this.v.x+=this.run.x*1.1; this.v.z+=this.run.z*1.1;
     }
-    else if(r<0.80){ this.beh='cruise'; this.behT=1.0+Math.random()*1.6; this.newRunDir(); }
+    else if(k===3){ this.beh='cruise'; this.behT=1.0+Math.random()*1.6; this.newRunDir(); }
     else { this.beh='easy'; this.behT=1.0+Math.random()*1.6; }
     say('fish: '+this.beh);
   }
   /* Three rises, blended by the Rise style setting. A big fish leans toward
      head-and-tail on its own, because a big fish does. */
   startRise(){
-    const a=Math.max(0,Math.min(1,P.riseAggro))*(0.75+0.55*Math.min(1,this.len/0.42));
+    const a=Math.max(0,Math.min(1,P.riseAggro*beh(this,'aggro')))*(0.75+0.55*Math.min(1,this.len/0.42));
     const r=Math.random();
     this.riseKind = r<Math.max(0,0.92-a*1.25) ? 0 : (r<Math.max(0,0.99-a*0.62) ? 1 : 2);
     this.riseDur  = this.riseKind===0?1.05:this.riseKind===1?0.90:0.42;
@@ -4896,7 +5279,7 @@ class Trout{
     this.strikeT=0;this.broke=false;this.riseMark=0;
     this.strikeFrom.copy(this.p);this.strikePrev.copy(this.p);
     const d=Math.hypot(pos[0]-this.p.x,pos[2]-this.p.z);
-    const a=Math.max(0,Math.min(1,P.riseAggro))*(0.75+0.55*Math.min(1,this.len/0.42));
+    const a=Math.max(0,Math.min(1,P.riseAggro*beh(this,'aggro')))*(0.75+0.55*Math.min(1,this.len/0.42));
     const r=Math.random();
     this.riseKind=r<Math.max(0,0.92-a*1.25)?0:(r<Math.max(0,0.99-a*0.62)?1:2);
     /* a sip is a slow deliberate drift up; a slash is a charge */
@@ -4970,8 +5353,11 @@ class Trout{
     c.textAlign='center';
     c.fillStyle='#e8e3d4';c.font='700 40px "Space Mono",monospace';
     c.fillText(this.lengthIn().toFixed(1)+'″',W/2,54);
-    c.fillStyle='#9fb0ae';c.font='700 26px "Space Mono",monospace';
-    c.fillText(this.weightText(),W/2,94);
+    c.fillStyle='#9fb0ae';c.font='700 22px "Space Mono",monospace';
+    c.fillText(this.weightText(),W/2,86);
+    /* what he was, under what he weighed */
+    c.fillStyle='#b5713f';c.font='700 17px "Space Mono",monospace';
+    c.fillText(this.sp.label.toUpperCase(),W/2,108);
     c.textAlign='left';
     this.label.tex.needsUpdate=true;
     this.label.mesh.visible=true;
@@ -4989,7 +5375,7 @@ class Trout{
     let ax=this.p.x-rpos[0],az=this.p.z-rpos[2];
     const dl=Math.hypot(ax,az)||1;ax/=dl;az/=dl;
     const m=this.bodyMass();
-    const F=12*this.len*P.fishPower*(0.25+0.75*this.stamina);
+    const F=12*this.len*P.fishPower*beh(this,'power')*(0.25+0.75*this.stamina);
     let fx=0,fy=0,fz=0;
     switch(this.beh){
       case 'run':   fx=this.run.x*F*2.6; fz=this.run.z*F*2.6; this.effort=1.6; break;
@@ -5085,7 +5471,20 @@ class Trout{
     pos[0]=this.p.x;pos[1]=this.p.y;pos[2]=this.p.z;
     vel[0]=this.v.x;vel[1]=this.v.y;vel[2]=this.v.z;
   }
+  /* Fish size and the species' own size are LIVE: the slider moves and the
+     fish in the water grow, rather than waiting for a rebuild that would put
+     every one of them back in its lie and let a hooked one go. The scale IS
+     the length, so this is one number in two places. */
+  sizeSync(){
+    const want=this.baseLen*beh(this,'size')*Math.max(0.05,P.fishSize);
+    if(Math.abs(want-this.len)<1e-5) return;
+    this.len=want;
+    this.mesh.scale.setScalar(want);
+    /* the card cannot be allowed to disagree with the fish it sits under */
+    if(this.state==='landed'&&this.label) this.showLabel();
+  }
   update(dt,t){
+    this.sizeSync();
     if(this.state==='hooked'){
       /* p is integrated in step(); nothing to do here */
     } else if(this.state==='spooked'){
@@ -5168,7 +5567,7 @@ class Trout{
       }
     } else {
       this.feedT-=dt;
-      if(this.feedT<=0){this.feeding=Math.random()<P.feedChance;this.feedT=8+Math.random()*14;}
+      if(this.feedT<=0){this.feeding=Math.random()<P.feedChance*beh(this,'feed');this.feedT=8+Math.random()*14;}
       if(this.cr){
         /* A cruiser does not hold. He works a beat, and the cast has to go
            where he is going rather than where he is. */
@@ -5184,7 +5583,7 @@ class Trout{
       }
       let ty=this.restY();
       if(this.feeding){
-        this.riseT-=dt*P.riseRate*2;
+        this.riseT-=dt*P.riseRate*beh(this,'rise')*2;
         if(this.riseT<=0&&this.riseAnim<=0){this.startRise();this.riseT=2.5+Math.random()*5;}
       }
       if(this.riseAnim>0){
@@ -5292,9 +5691,9 @@ class Trout{
       const mat=m.userData.swim;
       const air=Math.max(0,Math.min(1,(this.p.y-(filmY(this.p.x,this.p.z,t)-0.02))*7));
       mat.userData.wet+=(air-mat.userData.wet)*Math.min(1,dt*(air>mat.userData.wet?14:1.6));
-      const w=mat.userData.wet*Math.max(0,P.wetShine);
-      mat.roughness=0.34-0.26*Math.min(1,w);
-      mat.metalness=0.20+0.30*Math.min(1,w);
+      const w=Math.min(1,mat.userData.wet*Math.max(0,P.wetShine));
+      mat.roughness=mat.userData.rough0*(1-0.76*w);
+      mat.metalness=mat.userData.metal0+(1-mat.userData.metal0)*0.375*w;
       if(mat.normalScale) mat.normalScale.set(P.fishDetail,P.fishDetail);
     }
     /* body wave: faster and wider when hooked, lazy while holding */
@@ -5318,7 +5717,9 @@ class Trout{
     this.marker.children[1].material.color.setHex(col);
   }
   spook(msg,mult){
-    this.state='spooked';this.timer=P.spookT*(mult||1);
+    /* a brown sulks half again as long as a rainbow; a brookie is back in
+       under a minute and eating again */
+    this.state='spooked';this.timer=P.spookT*(mult||1)*beh(this,'wary');
     if(hooked===this){hooked=null;fishTension=0;fishCarried=0;rebuildMasses();}
     say(msg);
   }
@@ -5343,8 +5744,18 @@ class Trout{
       if(this.mesh.parent) this.mesh.parent.remove(this.mesh);
       disposeTree(this.mesh);
     }
-    this.mesh=makeTrout(this.len);
+    this.mesh=makeTrout(this.len,this.sp);
     fishGroup.add(this.mesh);
+  }
+  /* Change what he IS without changing where he is or what he is doing. The
+     mesh is swapped the same way an asset load swaps it, so a fish you have
+     on turns into a brown mid-fight rather than coming off. */
+  setSpecies(sp){
+    if(sp===this.sp) return;
+    this.sp=sp;
+    this.len=this.baseLen*sp.beh.size*Math.max(0.05,P.fishSize);
+    this.rebuildMesh();
+    if(this.state==='landed'&&this.label) this.showLabel();
   }
   reseat(){
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
@@ -5356,6 +5767,19 @@ class Trout{
   }
 }
 scene.add(fishGroup);
+/* WHAT IS IN THE WATER. Toggling a species does not rebuild the reach — every
+   fish keeps its lie, its state and its stamina, and only the ones whose draw
+   now lands on a different species change hands. Cheap enough to call every
+   frame, and it has to be, because the phone can move these rows too. */
+let spSig=SPECIES_ORDER.map(k=>P[SPECIES[k].key]>0.5?1:0).join('');
+function syncSpecies(){
+  const sig=SPECIES_ORDER.map(k=>P[SPECIES[k].key]>0.5?1:0).join('');
+  if(sig===spSig) return;
+  spSig=sig;
+  const seen={};
+  for(const f of fishes){ const sp=speciesFor(f.lie); f.setSpecies(sp); seen[sp.id]=(seen[sp.id]||0)+1; }
+  say(SPECIES_ORDER.filter(k=>seen[k]).map(k=>seen[k]+' '+SPECIES[k].label).join(', '));
+}
 function buildFish(){
   hooked=null; fishHeld=null;
   emptyGroup(fishGroup);
@@ -5997,6 +6421,7 @@ function applyPreset(obj){
   afterSettingsChange();
 }
 function afterSettingsChange(){
+  syncSpecies();
   const oL=leadLen,oN=leadN,oT=leaderTot,oM=nodeLen;
   rebuildSpacing();
   if(nAct>2) redistribute(v=> v<=oT ? v/oL : oN+(v-oT)/oM);
@@ -6061,7 +6486,7 @@ function runAction(key){
       best.v.set(0,0,0);hooked=best;invM[0]=0;
       {const T=(RN-1)*3;
        lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.6);}
-      say('test fish on \u2014 '+(best.len*100).toFixed(0)+' cm');
+      say('test '+best.sp.label+' on \u2014 '+(best.len*100).toFixed(0)+' cm');
     } else say('no fish available to hook');
   }
   else if(key==='!record'){recOpen=!recOpen;rec.mesh.visible=recOpen;if(recOpen)recenterPanel(rec.mesh);say(recOpen?'recorder open':'recorder closed');}
@@ -6181,10 +6606,17 @@ function drawMenu(){
     const b=tabRect(i), on=i===selTab;
     c.fillStyle=on?'#3a2a1c':'#141d21';c.fillRect(b.x,b.y,b.w,b.h);
     if(on){c.fillStyle='#b5713f';c.fillRect(b.x,b.y+b.h-4,b.w,4);}
-    c.font='700 15px "Space Mono",monospace';
+    /* The bar divides the panel width by however many sections MENU has, so
+       every tab added narrows all of them. Shrink the type until the longest
+       name fits its own slot rather than running into the next one. */
+    let w=0;
+    for(const px of [15,13,11]){
+      c.font='700 '+px+'px "Space Mono",monospace';
+      w=c.measureText(TABS[i].name).width;
+      if(w<=b.w-10) break;
+    }
     c.fillStyle=on?'#e0a45e':'#7d8b8c';
-    const w=c.measureText(TABS[i].name).width;
-    c.fillText(TABS[i].name,b.x+Math.max(6,(b.w-w)/2),b.y+b.h/2+6);
+    c.fillText(TABS[i].name,b.x+Math.max(5,(b.w-w)/2),b.y+b.h/2+6);
   }
   const rows=TABS[selTab]?TABS[selTab].rows:[];
   for(const i of rows){
@@ -6520,6 +6952,11 @@ function onSettingChanged(key){
   if(key==='speckBudget') gsResizeWanted=true;
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
   if(key==='hudScale')hud.mesh.scale.setScalar(P.hudScale);
+  /* Which species are in the water, and whether they behave differently. Both
+     are cheap when nothing moved — syncSpecies compares a five-bit signature
+     first — and the display fish follows whatever is now in the river. */
+  if(key==='spTraits'||SPECIES_ORDER.some(k=>SPECIES[k].key===key)){ syncSpecies(); pvFishReset(); }
+  if(key==='fishSize') pvFishReset();
 }
 
 
@@ -7582,14 +8019,19 @@ renderer.setAnimationLoop(()=>{
           if(f.state!=='holding')continue;
           f.evaluated=false;
           let lined=false;
+          /* how far away line on the water puts him down is the species'
+             own: a brown reads a line half a rod length further off than a
+             brookie does, and that is most of what makes him hard */
+          const rad=P.lineRad*beh(f,'wary');
           for(let i=3;i<lastFree;i++){
             const p=i*3;
             if(pos[p+1]<filmY(pos[p],pos[p+2],simTime)+0.07&&
-               Math.hypot(pos[p]-f.p.x,pos[p+2]-f.p.z)<P.lineRad){lined=true;break;}
+               Math.hypot(pos[p]-f.p.x,pos[p+2]-f.p.z)<rad){lined=true;break;}
           }
           const near=Math.hypot(fx-f.p.x,fz-f.p.z);
-          if(lined) f.spook('lined one \u2014 put down',1);
-          else if(speed>P.splashV&&near<2.5) f.spook('splashed near a fish',0.7);
+          if(lined) f.spook('lined a '+f.sp.label+' \u2014 put down',1);
+          else if(speed>P.splashV/Math.max(0.2,beh(f,'wary'))&&near<2.5*beh(f,'wary'))
+            f.spook('splashed near a '+f.sp.label,0.7);
         }
       }
       driftT+=dt;driftAcc+=slip*dt;
@@ -7605,10 +8047,13 @@ renderer.setAnimationLoop(()=>{
       if(f.evaluated)continue;
       f.evaluated=true;
       const clean=avgSlip<P.maxSlip&&slip<P.maxSlip*0.9;
-      const chance=(f.feeding?1:P.nonFeedMult)*(clean?1:0.06);
+      /* Willingness is the species' own. A brookie eats over half again as
+         much of what goes over him as a rainbow; a brown refuses most of it
+         and a salmon is not feeding at all, so his takes are temper. */
+      const chance=(f.feeding?1:P.nonFeedMult)*(clean?1:0.06)*beh(f,'take');
       if(Math.random()<chance){
         f.beginStrike();pulse(0.35);
-      } else say(!clean?'drag \u2014 refused':(f.feeding?'he looked and passed':'that one isn\u2019t feeding'));
+      } else say(!clean?'drag \u2014 refused':(f.feeding?'the '+f.sp.label+' looked and passed':'that one isn\u2019t feeding'));
     }
   }
 
@@ -7637,7 +8082,7 @@ renderer.setAnimationLoop(()=>{
       if(f.state!=='holding'||!alive) continue;
       const d=Math.hypot(fx-f.p.x,fz-f.p.z);
       if(d>P.chaseRadius) continue;
-      const eager=(f.feeding?1:P.nonFeedMult)*(1-d/P.chaseRadius);
+      const eager=(f.feeding?1:P.nonFeedMult)*(1-d/P.chaseRadius)*beh(f,'chase');
       if(Math.random()<eager*P.chaseChance*dt){
         f.state='chasing'; f.badT=0; say('he\u2019s following it'); pulse(0.20);
       }
@@ -7650,7 +8095,7 @@ renderer.setAnimationLoop(()=>{
   }
   if(hooked){
     hooked.stamina=Math.max(0,hooked.stamina
-      -(M.tension*0.0060+hooked.effort*0.055)*P.fatigue*dt-dt*0.008);
+      -(M.tension*0.0060+hooked.effort*0.055)*P.fatigue*beh(hooked,'tire')*dt-dt*0.008);
     if(M.tension>P.tippet){
       hooked.spook('tippet popped',1);hooked=null;fishTension=0;fishCarried=0;rebuildMasses();pulse(1.0);
     } else if(netOn&&haveLeft){
@@ -7660,7 +8105,7 @@ renderer.setAnimationLoop(()=>{
         const f=hooked;
         hooked=null;fishTension=0;fishCarried=0;rebuildMasses();pulse(0.6);
         f.land();
-        say('netted him \u2014 '+f.lengthIn().toFixed(1)+' in, '+f.weightText());
+        say('netted a '+f.sp.label+' \u2014 '+f.lengthIn().toFixed(1)+' in, '+f.weightText());
       }
     }
     M.drift=0;
@@ -8254,16 +8699,34 @@ const PV_SEQ=[
   {k:'take',d:1.10,l:'swim to the fly and take'},
   {k:'swim',d:2.5,l:'holding'},
 ];
-let pvFish=null,pvPhase=0,pvPT=0,pvFishSpeed=1,pvFishYaw=0,pvLabel='';
+let pvFish=null,pvPhase=0,pvPT=0,pvFishSpeed=1,pvFishYaw=0,pvLabel='',pvSpecies=0;
 const pvBase=new THREE.Vector3();
+/* The display fish shows a species that is actually in the water, and steps
+   to the next one each time the sequence comes round — so with three species
+   on you can stand and look at all three without touching anything. */
+function pvSpeciesNow(){
+  const on=enabledSpecies();
+  return SPECIES[on[pvSpecies%on.length]];
+}
 function pvFishEnsure(){
   if(pvFish) return;
-  pvFish=makeTrout(0.36);
+  const sp=pvSpeciesNow();
+  pvFish=makeTrout(0.36*sp.beh.size*Math.max(0.05,P.fishSize),sp);
+  pvFish.userData.sp=sp.id;
   pvFish.rotation.order='YZX';
   /* just inside the near bank, at eye level, so you can walk round it */
   pvBase.set(0,1.12,CZ+SC.dz(0)+SC.hw(0)*0.92);
   pvFish.position.copy(pvBase);
   scene.add(pvFish);
+}
+/* rebuild it where it stands — used when the species in the water change, or
+   when Fish size moves and the display fish has to grow with the river */
+function pvFishReset(){
+  if(!pvFish) return;
+  const vis=pvFish.visible, pp=pvFish.position.clone();
+  scene.remove(pvFish); disposeTree(pvFish); pvFish=null;
+  pvFishEnsure();
+  if(pvFish){pvFish.visible=vis;pvFish.position.copy(pp);}
 }
 function pvFishUpdate(dt,t){
   if(!pvFish) return;
@@ -8302,16 +8765,21 @@ function pvFishUpdate(dt,t){
   /* wetness: it is in the air, so it should read as just out of the water */
   if(mat.userData.wet!==undefined){
     mat.userData.wet=1;
-    const wv=Math.max(0,P.wetShine);
-    mat.roughness=0.34-0.26*Math.min(1,wv);
-    mat.metalness=0.20+0.30*Math.min(1,wv);
+    const wv=Math.min(1,Math.max(0,P.wetShine));
+    mat.roughness=mat.userData.rough0*(1-0.76*wv);
+    mat.metalness=mat.userData.metal0+(1-mat.userData.metal0)*0.375*wv;
   }
   pvFish.position.set(pvBase.x-Math.sin(pvFishYaw)*fwd,
                       pvBase.y+lift,
                       pvBase.z-Math.cos(pvFishYaw)*fwd);
   pvFish.rotation.set(roll,pvFishYaw,-pitch);
-  pvLabel=ph.l;
-  if(pvPT>=ph.d){pvPT=0;pvPhase=(pvPhase+1)%PV_SEQ.length;}
+  pvLabel=pvSpeciesNow().label+' \u2014 '+ph.l;
+  if(pvPT>=ph.d){
+    pvPT=0;pvPhase=(pvPhase+1)%PV_SEQ.length;
+    /* one full pass of every animation, then hand over to the next species
+       that is actually in the water */
+    if(pvPhase===0&&enabledSpecies().length>1){ pvSpecies++; pvFishReset(); }
+  }
 }
 
 function previewUpdate(dt){
