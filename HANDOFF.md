@@ -181,10 +181,63 @@ chain — explicitly not a physical force, present only to kill discretisation j
 
 ### 2.7 Fish
 
-Four rainbow trout, procedurally generated: swept-ellipse body with clean UVs, a canvas
-texture with olive back, silver flanks, the pink lateral stripe and depth-graded spots, plus
-forked caudal, dorsal, adipose, anal and pectoral fins. A travelling sine wave runs down each
-body via a per-fish vertex shader, with the tail riding the same wave.
+Four to six fish per venue, procedurally generated: swept-ellipse body with clean UVs, a
+canvas texture, plus caudal, dorsal, adipose, anal, pectoral and pelvic fins. A travelling
+sine wave runs down each body via a per-fish vertex shader, with the tail riding the same
+wave.
+
+**Fish size** (`fishSize`) multiplies the length of every fish in the reach, on top of the
+length the venue gives each lie and the size the species runs to. It is live — the slider
+moves and the fish in the water grow, rather than waiting for a rebuild that would put every
+one of them back in its lie and drop a fish you had on. The mesh scale **is** the length,
+and weight comes off `bodyMass()`, which is length **cubed**, so the card under a landed
+fish and what the rod feels can never disagree with each other.
+
+### 2.7a The five species
+
+`SPECIES` in section 5 is the whole of the difference between them: the paint, the tail
+shape, the body depth, and eleven behaviour multipliers. Add a sixth entry and the menu row,
+the texture, the mesh, the phone panel, the trophy card and the asset slot all follow from
+it — there is no second list to keep in step.
+
+Which lie holds which fish comes from a **fixed draw taken from where the lie is**, so the
+same lie holds the same fish across a rebuild, an asset load or a settings change. Turn a
+species off and only the lies that held it change hands; the rest of the reach stays exactly
+as you learned it. Turn every species off and rainbows come back — an empty river is never
+what anybody meant. `syncSpecies()` swaps a fish's species **in place**: it keeps its lie,
+its state and its stamina, so a fish you have on turns into a brown mid-fight rather than
+coming off.
+
+The UV runs **around** the body: v=0 and v=1 are the dorsal midline, v=0.5 is the belly, so
+the two flanks sit at v=0.25 and v=0.75 and `dB=|v−0.5|` is how far up the flank a point is.
+`dB>0.25` is above the lateral line. Every paint pass is written in those terms, which is
+what lets one routine pepper a rainbow all over and keep a salmon's belly clean.
+
+| | paint that identifies it | size | how it behaves |
+|---|---|---|---|
+| **rainbow** | heavy fine spotting right down over the flank and onto the tail, pink lateral band, hot red gill plate | 1.00 | the reference fish — every FISH constant was tuned against it, and all the multipliers below are relative to it |
+| **brown** | buttery gold, big black spots in pale halos, red spots in blue halos along the lateral line, square unspotted tail | 1.20 | takes 0.62 — refuses most of what a rainbow eats. Wary 1.45: put down from half again the distance, and sulks that much longer. Holds 1.35 deeper. Bores **down** rather than jumping |
+| **brook** | dark olive back with cream vermiculation, red spots in strong blue halos, orange belly, white-edged lower fins | 0.68 | takes 1.55, feeds 1.30, rises 1.45 — the gullible one. Tires 1.55: a short scrappy fight |
+| **cutthroat** | brassy gold, large spots crowding the rear third, the red-orange slash under the jaw | 0.95 | takes 1.30, but rise style 0.55 — willing, and the rise is a slow deliberate sip rather than a slash |
+| **salmon** | chrome over a blue-green back, sparse X-shaped spots above the lateral line and almost none below, forked tail | 1.65 | takes 0.35 — he is not feeding in fresh water, so a take is temper. Power 1.75, tires 0.55, and the fight weights are run and jump. **He will break a trout tippet**; raise `tippet` or lower `fishPower` to land one |
+
+**Species traits** (`spTraits`) at 0 makes every fish read a rainbow's numbers, so the
+species go purely cosmetic. That is the setting to use when tuning the FISH rows — one
+variable at a time.
+
+Each species has a **model slot of its own**, all normalised to a metre nose-to-tail along X
+with the nose at −X and the back at +Y, which is the frame the procedural body uses and the
+reason a loaded model inherits the swim shader untouched. Drop any of these into `assets/`
+and it is used; leave it out and that species stays procedural. A species with no file of
+its own falls back to the generic `trout` slot.
+
+| species | file, `.glb` tried before `.gltf` |
+|---|---|
+| rainbow | `trout` · `rainbow` · `rainbow-trout` · `fish` |
+| brown | `brown-trout` · `browntrout` · `brown` |
+| brook | `brook-trout` · `brooktrout` · `brook` · `brookie` |
+| cutthroat | `cutthroat-trout` · `cutthroat` · `cutty` |
+| salmon | `salmon` · `atlantic-salmon` |
 
 **Fighting a hooked fish.** Pull scales with length: roughly `12·len·power` newtons steady,
 with a run multiplying that by 2.6 and a jump by 3.2. A 40 cm rainbow therefore pulls ~5 N

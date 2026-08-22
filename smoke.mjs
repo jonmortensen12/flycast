@@ -1320,4 +1320,99 @@ if(!rem.chunked.whole||rem.chunked.parts<2||rem.chunked.rows<100||rem.chunked.ta
    !rem.inMenu.code||!rem.inMenu.url)
   console.log('  *** PHONE REMOTE FAILURE ***');
 
+/* ── the species ─────────────────────────────────────────────────────────
+   Five fish out of one body, and the failures worth guarding are the quiet
+   ones: a paint pass that throws only for the species nobody has turned on
+   yet, a mesh swap that leaves the old body in the group (which is exactly
+   what the asset rebuild got wrong once), a river emptied by turning every
+   box off, and a size slider that moves the fish but not the card. */
+const spec=vm.runInContext(`(()=>{
+  const before={}; for(const k in P) before[k]=P[k];
+  const keys=SPECIES_ORDER.map(k=>SPECIES[k].key);
+
+  /* every species paints, meshes, and swims a frame on its own */
+  const built=[], errs=[];
+  for(const id of SPECIES_ORDER){
+    for(const k of keys) P[k]=0;
+    P[SPECIES[id].key]=1;
+    try{
+      syncSpecies();
+      const kinds=[...new Set(fishes.map(f=>f.sp.id))];
+      built.push(id+' x'+fishes.length);
+      if(kinds.length!==1||kinds[0]!==id) errs.push(id+' got '+kinds.join('+'));
+      for(const f of fishes) f.update(1/72,1.0);
+    }catch(e){ errs.push(id+': '+e.message); }
+  }
+
+  /* turn everything off and the river is still not empty */
+  for(const k of keys) P[k]=0;
+  syncSpecies();
+  const noneOn=fishes.length>0&&fishes.every(f=>f.sp.id==='rainbow');
+
+  /* mixed water, and a lie that keeps its fish across a re-sync */
+  for(const k of keys) P[k]=1;
+  syncSpecies();
+  const mix=fishes.map(f=>f.sp.id);
+  const allOn=mix.every(id=>SPECIES_ORDER.indexOf(id)>=0);
+  syncSpecies();
+  const stable=fishes.every((f,i)=>f.sp.id===mix[i]);
+
+  /* THE DRAW MUST ACTUALLY SPREAD. A sin-fract hash passed every check above
+     and still put three rainbows and a brown in a reach with five species
+     turned on, because in double precision it barely moves between lies a few
+     metres apart. Bucket the whole bed and demand something near flat. */
+  const bins=new Array(SPECIES_ORDER.length).fill(0); let n=0;
+  for(let x=-48;x<=48;x+=0.5) for(let z=-14;z<=14;z+=0.5){
+    bins[Math.min(bins.length-1,Math.floor(lieDraw({x,z})*bins.length))]++; n++;
+  }
+  const spread=+((Math.max(...bins)-Math.min(...bins))/n).toFixed(4);
+  /* and on the reach in front of you, more than one species actually shows up */
+  const kindsHere=new Set(mix).size;
+
+  /* swapping species over and over must not grow the group */
+  const kids0=fishGroup.children.length;
+  for(let i=0;i<4;i++){ P.spBrown=i%2; P.spSalmon=(i+1)%2; syncSpecies(); }
+  const kids1=fishGroup.children.length;
+
+  /* a fish you have ON stays on through a species change */
+  for(const k of keys) P[k]=1; syncSpecies();
+  const f0=fishes[0]; f0.state='hooked'; f0.stamina=0.6; hooked=f0;
+  P.spBrook=0; syncSpecies(); P.spBrook=1; syncSpecies();
+  const kept=f0.state==='hooked'&&Math.abs(f0.stamina-0.6)<1e-9&&hooked===f0;
+  f0.state='holding'; hooked=null;
+
+  /* Fish size is live, the mesh scale IS the length, and weight follows it
+     CUBED — the card cannot disagree with what the rod feels */
+  P.fishSize=1; for(const f of fishes) f.sizeSync();
+  const l1=fishes[0].len, w1=fishes[0].weightOz();
+  P.fishSize=2; for(const f of fishes) f.sizeSync();
+  const l2=fishes[0].len, w2=fishes[0].weightOz(), s2=fishes[0].mesh.scale.x;
+  P.fishSize=1; for(const f of fishes) f.sizeSync();
+  const size={len:+(l2/l1).toFixed(3), wt:+(w2/w1).toFixed(2),
+              scale:+(s2/l2).toFixed(3), back:+(fishes[0].len/l1).toFixed(3)};
+
+  /* traits off means every fish reads a rainbow, traits on means it does not */
+  P.spTraits=0;
+  const flat=SPECIES_ORDER.every(id=>Object.keys(RAINBOW_BEH).every(
+    k=>k==='fight'||beh({sp:SPECIES[id]},k)===RAINBOW_BEH[k]));
+  P.spTraits=1;
+  const varied=beh({sp:SPECIES.brown},'take')!==beh({sp:SPECIES.brook},'take');
+
+  /* and each one is reachable from the menu, so the phone gets it too */
+  const rows=SPECIES_ORDER.every(id=>MENU.some(r=>r[1]===SPECIES[id].key)
+                                     &&(SPECIES[id].key in P));
+  const sizeRow=MENU.some(r=>r[1]==='fishSize')&&('fishSize' in P);
+
+  applyPreset(before);
+  return {built, errs, noneOn, allOn, stable, spread, kindsHere,
+          kids:[kids0,kids1], kept, size, flat, varied, rows, sizeRow};
+})()`,sandbox);
+console.log('the species',spec);
+if(spec.errs.length||!spec.noneOn||!spec.allOn||!spec.stable||
+   spec.spread>0.03||spec.kindsHere<2||
+   spec.kids[0]!==spec.kids[1]||!spec.kept||
+   spec.size.len!==2||Math.abs(spec.size.wt-8)>0.05||spec.size.scale!==1||
+   spec.size.back!==1||!spec.flat||!spec.varied||!spec.rows||!spec.sizeRow)
+  console.log('  *** SPECIES FAILURE ***');
+
 console.log('OK');
