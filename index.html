@@ -256,7 +256,7 @@ const MENU=[
   ['Line level','volLine',0.00,1.50,0.05,'Air noise off the line during the stroke. Brightness and loudness both follow rod tip speed.'],
   ['Splash level','volSplash',0.00,1.50,0.05,'The fly hitting the water, a fish rising, and a hooked fish breaking the surface.'],
   ['— PLAYER —',null,0,0,0,''],
-  ['Teleport move','teleport',0,1,1,'1 moves you the way most headset games do: push the left stick forward and an arc comes off your left hand with a ring where it lands, let go and you blink to it. Green ring means you can stand there; red means the water is over your chest, or there is a boulder in the way. Pushing the stick hard left or right snaps you round by Snap turn instead. 0 goes back to sliding the stick around, which is smoother to fish from and rougher on the stomach.'],
+  ['Teleport move','teleport',0,1,1,'1 moves you the way most headset games do: push the left stick forward and an arc comes off your left hand with a ring where it lands, let go and you blink to it. Green ring means you can stand there; red means the water is over your chest, or there is a boulder in the way. Pushing the stick hard left or right snaps you round by Snap turn instead. 0 goes back to sliding the stick around, which is smoother to fish from and rougher on the stomach. Either way the rod and the line come with you: a hop moves your whole rig of tackle by the same step on the same frame, so the line never gets yanked and a fish you are playing stays on.'],
   ['Teleport range m','tpRange',3.00,20.0,1.00,'How far a hop can carry. This is the arc’s launch speed, not a leash — aim higher and it simply falls short of anything past this, exactly like a thrown line. Nine metres is about five wading paces.'],
   ['Snap turn °','snapTurn',0.00,45.0,15.0,'How far a hard push left or right on the stick turns you, with teleport movement on. Snapping instead of sweeping is what keeps turning comfortable when you are not walking. 0 turns it off and leaves you turning with your feet.'],
   ['Move speed','moveSpeed',0.40,4.00,0.10,'Walking speed on the left stick, with teleport movement off. Deep water slows you regardless.'],
@@ -6856,6 +6856,90 @@ function snapTurn(rad){
   player.position.z=_camWorld.z-dx*s+dz*c;
   player.rotation.y+=rad;
 }
+/* ── the tackle comes with you ───────────────────────────────────────────
+   A hop is not travel. Nothing accelerated and nothing was thrown; the angler
+   is simply somewhere else on the next frame. But the ROD is in their hands,
+   so the rod is somewhere else too — and the solver reads velocity out of
+   consecutive positions, so a rig that moves eight metres between one frame
+   and the next hands the rod butt about 3500 m/s and every guide drags the
+   line after it.
+
+   Measured before this existed, 7.4 m of line on the water and an 8 m hop:
+   a segment stretched to 6.6x its material length, line nodes hit 134 m/s
+   against sanity()'s 140 m/s clamp, 3.4 m of line was ripped back in through
+   the guides — and the fly was dragged the whole way to the new position
+   anyway. That last one is the tell. The tackle came with you regardless; it
+   just arrived through the solver as violence.
+
+   So bring it deliberately. Shift the rod, the line and whatever is on the
+   end of it by the same offset the rig moved, on the same frame, while the
+   screen is black. The whole configuration is preserved, so not one
+   constraint is violated and no energy is created — the cost is one pass
+   over ~120 nodes on a frame nobody sees.
+
+   Velocities are deliberately NOT touched: a rigid translation implies no
+   velocity, and line that was drifting downstream still is. `prd`/`rprd` are
+   not touched either — both are scratch, rewritten from `pos`/`rpos` at the
+   top of every substep before anything reads them.
+
+   A SNAP TURN was measured the same way and does not need this. Thirty
+   degrees about the head sweeps the tiptop far less than a hop moves it, and
+   it costs x1.17 stretch and 0.5 N — inside the range ordinary rod movement
+   produces. Do not "fix" it on a hunch; measure it again first. */
+function carryTackle(dx,dz){
+  if(!dx&&!dz) return;
+  for(let i=0;i<RN;i++){const p=i*3; rpos[p]+=dx; rpos[p+2]+=dz;}
+  for(let i=0;i<nAct;i++){const p=i*3; pos[p]+=dx; pos[p+2]+=dz;}
+  /* The river runs downhill. Eight metres upstream the surface can sit 28 cm
+     higher than the water you left, so line carried rigidly arrives that far
+     UNDER the new film and pops back up — and on 3 cm leader nodes that alone
+     was the whole of the residual transient after the yank was gone. Give the
+     FREE line its local change in surface height too, tapered to nothing over
+     the last 1.2 m of arc before the tiptop so the guided end stays welded to
+     a rod that did not move vertically at all. The belly between the
+     stripping guide and the reel is left rigid: it hangs off the rod, not off
+     the river. */
+  for(let i=0;i<nAct;i++){
+    const sA=sArc(i); if(sA>=lineOut) break;
+    const p=i*3, w=Math.min(1,(lineOut-sA)/1.2);
+    pos[p+1]+=(surfY(pos[p])-surfY(pos[p]-dx))*w;
+  }
+  /* The BED moved further than the surface did — 70 cm over that same hop —
+     so a sunk fly or a line lying on the gravel arrives inside it, and
+     waterAndGround would evict it in one substep at a few hundred metres a
+     second. Lift it out here instead, where a position is just a position and
+     no velocity is read from the change. */
+  for(let i=0;i<nAct;i++){
+    const p=i*3, b=bedY(pos[p],pos[p+2])+0.01;
+    if(pos[p+1]<b) pos[p+1]=b;
+  }
+  /* The hand target physics interpolates FROM. Leave this behind and the
+     substep loop still drives the butt across the whole hop, which is not a
+     side effect of the yank — it IS the yank. */
+  _p0.x+=dx;_p0.z+=dz;_p1.x+=dx;_p1.z+=dz;
+  updateGuidePositions();
+  if(hooked){
+    /* A played fish is on the end of the line, so it is part of what you are
+       holding. It must not be carried onto the grass, though: if the reach
+       has bent away under the hop, put him back in the channel at the station
+       he now finds himself at rather than beaching him or breaking him off. */
+    hooked.p.x+=dx; hooked.p.z+=dz;
+    if(surfY(hooked.p.x)-bedY(hooked.p.x,hooked.p.z)<=0.10){
+      hooked.p.z=CZ+SC.dz(hooked.p.x);
+      hooked.p.y=hooked.restY();
+    }
+  }
+  /* A fish that had committed to the fly did not commit to it over there. */
+  for(const f of fishes) if(f.state==='striking'||f.state==='chasing') f.reseat();
+  /* The drift being judged was a drift through different water. */
+  driftAcc=0;driftT=0;
+  /* And if the fly has come ashore there is nothing left to fish: put the
+     line back at your feet rather than leave it draped over the bank. */
+  if(!hooked&&surfY(pos[0])-bedY(pos[0],pos[2])<=0.02){
+    resetCast(); say('line came ashore \u2014 recast');
+  }
+}
+
 /* The blink. Dark before you move and light after, so the jump happens on a
    frame nobody sees — which is the whole reason teleporting is comfortable.
    It borrows the venue fade's shell rather than adding a second one. */
@@ -6878,8 +6962,11 @@ function blinkStep(dt){
          scale your head is not over the rig origin, and teleporting the origin
          leaves you standing a stride from the ring you aimed at. */
       camera.getWorldPosition(_camWorld);
-      player.position.x+=blinkTo.x-_camWorld.x;
-      player.position.z+=blinkTo.z-_camWorld.z;
+      const dx=blinkTo.x-_camWorld.x, dz=blinkTo.z-_camWorld.z;
+      player.position.x+=dx;
+      player.position.z+=dz;
+      /* same frame, same offset: the rod and the line arrive with you */
+      carryTackle(dx,dz);
       blinkPending=false;
     }
     return 1;

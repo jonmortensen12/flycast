@@ -275,13 +275,45 @@ timestep-dependent, so **any calibration must be redone if those change.** XPBD 
 
 | Input | Action |
 |---|---|
-| Left stick | walk, including wading; deep water slows you |
+| Left stick | move — teleport by default, sliding walk with **Teleport move** off. See *Moving* below |
 | Left trigger | under 15% free · 15–85% **routes** (a PULLEY: the material point at your fingers is set by the straight run from the stripping guide, so the span is never over-taut and never blocks line feeding out) · 15-85% old behaviour was to pin one node, which was what stopped casting past the hand · over 85% **pinches** |
 | ~~old~~ | under 15% free · 15–85% **routes** (line slides through the hand, held point re-chosen every frame) · over 85% **pinches** (one material point held fast) |
 | Left grip | net |
 | Right trigger | reel in, analog · **drives the menu pointer while the menu is open** |
 | Right grip | clamp line at the cork |
 | A | reset cast · B | reseat fish · Y | toggle menu |
+
+### Moving: teleport or slide
+
+**PLAYER → Teleport move.** 1 (the default) is the hop; 0 goes back to sliding the rig
+around on the stick, unchanged from before teleport existed. It is a live toggle — nothing
+is rebuilt — and it is reachable from the phone remote as well.
+
+With it on, pushing the stick forward throws a real ballistic arc off the **left** hand
+with a ring where it lands; let go and you blink to it. Green ring means you can stand
+there, red means the water is over your chest or there is a boulder in the way. **Teleport
+range** is the arc's launch speed, not a leash: aim past it and the arc simply falls short,
+the way a thrown line does. A hard push left or right is a **Snap turn** instead, so a
+sloppy diagonal picks a spot rather than spinning you. With it off, the stick is the walk
+code and none of the above is drawn or armed.
+
+**The tackle comes with you.** A hop is not travel — nothing accelerated, nothing was
+thrown, the angler is simply somewhere else on the next frame. But the rod is in their
+hands, and PBD reads velocity out of consecutive positions, so a rig that jumps eight
+metres between frames hands the rod butt about 3500 m/s. `carryTackle()` shifts the rod,
+the line and whatever is on the end of it by that same offset on that same frame, while
+the screen is black. The configuration is preserved, so no constraint is violated and no
+energy is created; the cost is one pass over ~120 nodes on a frame nobody sees. Two
+corrections ride along with it, because the river is not flat: the free line also takes its
+local change in **surface** height (the water can sit 28 cm higher eight metres upstream),
+feathered to nothing over the last 1.2 m before the tiptop so the guided end stays welded
+to a rod that did not move vertically at all; and every node is lifted clear of the new
+**bed**, which moves further than the surface does. A played fish is carried too, and put
+back in the channel if the reach has bent away under the hop rather than beached.
+
+A **snap turn** was measured the same way and does not need any of this — 30° about the
+head sweeps the tiptop far less than a hop moves it, and it costs ×1.17 stretch and 0.5 N,
+inside what ordinary rod movement produces. Do not "fix" it on a hunch; measure it first.
 
 Menu: point with the rod hand, hold the trigger to drag a slider. The panel is movable —
 grab the handle at its top left and it follows the ray; the +/- buttons at top right resize it.
@@ -420,6 +452,26 @@ Recorded because each one was mis-diagnosed at least once.
    at 560, i.e. 313600 specks, tuned by eye on a flat screen. A standalone headset that misses
    72 fps does not render slower, it **reprojects**, and that reads as jittery head tracking,
    not as a soft picture. Now 80 (6400 specks). Check device budgets on the device.
+14. **Every hop while playing a fish broke you off** — and the general case was worse than
+   it looked. The rig jumping is a discontinuity, and the solver reads velocity out of
+   consecutive positions, so the rod butt arrived at the far end of the hop at about
+   3500 m/s and dragged the line after it through eleven guides. Measured with 7.4 m of
+   line on the water and an 8 m hop: a segment stretched to **6.6x** its material length,
+   line nodes hit **134 m/s** against `sanity()`'s 140 clamp, and **3.4 m of line was
+   ripped back in through the guides**. With a fish on it was **108 N against a 21 N
+   tippet** — not a near miss, a guaranteed break-off on every hop. Fixed by
+   `carryTackle()`; the same measurements now read ×1.76, 61 m/s, no line lost, and a
+   peak with a fish on that is *below* the tension the fight was already applying.
+
+   The tell was in the numbers all along: **the fly was dragged the whole way to the new
+   position anyway.** The tackle came with you regardless — it just arrived through the
+   solver as violence. The fix is to bring it deliberately.
+
+   Why it survived a build with two harnesses: `smoke.mjs` stubbed `getWorldPosition()` to
+   return the LOCAL position, so every hand, panel and reel was pinned to the world origin
+   however far the rig had walked. Moving the rig reached nothing the simulation can feel,
+   and a teleport under load looked completely free in here. The stub walks parents now.
+   **A harness that cannot see the rig move cannot see anything that moving it breaks.**
 
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
@@ -436,6 +488,12 @@ actually caught the last undeclared variable.
 
 **And `remotecheck.mjs` for the phone page**, which has no simulation to fall over and so
 never appears in `smoke.mjs` — see section 4b.
+
+**A stub that answers wrongly is worse than one that throws.** Both of the harness's
+worst misses have been this shape: the Proxy `has` trap that made every undeclared read
+resolve to `undefined`, and `getWorldPosition()` returning a local position so the rig
+could never move. Neither failed; both quietly reported health. When adding a stub, prefer
+one that is obviously incomplete to one that is plausibly wrong.
 
 **Therefore: run `smoke.mjs` before shipping.** It stubs Three.js and the DOM with real
 Vector3/Quaternion maths, executes the module, **connects a left and right controller with

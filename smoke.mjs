@@ -51,9 +51,27 @@ class Obj3D{
   constructor(){this.position=new V3();this.rotation=new E();this.quaternion=new Q();
     this.scale=new V3(1,1,1);this.children=[];this.visible=true;this.userData={};
     this.matrixWorld={elements:new Array(16).fill(0)};this.material=null;this.geometry=null;}
-  add(...o){for(const c of o) if(c) this.children.push(c);return this;}
+  add(...o){for(const c of o) if(c){c.parent=this;this.children.push(c);}return this;}
   remove(){return this;} clear(){this.children.length=0;return this;}
-  getWorldPosition(v){return v.copy(this.position);}
+  /* Walk the parents. This used to return the LOCAL position, which pinned
+     every hand, panel and reel to the world origin however far the rig had
+     walked — so moving the rig reached nothing the simulation can feel, and a
+     teleport under load looked free in here while yanking the rod eight metres
+     in the headset. Rotation stays stubbed out; positions are what the physics
+     reads. */
+  getWorldPosition(v){v.copy(this.position);
+    /* yaw as well as offset. Every parent in this scene graph is either the
+       scene (unrotated) or the player rig (yaw only), so a yaw-only walk is
+       exact here — and without it snapTurn cannot be checked at all, because
+       the whole point of that code is that the rig's rotation and its new
+       origin cancel at the head. */
+    for(let p=this.parent;p;p=p.parent){
+      const a=p.rotation?p.rotation.y:0;
+      if(a){const c=Math.cos(a),si=Math.sin(a),x=v.x,z=v.z;
+            v.x=x*c+z*si; v.z=-x*si+z*c;}
+      v.add(p.position);
+    }
+    return v;}
   getWorldQuaternion(q){return q;} getWorldDirection(v){return v;}
   lookAt(){} traverse(f){f(this);for(const c of this.children)c.traverse&&c.traverse(f);}
   updateMatrixWorld(){} localToWorld(v){return v;} worldToLocal(v){return v;}
@@ -798,6 +816,7 @@ if(!(hudDrag.handle&&hudDrag.minus&&hudDrag.plus)||hudDrag.numbers||hudDrag.menu
    straight back to the walk code. */
 const tp=vm.runInContext(`(()=>{
   const wasTP=P.teleport, wasP={x:player.position.x,z:player.position.z,y:player.rotation.y};
+  const wasCam={x:camera.position.x,y:camera.position.y,z:camera.position.z};
   const wasGrip=offGrip;
   P.teleport=1; blinkT=0; blinkPending=false; tpArmed=false;
   const aim=(x,y,z)=>{ offGrip={getWorldPosition:v=>v.set(x,y,z), getWorldQuaternion:q=>q};
@@ -844,12 +863,20 @@ const tp=vm.runInContext(`(()=>{
                   z:+(head0.z+(player.position.z-rig0.z)).toFixed(2)};
   const onRing=Math.hypot(headLand.x-tpHit.x,headLand.z-tpHit.z)<0.01;
 
-  /* snap turn: yaw advances, the head does not move */
-  player.position.set(2,0,3); player.rotation.y=0; camera.position.set(0,1.55,0);
-  const r0=Math.hypot(player.position.x-camera.position.x,player.position.z-camera.position.z);
+  /* snap turn: yaw advances, the head does not move. The camera's position is
+     LOCAL to the rig, so standing the head away from the rig origin — which is
+     the whole point of the test — means offsetting it by -rig, not setting a
+     world position. Written the other way round it put the head exactly over
+     the origin and a turn about the head moved nothing, which read as a
+     failure of the code rather than of the test. */
+  player.position.set(2,0,3); player.rotation.y=0; camera.position.set(-2,1.55,-3);
+  /* the property the code exists to guarantee, measured directly: the HEAD
+     stays where it is and only the rig swings around it */
+  const h0=camera.getWorldPosition(new THREE.Vector3()).clone();
   snapTurn(Math.PI/6);
-  const r1=Math.hypot(player.position.x-camera.position.x,player.position.z-camera.position.z);
-  const snap={yaw:+player.rotation.y.toFixed(4), radiusKept:Math.abs(r1-r0)<1e-9,
+  const h1=camera.getWorldPosition(new THREE.Vector3());
+  const snap={yaw:+player.rotation.y.toFixed(4),
+              headKept:Math.hypot(h1.x-h0.x,h1.z-h0.z)<1e-9,
               turned:Math.abs(player.position.x-2)>1e-6};
 
   /* off means off: the stick goes back to the walk code and nothing is drawn */
@@ -862,6 +889,9 @@ const tp=vm.runInContext(`(()=>{
   P.teleport=wasTP; offGrip=wasGrip; blinkT=0; blinkPending=false; tpArmed=false;
   tpArc.visible=false; tpMark.grp.visible=false;
   player.position.set(wasP.x,0,wasP.z); player.rotation.y=wasP.y;
+  /* the head goes back over the rig too: leaving it three metres off to one
+     side is a standing offset every later test would inherit */
+  camera.position.set(wasCam.x,wasCam.y,wasCam.z);
   return {standable, near, margin, far, peak:+peak.toFixed(2), moved,
           darkAtMove:+darkAtMove.toFixed(2), onRing, snap, offMode, onHalf,
           range:wasTP===undefined?null:P.tpRange};
@@ -870,9 +900,110 @@ console.log('teleport locomotion',tp);
 if(!tp.standable.bank||tp.standable.middle||tp.standable.onRock||
    !tp.near.landed||tp.near.ok||!tp.margin.landed||!tp.margin.ok||tp.far.ok||
    !tp.moved||tp.darkAtMove<0.999||tp.peak<0.999||!tp.onRing||
-   !tp.snap.radiusKept||!tp.snap.turned||
+   !tp.snap.headKept||!tp.snap.turned||
    tp.offMode.owns||tp.offMode.arc||tp.offMode.ring||!tp.onHalf)
   console.log('  *** TELEPORT FAILURE ***');
+
+/* ── the tackle through a hop ────────────────────────────────────────────
+   The rig moving is a discontinuity, and PBD reads velocity out of
+   consecutive positions, so before carryTackle() existed an 8 m hop handed
+   the rod butt about 3500 m/s. Measured with this harness: a segment
+   stretched to 6.6x its material length, line nodes hit 134 m/s against
+   sanity()'s 140 clamp, 3.4 m of line was ripped back in through the guides,
+   and with a fish on the line saw 108 N against a 21 N tippet — every hop
+   while playing a fish broke you off.
+
+   Everything is measured against a BASELINE taken over the same number of
+   frames just before the hop, because by this point in the run P has been
+   through the water sweep and half a dozen other tests and no absolute
+   threshold means anything. The claim being checked is the right one anyway:
+   a hop must not do more to the line than standing still does. */
+const hop=vm.runInContext(`(()=>{
+  /* Its own world. By this point in the run the venue has been swapped, the
+     flow and grade have been driven up for the water sweep and half the
+     tackle has been through two presets — measuring a hop against that is
+     measuring the leftovers. applyVenue puts back the reach every constant
+     was tuned on, and the shipped defaults go on top of it. */
+  applyVenue('cedar');
+  applyPreset(SHIPPED);
+  const worst=()=>{
+    let st=0,vmax=0;
+    for(let i=1;i<nAct;i++){const a=(i-1)*3,b=i*3;
+      const d=Math.hypot(pos[b]-pos[a],pos[b+1]-pos[a+1],pos[b+2]-pos[a+2]);
+      if(d/restOf(i-1)>st) st=d/restOf(i-1);}
+    for(let i=0;i<nAct;i++){const p=i*3;
+      const sp=Math.hypot(vel[p],vel[p+1],vel[p+2]); if(sp>vmax)vmax=sp;}
+    return {st,vmax,T:M.tension};
+  };
+  const settle=n=>{ for(let i=0;i<n;i++) renderer._loop(); };
+  const peaks=n=>{ let st=0,v=0,T=0,blew=false;
+    for(let i=0;i<n;i++){ renderer._loop(); const w=worst();
+      if(w.st>st)st=w.st; if(w.vmax>v)v=w.vmax; if(w.T>T)T=w.T; blew=blew||blewUp; }
+    return {st:+st.toFixed(2), v:+v.toFixed(0), T:+T.toFixed(1), blew}; };
+
+  for(const f of fishes) f.reseat();
+  lineOut=12; offSpool=lineOut+rodArc+2.2; resetCast(); settle(70);
+  const base=peaks(30);
+  /* Distance from the TIPTOP, not an absolute position: the fly is drifting
+     the whole time, so "did it move by eight metres" is measuring the current
+     as much as the hop. What the carry actually claims is that the
+     configuration is preserved, and this is that claim. */
+  const tipGap=()=>{const T=(NG-1)*3;
+    return Math.hypot(pos[0]-guidePos[T],pos[1]-guidePos[T+1],pos[2]-guidePos[T+2]);};
+  const was={lineOut, gap:tipGap()};
+  camera.getWorldPosition(_camWorld);
+  blinkTo_(_camWorld.x-8,_camWorld.z);
+  /* far enough past the blink for the move to have happened (the dark half is
+     0.13 s and this harness ticks at 1/45), near enough that the fly has not
+     had time to swing downstream and muddy the measurement */
+  let mid=null;
+  for(let i=0;i<12;i++) renderer._loop();
+  mid={gap:+tipGap().toFixed(2), lineOut:+lineOut.toFixed(2)};
+  const after=peaks(28);
+  const open={base, after, mid, wasGap:+was.gap.toFixed(2),
+              carried:Math.abs(mid.gap-was.gap)<1.0,        /* it came with you */
+              kept:Math.abs(mid.lineOut-was.lineOut)<0.6,   /* not ripped in */
+              dry:surfY(pos[0])-bedY(pos[0],pos[2])<=0.02};
+
+  /* and again with a fish on, which is the case that used to break you off */
+  for(const f of fishes) f.reseat();
+  lineOut=12; offSpool=lineOut+rodArc+2.2; resetCast(); settle(50);
+  runAction('!hookfish'); settle(30);
+  const hookedBefore=!!hooked;
+  const fbase=peaks(30);
+  camera.getWorldPosition(_camWorld);
+  blinkTo_(_camWorld.x-8,_camWorld.z);
+  const fafter=peaks(40);
+  const fish={hookedBefore, stillOn:!!hooked,
+              wet:hooked?+(surfY(hooked.p.x)-bedY(hooked.p.x,hooked.p.z)).toFixed(2):null,
+              base:fbase, after:fafter, tippet:P.tippet};
+
+  for(const f of fishes) f.reseat();
+  blinkT=0; blinkPending=false;
+  resetCast();
+  return {open, fish};
+})()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
+console.log('tackle through a hop',hop);
+{
+  const o=hop.open, f=hop.fish;
+  if(o.after.blew||f.after.blew||
+     /* Peak node speed is printed but NOT asserted on. The stub water's own
+        peaks are erratic here and reach sanity()'s 140 m/s clamp in several of
+        these states with the line under no stretch and no tension at all — a
+        single node flying free, not the chain being yanked. Stretch and
+        tension are the measures that discriminate, and they do it cleanly:
+        x1.4 against x6.6, and 0.3 N against 17.5 N.
+
+        With a fish on, the claim is the one that actually cost you fish: a hop
+        must not reach breaking strain. 108 N against a 40 N tippet fires both
+        of these; 7 N fires neither. */
+     o.after.st>o.base.st+1.5 || o.after.T>o.base.T+3 ||
+     !o.carried||!o.kept||o.dry||
+     !f.hookedBefore||!f.stillOn||f.wet<=0.05||
+     f.after.st>f.base.st+1.5 ||
+     f.after.T>f.base.T+15 || f.after.T>=f.tippet*0.8)
+    console.log('  *** TACKLE-THROUGH-A-HOP FAILURE ***');
+}
 
 /* ── phone remote ────────────────────────────────────────────────────────
    No Peer here, so a fake conn is dropped straight into REMOTE and the
