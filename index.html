@@ -170,7 +170,7 @@ const P = {
   massMul:1, lineBend:1, lineSmooth:0.15, menuScale:1, hudScale:1, dragMul:0.85, lineWt:5, statFric:0.05,
   reelSpeed:2.6, reelPower:60, lineStretch:60, spoolDrag:3, spoolDead:0.05, buoyancy:1, stick:1, tippet:40,
   guideMu:0.15, slipInertia:0.06, dragHeld:1, routeOn:0, handSlide:8, reelSlack:0.1, lineVis:0.8, flySize:1.8, haptics:1,
-  moveSpeed:1.6, netRadius:0.3, invertY:0, reelHand:0,
+  moveSpeed:1.6, netRadius:0.3, invertY:0, reelHand:0, handGuide:1,
   teleport:1, tpRange:9, snapTurn:30,
   volume:0.7, volReel:1, volSplash:1, volRiver:0.55, volLine:1,
   lineTaper:1,
@@ -263,6 +263,7 @@ const MENU=[
   ['Invert walk Y','invertY',0,1,1,'Flip the forward and backward walking direction. Applies to the teleport aim too.'],
   ['Reel hand','reelHand',0,1,1,'Which side of the reel the handle is on. 0 is left-hand wind, the usual setup for a right-handed caster, and puts the handle on the side facing you. 1 is right-hand wind. Takes effect immediately.'],
   ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
+  ['Control labels','handGuide',0,1,1,'Draws a ghost of each controller over your hands with a callout on every button that does something, so somebody who has just put the headset on can read what to press instead of being told. The words follow the settings: with teleport off the stick says WALK, and with a fish on it says the stick wades. 0 turns it off \u2014 do that and Save as my default if you would rather fish without them.'],
   ['— RIVER —',null,0,0,0,''],
   ['Water model','waterModel',0,1,1,'0 is the analytic field: flow painted on by formula, fast but it can only do what was written into it. 1 solves shallow water on a grid — depth from the bed and obstacles, gravity down the surface slope, Manning bed friction and a pressure projection. Rocks divert flow because they ARE bed elevation, and eddies form because the solver makes them.'],
   ['Surface damping','waterSmooth',0.00,0.40,0.01,'Smooths the solved free surface between cells. The solver stores velocity and depth at the same points, which lets odd and even cells drift apart into a checkerboard that shows up as the whole reach rippling for no reason \u2014 measured at plus or minus 0.3 m on a dead flat bed with this at zero. At 0.08 a flat bed solves flat. Higher irons out real detail too.'],
@@ -963,7 +964,12 @@ let offSpool=8.0+ROD_ARC+2.2;
 let rodArc=ROD_ARC;       /* live path length through the guides */
 let handMode=0,rodPinch=false,wrapTotal=0;
 let clickAcc=0,slipOut=0,spoolOut=0,reeling=false;
-let probeOut=0,probeIn=0,probeThr=0,probeSp=0,fishTension=0;
+/* fishTension is the raw pull in the line, which the rod reaction and the
+   break-off test both want. fishCarried is what the tippet could actually
+   transmit into the fish — see Trout.step and HANDOFF bug 15. Kept separate
+   and both live, because a test that recomputes the cap for itself proves
+   nothing about the cap the game applied. */
+let probeOut=0,probeIn=0,probeThr=0,probeSp=0,fishTension=0,fishCarried=0;
 
 /* Weight-forward taper. A real WF line is not a uniform cylinder: a short front
    taper, a heavy belly, a rear taper, then thin running line. The front taper is
@@ -4983,7 +4989,18 @@ class Trout{
     const ll=Math.hypot(lx,ly,lz)||1; lx/=ll;ly/=ll;lz/=ll;
     const over=ll-lineOut;
     fishTension=over>0?Math.min(P.lineStretch*over,600):0;
-    fx+=lx*fishTension; fy+=ly*fishTension; fz+=lz*fishTension;
+    /* WHAT THE FISH FEELS IS NOT WHAT THE ROD READS. `fishTension` is the pull
+       in the line and the rod and the break-off test both want it raw. But a
+       tippet cannot TRANSMIT more than it can hold: past that it is parting,
+       not lifting him. Without this cap the spring could put its full 600 N —
+       fifteen tippets — into a 1 kg fish for the several frames it takes the
+       1/12 s smoothed M.tension to climb past P.tippet and fire the break, and
+       600 N on 1 kg is 55 m/s of upward velocity per tenth of a second. That is
+       the fish that goes twenty feet in the air off a rod sweep. Measured with
+       a hard rod lift: 144 N reached the fish before the line let go, six times
+       what a 21 N 5X tippet could ever have carried. */
+    fishCarried=Math.min(fishTension,P.tippet);
+    fx+=lx*fishCarried; fy+=ly*fishCarried; fz+=lz*fishCarried;
     /* equal and opposite on the rod tip, so a running fish bends the blank */
     if(fishTension>0&&rinvM[RN-1]>0){
       const a=fishTension*rinvM[RN-1]*h;
@@ -5004,6 +5021,20 @@ class Trout{
       }
     } else {
       this.v.y-=9.81*h;
+    }
+    /* A CEILING ON THE WHOLE THING. The cap above stops the line from putting
+       a superhuman impulse into him, but it only closes the path I could
+       measure — the reported symptom is a fish twenty feet in the air and I
+       could not reproduce that at any tippet, rod sweep or reel setting, so I
+       do not know that the line spring is the only way in. This is the guard
+       that does not depend on knowing: nothing about a hooked trout, dragged
+       or swimming, is 8 m/s. Every scenario in the harness peaks at 5.0, so
+       this changes nothing that was already happening — it just means that
+       whatever the cause, the answer is now a fish that surges rather than a
+       fish that leaves the reach. A ballistic apex from 8 m/s is 3.3 m. */
+    {
+      const sp=Math.hypot(this.v.x,this.v.y,this.v.z);
+      if(sp>8){ const k=8/sp; this.v.x*=k; this.v.y*=k; this.v.z*=k; }
     }
     this.p.x+=this.v.x*h; this.p.y+=this.v.y*h; this.p.z+=this.v.z*h;
     const gy=bedY(this.p.x,this.p.z)+0.06;
@@ -5246,7 +5277,7 @@ class Trout{
   }
   spook(msg,mult){
     this.state='spooked';this.timer=P.spookT*(mult||1);
-    if(hooked===this){hooked=null;fishTension=0;rebuildMasses();}
+    if(hooked===this){hooked=null;fishTension=0;fishCarried=0;rebuildMasses();}
     say(msg);
   }
   /* swap the mesh for a freshly built one — used when a model finishes
@@ -6978,8 +7009,15 @@ function blinkStep(dt){
    stick that slid you a few centimetres while you were lining up a hop would
    be the worst of both schemes. */
 function teleportStep(ax,fwd){
-  if(P.teleport<0.5){
-    tpArc.visible=false;tpMark.grp.visible=false;tpArmed=false;
+  /* A fish on changes what the stick is FOR. Netting him means closing the
+     distance while watching what the line is doing, and a hop that puts you
+     somewhere a rod length away with the fish still coming is not that — you
+     want to wade in, at wading pace, and be able to stop. So while a fish is
+     hooked the stick goes back to the walk code whatever the setting says,
+     and the arc and the ring go away with it. Turning the toggle off entirely
+     is still the way to fish the whole session on the stick. */
+  if(P.teleport<0.5||hooked){
+    tpArc.visible=false;tpMark.grp.visible=false;tpArmed=false;tpSnapLatch=0;
     return false;
   }
   const push=-fwd;                       /* stick pushed away from you */
@@ -7006,6 +7044,175 @@ function teleportStep(ax,fwd){
   tpMark.grp.visible=true;
   tpMark.grp.position.copy(tpHit);
   return true;
+}
+
+
+/* ════════════════════════════════════════════════════════════
+   7c. THE CONTROL GUIDE
+
+   A ghost of each controller, drawn where the real one is, with a callout on
+   every button that does something. It exists for the person who has just put
+   the headset on: there is no tutorial and no button prompt anywhere else in
+   the game, and "now squeeze the left trigger" is a sentence you should not
+   have to say out loud while somebody is holding a fly rod.
+
+   Three decisions worth keeping:
+
+   · The ghost is SCHEMATIC, not a model of a Quest controller. It shares
+     space with the rod, the cork and the reel, and a shape that is plainly a
+     diagram reads as an instruction rather than as a second object in the
+     world. It is also the only version that stays right if the hardware
+     changes.
+   · The labels BILLBOARD; their anchors do not. So the leader line stays
+     pinned to the part it names while the text is square-on from wherever you
+     happen to be looking, which is the whole point of a callout.
+   · The text tells the truth about the CURRENT settings, not the defaults.
+     With teleport off the stick says WALK; with a fish on it says the stick
+     wades, because that is what it does then. A label that lies is worse than
+     no label at all.
+   ════════════════════════════════════════════════════════════ */
+const GUIDE={built:false, hands:[]};
+const _gq=new THREE.Quaternion(), _gcq=new THREE.Quaternion();
+
+/* one callout: a small canvas with a bold action and a quieter hint */
+function guideLabel(){
+  const p=makePanel(0.112,0.042,336,126);
+  p.mesh.renderOrder=22;
+  p.said='';
+  return p;
+}
+function guideDraw(p,title,hint){
+  if(p.said===title+'|'+hint) return;      /* canvas work is not free */
+  p.said=title+'|'+hint;
+  const c=p.cx, W=336, H=126;
+  c.clearRect(0,0,W,H);
+  c.fillStyle='rgba(10,20,24,0.82)';c.fillRect(0,0,W,H);
+  c.fillStyle='#b5713f';c.fillRect(0,0,6,H);
+  c.font='700 34px "Space Mono",monospace';c.fillStyle='#e8e3d4';
+  c.fillText(title,20,48);
+  c.font='400 22px "Space Mono",monospace';c.fillStyle='#9fb0ae';
+  const words=String(hint||'').split(' ');
+  let line='', y=84;
+  for(const w of words){
+    const t=line?line+' '+w:w;
+    if(c.measureText(t).width>W-34&&line){
+      c.fillText(line,20,y); line=w; y+=26;
+      if(y>H-8){line='';break;}
+    } else line=t;
+  }
+  if(line) c.fillText(line,20,y);
+  p.tex.needsUpdate=true;
+}
+/* A leader from the part to the label, as a thin cylinder. A GL line is one
+   pixel wide however close it is, and one pixel against bright water is
+   nothing — the same reason the teleport arc is beads. */
+function guideLeader(from,to){
+  const dx=to[0]-from[0],dy=to[1]-from[1],dz=to[2]-from[2];
+  const len=Math.hypot(dx,dy,dz)||1e-4;
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(0.0014,0.0014,len,5),
+    new THREE.MeshBasicMaterial({color:0xb5713f,transparent:true,opacity:0.5,
+      depthTest:false,depthWrite:false}));
+  m.position.set(from[0]+dx/2,from[1]+dy/2,from[2]+dz/2);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),
+    new THREE.Vector3(dx/len,dy/len,dz/len));
+  m.renderOrder=21;
+  return m;
+}
+/* The controller, in GRIP space: the rod runs out along -Z (see BUTT_Z), +Y is
+   up out of the top face, and the handle falls away below and behind. */
+function guideGhost(){
+  const g=new THREE.Group();
+  const skin=new THREE.MeshBasicMaterial({color:0x9fb8bf,transparent:true,
+    opacity:0.18,depthTest:false,depthWrite:false});
+  const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.019,0.070,4,8),skin);
+  body.position.set(0,-0.052,0.022); body.rotation.x=0.34;
+  const face=new THREE.Mesh(new THREE.CylinderGeometry(0.027,0.027,0.007,16),skin);
+  face.position.set(0,0.004,-0.006);
+  g.add(body,face);
+  return g;
+}
+function guidePart(at){
+  const m=new THREE.Mesh(new THREE.SphereGeometry(0.0075,10,8),
+    new THREE.MeshBasicMaterial({color:0xe0a45e,transparent:true,opacity:0.85,
+      depthTest:false,depthWrite:false}));
+  m.position.set(at[0],at[1],at[2]);
+  m.renderOrder=21;
+  return m;
+}
+/* [key, where the part is, where its label hangs] in grip space. The two
+   hands are mirrored on X so the grip button and the face buttons land on the
+   inside edge of each controller, which is where they are. */
+const GUIDE_RIGHT=[
+  ['trigger',[0,-0.020,-0.030],[0.000,-0.120,-0.150]],
+  ['grip',   [-0.023,-0.046,0.014],[-0.160,-0.140,0.035]],
+  ['a',      [0.019,0.013,-0.019],[0.170,-0.015,-0.095]],
+  ['b',      [0.030,0.013,0.002],[0.180,0.060,0.050]],
+];
+const GUIDE_LEFT=[
+  ['stick',  [0,0.021,0.006],[0.000,0.140,0.080]],
+  ['trigger',[0,-0.020,-0.030],[0.000,-0.120,-0.150]],
+  ['grip',   [0.023,-0.046,0.014],[0.160,-0.140,0.035]],
+  ['y',      [-0.030,0.013,0.002],[-0.180,0.060,0.050]],
+];
+function buildGuide(){
+  if(GUIDE.built) return;
+  for(const [name,parts] of [['right',GUIDE_RIGHT],['left',GUIDE_LEFT]]){
+    const grp=guideGhost();
+    grp.visible=false;
+    scene.add(grp);
+    const rows=[];
+    for(const [key,at,to] of parts){
+      grp.add(guidePart(at));
+      grp.add(guideLeader(at,to));
+      const lbl=guideLabel();
+      lbl.mesh.position.set(to[0],to[1],to[2]);
+      grp.add(lbl.mesh);
+      rows.push({key,lbl});
+    }
+    GUIDE.hands.push({name,grp,rows});
+  }
+  GUIDE.built=true;
+}
+/* What a button does RIGHT NOW, in this hand, at these settings. */
+function guideWords(key,hand){
+  if(key==='stick'){
+    if(hooked) return ['WADE','he is on — the stick walks you to him'];
+    return P.teleport>0.5 ? ['TELEPORT','push it, aim the ring, let go']
+                          : ['WALK','push it to wade'];
+  }
+  if(key==='trigger') return hand==='right'
+    ? ['REEL IN', menuOpen?'and aims the menu while that is open'
+                          :'squeeze harder to wind faster']
+    : (P.routeOn>0.5 ? ['HOLD LINE','half squeeze feeds it, full squeeze pinches']
+                     : ['HOLD LINE','squeeze to pinch it, let go to free it']);
+  if(key==='grip') return hand==='right'
+    ? ['CLAMP','holds the line against the cork']
+    : ['NET','hold it out and steer him over it'];
+  if(key==='a') return ['RESET CAST','puts the line back at your feet'];
+  if(key==='b') return ['FISH BACK','sends them home and starts over'];
+  if(key==='y') return ['MENU','every setting, on a panel you point at'];
+  return null;
+}
+function guideStep(){
+  const want=P.handGuide>0.5;
+  if(!want&&!GUIDE.built) return;          /* never built, never asked for */
+  if(want&&!GUIDE.built) buildGuide();
+  camera.getWorldQuaternion(_gcq);
+  for(const h of GUIDE.hands){
+    const grip=h.name==='right'?rodGrip:offGrip;
+    const live=want&&!!grip;
+    h.grp.visible=live;
+    if(!live) continue;
+    grip.getWorldPosition(h.grp.position);
+    grip.getWorldQuaternion(h.grp.quaternion);
+    /* square-on to the eye: local = groupWorld^-1 * cameraWorld */
+    _gq.copy(h.grp.quaternion).invert();
+    for(const r of h.rows){
+      r.lbl.mesh.quaternion.copy(_gq).multiply(_gcq);
+      const t=guideWords(r.key,h.name);
+      if(t) guideDraw(r.lbl,t[0],t[1]);
+    }
+  }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -7130,6 +7337,7 @@ renderer.setAnimationLoop(()=>{
     netGrp.visible=netOn;
     if(netOn){netGrp.position.copy(_lh);offGrip.getWorldQuaternion(_camQ);netGrp.quaternion.copy(_camQ);}
   } else {leftHand.visible=false;netGrp.visible=false;}
+  guideStep();
 
   /* Take hold of a landed fish. The left pinch already means "close your hand
      on something", so it is reused rather than adding an input — and while a
@@ -7367,13 +7575,13 @@ renderer.setAnimationLoop(()=>{
     hooked.stamina=Math.max(0,hooked.stamina
       -(M.tension*0.0060+hooked.effort*0.055)*P.fatigue*dt-dt*0.008);
     if(M.tension>P.tippet){
-      hooked.spook('tippet popped',1);hooked=null;fishTension=0;rebuildMasses();pulse(1.0);
+      hooked.spook('tippet popped',1);hooked=null;fishTension=0;fishCarried=0;rebuildMasses();pulse(1.0);
     } else if(netOn&&haveLeft){
       netMouth.getWorldPosition(_netP);
       const d=Math.hypot(fx-_netP.x,fy-_netP.y,fz-_netP.z);
       if(d<P.netRadius){
         const f=hooked;
-        hooked=null;fishTension=0;rebuildMasses();pulse(0.6);
+        hooked=null;fishTension=0;fishCarried=0;rebuildMasses();pulse(0.6);
         f.land();
         say('netted him \u2014 '+f.lengthIn().toFixed(1)+' in, '+f.weightText());
       }

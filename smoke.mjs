@@ -21,7 +21,22 @@ const V3=class{constructor(x=0,y=0,z=0){this.x=x;this.y=y;this.z=z;}
   cross(v){return this.crossVectors(this.clone(),v);}
   crossVectors(a,b){this.x=a.y*b.z-a.z*b.y;this.y=a.z*b.x-a.x*b.z;this.z=a.x*b.y-a.y*b.x;return this;}
   lerp(v,t){this.x+=(v.x-this.x)*t;this.y+=(v.y-this.y)*t;this.z+=(v.z-this.z)*t;return this;}
-  applyQuaternion(){return this;} applyMatrix4(){return this;} setScalar(s){return this.set(s,s,s);}
+  /* Real. It used to return `this` untouched, which meant the rod could not
+     be rotated: `_off.set(0,0,NEXT_Z).applyQuaternion(_q)` came back unchanged,
+     so the blank pointed along -Z whatever the wrist did. A casting game whose
+     harness cannot turn the rod is a harness that has never seen a cast. With
+     an identity quaternion this is a no-op, so nothing that was passing
+     changes — it only makes rotation reachable. */
+  applyQuaternion(q){
+    const x=this.x,y=this.y,z=this.z,qx=q.x,qy=q.y,qz=q.z,qw=q.w;
+    const ix=qw*x+qy*z-qz*y, iy=qw*y+qz*x-qx*z,
+          iz=qw*z+qx*y-qy*x, iw=-qx*x-qy*y-qz*z;
+    this.x=ix*qw+iw*-qx+iy*-qz-iz*-qy;
+    this.y=iy*qw+iw*-qy+iz*-qx-ix*-qz;
+    this.z=iz*qw+iw*-qz+ix*-qy-iy*-qx;
+    return this;
+  }
+  applyMatrix4(){return this;} setScalar(s){return this.set(s,s,s);}
   setFromMatrixPosition(){return this;} negate(){return this.multiplyScalar(-1);}
   toArray(){return [this.x,this.y,this.z];} min(){return this;} max(){return this;}
   setLength(l){return this.normalize().multiplyScalar(l);} equals(){return false;}
@@ -41,8 +56,16 @@ const Q=class{constructor(x=0,y=0,z=0,w=1){this.x=x;this.y=y;this.z=z;this.w=w;}
   set(x,y,z,w){this.x=x;this.y=y;this.z=z;this.w=w;return this;}
   copy(q){return this.set(q.x,q.y,q.z,q.w);} clone(){return new Q(this.x,this.y,this.z,this.w);}
   setFromAxisAngle(a,r){const h=r/2,s=Math.sin(h);return this.set(a.x*s,a.y*s,a.z*s,Math.cos(h));}
-  setFromEuler(){return this;} setFromUnitVectors(){return this;} multiply(){return this;}
-  premultiply(){return this;} invert(){return this;} slerp(){return this;} normalize(){return this;}
+  setFromEuler(){return this;} setFromUnitVectors(){return this;}
+  multiplyQuaternions(a,b){
+    const ax=a.x,ay=a.y,az=a.z,aw=a.w, bx=b.x,by=b.y,bz=b.z,bw=b.w;
+    return this.set(ax*bw+aw*bx+ay*bz-az*by, ay*bw+aw*by+az*bx-ax*bz,
+                    az*bw+aw*bz+ax*by-ay*bx, aw*bw-ax*bx-ay*by-az*bz);
+  }
+  multiply(q){return this.multiplyQuaternions(this,q);}
+  premultiply(q){return this.multiplyQuaternions(q,this);}
+  invert(){return this.set(-this.x,-this.y,-this.z,this.w);}
+  slerp(){return this;} normalize(){return this;}
   setFromRotationMatrix(){return this;}};
 const E=class{constructor(x=0,y=0,z=0,o='XYZ'){this.x=x;this.y=y;this.z=z;this.order=o;}
   set(x,y,z){this.x=x;this.y=y;this.z=z;return this;} setFromQuaternion(){return this;}};
@@ -72,7 +95,13 @@ class Obj3D{
       v.add(p.position);
     }
     return v;}
-  getWorldQuaternion(q){return q;} getWorldDirection(v){return v;}
+  /* Compose the chain instead of handing back whatever was already in q —
+     which is how `_q` used to keep a stale value forever. Identity parents
+     make this the grip's own rotation, i.e. exactly what it was. */
+  getWorldQuaternion(q){q.copy(this.quaternion);
+    for(let p=this.parent;p;p=p.parent) q.premultiply(p.quaternion);
+    return q;}
+  getWorldDirection(v){return v;}
   lookAt(){} traverse(f){f(this);for(const c of this.children)c.traverse&&c.traverse(f);}
   updateMatrixWorld(){} localToWorld(v){return v;} worldToLocal(v){return v;}
   attach(o){return this.add(o);} removeFromParent(){return this;}
@@ -1004,6 +1033,111 @@ console.log('tackle through a hop',hop);
      f.after.T>f.base.T+15 || f.after.T>=f.tippet*0.8)
     console.log('  *** TACKLE-THROUGH-A-HOP FAILURE ***');
 }
+
+/* ── a fish on: the stick, and what the line may do to him ───────────────
+   Three claims, all of which used to be false or untested.
+
+   1. With a fish on, the stick wades whatever Teleport move says — you close
+      the distance to net him rather than hopping and hoping.
+   2. A tippet cannot TRANSMIT more than it can hold. `fishTension` is the raw
+      pull, because the rod and the break-off test both want it raw; what
+      reaches the fish's body is clamped to P.tippet. Before this, 144 N was
+      measured arriving at a fish on a 21 N 5X tippet — six tippets' worth,
+      for the several frames it takes a 1/12 s smoothed M.tension to climb
+      past the threshold and fire the break.
+   3. Nothing about a hooked trout is 8 m/s.
+
+   Note what this does NOT claim: the reported symptom was a fish twenty feet
+   in the air, and it is not reproduced here — see HANDOFF section 5. */
+const fight=vm.runInContext(`(()=>{
+  const wasP={x:player.position.x,z:player.position.z,y:player.rotation.y};
+  applyVenue('cedar'); applyPreset(SHIPPED);
+  const settle=n=>{ for(let i=0;i<n;i++) renderer._loop(); };
+  for(const f of fishes) f.reseat();
+  lineOut=12; offSpool=lineOut+rodArc+2.2; resetCast(); settle(60);
+
+  /* 1. the stick, with and without a fish */
+  const wasTP=P.teleport; P.teleport=1;
+  const dry={owns:teleportStep(0,-1), arc:tpArc.visible};
+  runAction('!hookfish'); settle(30);
+  const on={hooked:!!hooked, owns:teleportStep(0,-1),
+            arc:tpArc.visible, ring:tpMark.grp.visible};
+  /* and with the toggle off it was already the walk code, fish or no fish */
+  P.teleport=0;
+  const off={owns:teleportStep(0,-1)};
+  P.teleport=wasTP;
+
+  /* 2 & 3. drive the fight hard and watch what reaches him. The rod hand can
+     actually be rotated now, so this is a real sweep rather than a shove. */
+  const grip=renderer.xr.getControllerGrip(0);
+  let sawT=0, sawV=0, sawAir=0, carried=0;
+  for(let f=0;f<220&&hooked;f++){
+    grip.quaternion.setFromAxisAngle(new THREE.Vector3(1,0,0),Math.sin(f*0.55)*1.1);
+    if(f===40&&hooked){ hooked.beh='jump'; hooked.behT=0.45; hooked.v.y=3.6; }
+    renderer._loop();
+    if(!hooked) break;
+    const film=filmY(hooked.p.x,hooked.p.z,simTime);
+    sawT=Math.max(sawT,fishTension);
+    sawV=Math.max(sawV,Math.hypot(hooked.v.x,hooked.v.y,hooked.v.z));
+    sawAir=Math.max(sawAir,hooked.p.y-film);
+    /* what the GAME applied, not what this test would have applied. Recompute
+       the cap here and the assertion is true by construction and worth nothing. */
+    carried=Math.max(carried,fishCarried);
+  }
+  grip.quaternion.set(0,0,0,1);
+  for(const f of fishes) f.reseat();
+  player.position.set(wasP.x,0,wasP.z); player.rotation.y=wasP.y;
+  resetCast();
+  return {dry, on, off, tippet:P.tippet,
+          rawSeen:+sawT.toFixed(0), carriedMax:+carried.toFixed(0),
+          topSpeed:+sawV.toFixed(1), topAir:+sawAir.toFixed(2)};
+})()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
+console.log('a fish on',fight);
+if(!fight.dry.owns || !fight.on.hooked || fight.on.owns || fight.on.arc || fight.on.ring ||
+   fight.off.owns || fight.carriedMax>fight.tippet ||
+   fight.rawSeen<=fight.tippet ||     /* the cap must have actually bitten */
+   fight.topSpeed>8.05 || fight.topAir>3.4)
+  console.log('  *** FISH-ON FAILURE ***');
+
+/* ── the control guide ───────────────────────────────────────────────────
+   Every callout says something, both hands are drawn, turning it off hides
+   all of it, and the words track the settings — which is the part that rots.
+   A label still reading TELEPORT with the toggle off is worse than no label.
+
+   `lazy` is reported but NOT asserted: the geometry is built on first use, and
+   by this point in the run the frame loop has been ticking with handGuide at
+   its shipped 1, so of course it is already built. The claim that is worth
+   holding is the one below it — off means nothing on screen. */
+const guide=vm.runInContext(`(()=>{
+  const was=P.handGuide, wasTP=P.teleport;
+  P.handGuide=0; guideStep();
+  const lazy=!GUIDE.built;                 /* informational, see above */
+  P.handGuide=1; guideStep();
+  const hands=GUIDE.hands.map(h=>({name:h.name, rows:h.rows.length,
+    shown:h.grp.visible,
+    words:h.rows.map(r=>r.lbl.said)}));
+  const blank=GUIDE.hands.some(h=>h.rows.some(r=>!r.lbl.said||r.lbl.said==='|'));
+  /* the stick tells the truth about the mode */
+  P.teleport=1; guideStep();
+  const tp=GUIDE.hands[1].rows[0].lbl.said;
+  P.teleport=0; guideStep();
+  const walk=GUIDE.hands[1].rows[0].lbl.said;
+  P.teleport=1; runAction('!hookfish'); guideStep();
+  const wade=GUIDE.hands[1].rows[0].lbl.said;
+  for(const f of fishes) f.reseat();
+  P.teleport=wasTP; P.handGuide=0; guideStep();
+  const hidden=GUIDE.hands.every(h=>!h.grp.visible);
+  P.handGuide=was;
+  return {lazy, hands, blank, hidden,
+          stick:{tp:tp.split('|')[0], walk:walk.split('|')[0], wade:wade.split('|')[0]}};
+})()`,sandbox);
+console.log('control guide',{lazy:guide.lazy, blank:guide.blank, hidden:guide.hidden,
+  stick:guide.stick, rows:guide.hands.map(h=>h.name+':'+h.rows+(h.shown?' shown':' hidden'))});
+console.log('  callouts:',guide.hands.map(h=>h.words.map(w=>w.split('|')[0]).join(', ')).join('  |  '));
+if(guide.blank||!guide.hidden||
+   guide.hands.length!==2||guide.hands.some(h=>h.rows<4||!h.shown)||
+   guide.stick.tp!=='TELEPORT'||guide.stick.walk!=='WALK'||guide.stick.wade!=='WADE')
+  console.log('  *** CONTROL GUIDE FAILURE ***');
 
 /* ── phone remote ────────────────────────────────────────────────────────
    No Peer here, so a fake conn is dropped straight into REMOTE and the

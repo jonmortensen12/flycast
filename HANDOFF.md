@@ -283,6 +283,10 @@ timestep-dependent, so **any calibration must be redone if those change.** XPBD 
 | Right grip | clamp line at the cork |
 | A | reset cast · B | reseat fish · Y | toggle menu |
 
+Nobody should have to be told any of that. **PLAYER → Control labels** draws a ghost
+of each controller over your hands with a callout on every button that does something
+— see *The control guide* below.
+
 ### Moving: teleport or slide
 
 **PLAYER → Teleport move.** 1 (the default) is the hop; 0 goes back to sliding the rig
@@ -311,6 +315,13 @@ to a rod that did not move vertically at all; and every node is lifted clear of 
 **bed**, which moves further than the surface does. A played fish is carried too, and put
 back in the channel if the reach has bent away under the hop rather than beached.
 
+**A fish on takes the stick back.** While one is hooked the stick is the walk code
+whatever Teleport move says, and the arc and the ring go away. Netting him means
+closing the distance while watching what the line is doing, and a hop that puts you
+somewhere a rod length away with the fish still coming is not that — you want to wade
+in and be able to stop. Turning the toggle off is still how you fish a whole session
+on the stick.
+
 A **snap turn** was measured the same way and does not need any of this — 30° about the
 head sweeps the tiptop far less than a hop moves it, and it costs ×1.17 stretch and 0.5 N,
 inside what ordinary rod movement produces. Do not "fix" it on a hunch; measure it first.
@@ -322,6 +333,30 @@ line control while the menu is open, deliberately, so changes can be felt live. 
 a range button cycling **0.01x / 0.1x / 1x / 10x / 100x**, so no setting is ever out of reach in
 either direction. Below 1x the range zooms in around the value at the moment you pressed it,
 and that window is frozen so the slider does not slide out from under you mid-drag.
+
+### The control guide
+
+**PLAYER → Control labels**, shipped ON. A ghost of each controller drawn where the
+real one is, with a callout on every button that does something. There is no tutorial
+in this game and no button prompt anywhere else, and *"now squeeze the left trigger"*
+is a sentence you should not have to say out loud while somebody is holding a fly rod.
+
+Three things about it are deliberate:
+
+- **The ghost is schematic**, not a model of a Quest controller. It shares space with
+  the rod, the cork and the reel, and a shape that is plainly a diagram reads as an
+  instruction rather than as a second object in the world. It is also the only version
+  that stays correct if the hardware changes.
+- **The labels billboard; their anchors do not.** The leader stays pinned to the part
+  it names while the text is square-on from wherever you are looking. The leaders are
+  thin cylinders, not GL lines — same reason the teleport arc is beads.
+- **The words track the settings.** With teleport off the stick says WALK; with a fish
+  on it says WADE. A label that lies is worse than no label, so `guideWords()` is read
+  every frame and `guideDraw()` skips the canvas unless the text actually changed.
+
+Turn it off and **Save as my default** if you would rather fish without them. It is on
+the phone remote too, so you can switch it on for a guest and off for yourself without
+taking the headset back.
 
 ---
 
@@ -473,6 +508,35 @@ Recorded because each one was mis-diagnosed at least once.
    and a teleport under load looked completely free in here. The stub walks parents now.
    **A harness that cannot see the rig move cannot see anything that moving it breaks.**
 
+15. **A tippet transmitting six times what it can hold.** Reported as *"sometimes while
+   fighting a fish it can jump, or get launched by the pole, and go 20-30 feet in the
+   air"*. The line pulls the fish as an axial spring, and `fishTension` was clamped at
+   **600 N** — fifteen 5X tippets — while the break-off fires off `M.tension`, which is
+   smoothed with a ~1/12 s time constant. So a spike could pour its full force into a
+   1 kg fish for the several frames it took the average to climb past `P.tippet`.
+   Measured with a hard rod movement: **144 N arriving at a fish on a 21 N tippet.**
+   `fishTension` stays raw, because the rod reaction and the break-off test both want
+   it raw; `fishCarried` is what reaches the fish's body, and it is
+   `min(fishTension, P.tippet)`. Two variables on purpose — a test that recomputes the
+   cap for itself proves nothing about the cap the game applied.
+
+   **This is a hardening, not a demonstrated cure, and the difference matters.** The
+   reported symptom was never reproduced: across every tippet, rod sweep, reel setting
+   and forced jump the harness could manage, the highest a hooked fish ever got was
+   **0.73 m**. So there is a path in that is not understood. The second guard is the one
+   that does not depend on understanding it: a hooked fish's speed is capped at 8 m/s,
+   which every measured scenario is already far below (peak 5.0), and which bounds any
+   ballistic apex at 3.3 m. **If a fish is still seen leaving the reach, that cap is the
+   proof the cause is somewhere else entirely** — and the next place to look is anything
+   that writes `Trout.p` or `Trout.v` outside `step()`.
+
+   Worth recording about the harness, too: `Vector3.applyQuaternion()` was a no-op stub
+   and `Quaternion.multiply()` returned `this`, so **the rod could never be rotated** —
+   `_off.set(0,0,NEXT_Z).applyQuaternion(_q)` came back unchanged and the blank pointed
+   down -Z whatever the wrist did. A casting game whose harness has never seen a cast.
+   Both are real now, and with identity quaternions they are exact no-ops, so nothing
+   that was passing changed.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
@@ -489,10 +553,11 @@ actually caught the last undeclared variable.
 **And `remotecheck.mjs` for the phone page**, which has no simulation to fall over and so
 never appears in `smoke.mjs` — see section 4b.
 
-**A stub that answers wrongly is worse than one that throws.** Both of the harness's
-worst misses have been this shape: the Proxy `has` trap that made every undeclared read
-resolve to `undefined`, and `getWorldPosition()` returning a local position so the rig
-could never move. Neither failed; both quietly reported health. When adding a stub, prefer
+**A stub that answers wrongly is worse than one that throws.** Every one of the
+harness's worst misses has been this shape: the Proxy `has` trap that made every
+undeclared read resolve to `undefined`; `getWorldPosition()` returning a local position,
+so the rig could never move; `applyQuaternion()` returning its input, so the rod could
+never turn. None of them failed; all of them quietly reported health. When adding a stub, prefer
 one that is obviously incomplete to one that is plausibly wrong.
 
 **Therefore: run `smoke.mjs` before shipping.** It stubs Three.js and the DOM with real
