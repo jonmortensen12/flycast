@@ -1546,18 +1546,38 @@ const nav=vm.runInContext(`(()=>{
   stick(0,-1); const back=menuSel;
   out.rowsWalk = second!==first && third!==second && back===second;
 
-  /* running off the bottom of a tab lands on the next one, so every row in
-     the game is reachable on one axis */
+  /* off the bottom of a tab wraps to the top of the same one: the tab bar is
+     the way to another section, not the end of this one */
   const tabWas=selTab;
   const rows=TABS[selTab].rows; menuSel=rows[rows.length-1];
   stick(0,1);
-  out.runsOnToNextTab = selTab===(tabWas+1)%TABS.length && menuSel===firstRowOf(selTab);
-  /* and off the top of that one comes back */
+  out.wrapsAtTheBottom = selTab===tabWas && menuSel===rows[0];
+
+  /* UP OFF THE TOP ROW GOES INTO THE TAB BAR, and sideways walks it there */
   menuSel=firstRowOf(selTab);
   stick(0,-1);
-  out.runsBack = selTab===tabWas;
+  out.upIntoTheTabs = menuFocus==='tabs' && selTab===tabWas;
+  stick(1,0);
+  out.tabsGoRight = selTab===(tabWas+1)%TABS.length && menuFocus==='tabs';
+  stick(-1,0);
+  out.tabsGoLeft = selTab===tabWas;
+  /* up again is already as high as it goes — it must not fall out of the bar */
+  stick(0,-1);
+  out.tabsAreTheTop = menuFocus==='tabs';
+  /* down drops into the rows of whichever tab you stopped on */
+  stick(0,1);
+  out.downIntoTheRows = menuFocus==='rows' && menuSel===firstRowOf(selTab);
+  /* and A does the same thing from up there */
+  stick(0,-1);
+  press(rodPad,4);
+  out.aOpensTheTab = menuFocus==='rows' && menuSel===firstRowOf(selTab);
+  /* nothing sideways in the bar may touch a setting */
+  const watch=P.takeRadius;
+  stick(0,-1); stick(1,0); stick(-1,0); stick(0,1);
+  out.tabsTouchNoSetting = P.takeRadius===watch;
 
   /* left and right move the value by its own step, exactly */
+  menuFocus='rows';
   selTab=TABS.findIndex(t=>t.name==='FISH');
   const row=MENU.findIndex(r=>r[1]==='takeRadius');
   menuSel=row; P.takeRadius=0.70;
@@ -1768,6 +1788,167 @@ console.log('markers and messages',disp);
 {
   const bad=Object.entries(disp).filter(([k,v])=>v===false).map(([k])=>k);
   if(bad.length) console.log('  *** MARKER / MESSAGE FAILURE:',bad.join(', '),'***');
+}
+
+/* ── THE PRESENTATION ZONE ─────────────────────────────────────────────
+   `latTol` and `upMax` used to appear in exactly ONE place in the file — the
+   four vertices of the quad the zone was drawn from — and in no test a fish
+   ever applied. That is the failure this is guarding against coming back: a
+   picture of a rule with no rule under it. So every claim below is driven
+   through the same fitZone/zoneStep/judge the frame loop calls, on real fish
+   in the real reach. */
+const zone=vm.runInContext(`(()=>{
+  const out={}, was={auto:P.zoneAuto, clear:P.zoneClear, up:P.upMax,
+                     lat:P.latTol, min:P.zoneMin, slip:P.maxSlip};
+  for(const f of fishes) f.reseat();
+  const f=fishes[0];
+  const put=(x,z,depth)=>{ f.p.set(x,surfY(x)-depth,z); f.fitZone(); };
+
+  /* OFF: every fish gets exactly the box the two sliders describe */
+  P.zoneAuto=0; put(0,-6,0.42);
+  out.offIsExactly = Math.abs(f.zoneUp-P.upMax)<1e-9 && Math.abs(f.zoneHalf-P.latTol)<1e-9;
+
+  /* ON, in open water: Snell's window, so a DEEPER fish gets a longer and a
+     wider box than a shallow one. This is the whole reason a pool fish wants
+     a long clean drift and a pocket fish will forgive a short one. */
+  P.zoneAuto=1;
+  /* somewhere with nothing upstream of it, so only the window is talking */
+  const clean=(()=>{
+    const scan=ZONE_SCAN(P.upMax);            /* the game's own rule, not ours */
+    for(let x=-30;x<30;x+=1){
+      let free=true;
+      for(const o of OBST) if(o.x<x&&x-o.x<scan&&Math.abs(o.z+6)<o.r+3) free=false;
+      for(const d of DROPS) if(d.x+d.w<x&&x-(d.x+d.w)<scan&&d.h*P.grade>=0.06) free=false;
+      if(free) return x;
+    }
+    return null;
+  })();
+  out.foundOpenWater = clean!==null;
+  if(clean!==null){
+    put(clean,-6,0.15); const shallow={up:+f.zoneUp.toFixed(2), half:+f.zoneHalf.toFixed(2)};
+    put(clean,-6,1.20); const deep   ={up:+f.zoneUp.toFixed(2), half:+f.zoneHalf.toFixed(2)};
+    out.window={shallow,deep};
+    out.deeperSeesFurther = deep.up>shallow.up*1.4;
+    out.deeperSeesWider   = deep.half>shallow.half*1.2;
+  }
+
+  /* ON, behind a rock: the box REACHES PAST IT, because the drift has to
+     survive the seam and not just the last two feet. */
+  const rock=OBST[0];
+  P.zoneClear=0.8;
+  put(rock.x+2.2,rock.z,0.35);
+  const need=2.2+rock.r+P.zoneClear;
+  out.rock={dx:2.2, r:+rock.r.toFixed(2), zoneUp:+f.zoneUp.toFixed(2),
+            needs:+need.toFixed(2), why:f.zoneWhy};
+  out.reachesPastTheRock = f.zoneUp>=need-1e-6 && f.zoneWhy==='rock';
+  /* and Zone clear is what buys that extra drift */
+  P.zoneClear=2.0; f.fitZone();
+  out.clearBuysDrift = f.zoneUp>=2.2+rock.r+2.0-1e-6;
+  P.zoneClear=0.8;
+  /* a rock OUT OF HIS LINE is not his problem */
+  put(rock.x+2.2,rock.z+rock.r+4.0,0.35);
+  out.rockOffToTheSideIgnored = f.zoneWhy!=='rock';
+
+  /* ON, below a lip: same again for a drop in the free surface */
+  const lip=DROPS.filter(d=>d.h*P.grade>=0.06).sort((a,b)=>a.x-b.x)[0];
+  if(lip){
+    /* far enough below it that the window alone would not reach, and inside
+       the scan, so the lip is what is doing the work */
+    const dxL=Math.min(ZONE_SCAN(P.upMax)-0.3,P.upMax*1.1);
+    put(lip.x+lip.w+dxL,-6,0.35);
+    out.drop={dx:+dxL.toFixed(2), zoneUp:+f.zoneUp.toFixed(2), why:f.zoneWhy};
+    out.reachesPastTheLip = f.zoneWhy==='drop'&&f.zoneUp>=dxL+lip.w*0.5+P.zoneClear-1e-6;
+    /* and a fish a long way below the same lip is NOT holding under it */
+    put(lip.x+lip.w+ZONE_SCAN(P.upMax)+6,-6,0.35);
+    out.farBelowIsNotUnderIt = f.zoneWhy==='window'&&f.zoneUp<P.upMax*1.8;
+  }
+
+  /* the floor holds however thin the water gets */
+  P.zoneMin=2.5; put(clean===null?0:clean,-6,0.02);
+  out.floorHolds = f.zoneUp>=2.5-1e-9;
+  P.zoneMin=was.min;
+
+  /* ── WHAT IT MEASURES ───────────────────────────────────────────────── */
+  P.zoneAuto=0; P.upMax=4; P.latTol=0.8; put(0,-6,0.42);
+  const dt=1/45;
+  /* a fly coming the whole way down the box, behaving itself */
+  f.zoneReset();
+  for(let x=-4.0;x<=0.001;x+=0.05) f.zoneStep(dt,x,-6,0.02,true);
+  const full=f.judge(0.02,true,9.0);
+  out.fullDrift={cover:+full.cover.toFixed(2), avg:+full.avgSlip.toFixed(3), clean:full.clean};
+  out.coversTheWholeBox = full.cover>0.92 && full.clean;
+  /* THE FALLBACK IS NOT USED once he has watched something: 9.0 m/s of
+     whole-cast average is filthy, and he judged the box instead. */
+  out.ignoresTheRestOfTheCast = full.avgSlip<0.05;
+
+  /* the same fly, dragging only in the last third — which the old whole-cast
+     average would have forgiven and he must not */
+  f.zoneReset();
+  for(let x=-4.0;x<=0.001;x+=0.05) f.zoneStep(dt,x,-6,x>-1.3?0.9:0.02,true);
+  const late=f.judge(0.9,true,0.0);
+  out.lateDrag={avg:+late.avgSlip.toFixed(3), clean:late.clean};
+  out.dragInFrontOfHimIsNotForgiven = !late.clean;
+
+  /* and the reverse: filthy above the box, honest inside it */
+  f.zoneReset();
+  for(let x=-9.0;x<-4.2;x+=0.05) f.zoneStep(dt,x,-6,1.4,true);   /* outside */
+  for(let x=-4.0;x<=0.001;x+=0.05) f.zoneStep(dt,x,-6,0.02,true);
+  const early=f.judge(0.02,true,1.4);
+  out.earlyDrag={avg:+early.avgSlip.toFixed(3), clean:early.clean};
+  out.dragAboveTheBoxIsNotHeld = early.clean;
+
+  /* a fly that appears on his head has covered none of it */
+  f.zoneReset();
+  for(let x=-0.30;x<=0.001;x+=0.03) f.zoneStep(dt,x,-6,0.02,true);
+  const onHisHead=f.judge(0.02,true,0.02);
+  out.onHisHead={cover:+onHisHead.cover.toFixed(2), pres:+onHisHead.pres.toFixed(2)};
+  out.noDriftIsWorthLess = onHisHead.pres<full.pres*0.5 && onHisHead.chance<full.chance*0.5;
+
+  /* out to the side of the box he is not judging it at all */
+  f.zoneReset();
+  for(let x=-4.0;x<=0.001;x+=0.05) f.zoneStep(dt,x,-6+P.latTol+0.4,0.02,true);
+  out.outsideIsNotWatched = f.zoneT===0;
+  /* and passing him resets the book, so the next cast starts clean */
+  f.zoneReset();
+  for(let x=-4.0;x<=0.001;x+=0.05) f.zoneStep(dt,x,-6,0.02,true);
+  f.zoneStep(dt,1.5,-6,0.02,true);
+  out.passingHimResets = f.zoneT===0 && f.zoneRun===0;
+
+  /* slack water has no upstream and no drift, so the box says nothing and the
+     old whole-cast average is what is left — this is what keeps the pond sane */
+  f.zoneReset();
+  const still=f.judge(0.02,false,0.02);
+  out.slackWaterFallsBack = still.cover===1 && still.pres===1;
+
+  /* ── ALL FOUR SIDES OF IT ───────────────────────────────────────────── */
+  P.showZones=1; renderer._loop();
+  const g=zoneBoxes[0].geometry.attributes.position.array;
+  const segs=g.length/6;
+  out.segments=segs;
+  out.isTwoSidesPlusTwoEnds = segs===ZSEG*2+2;
+  /* the last two segments are the cross members: constant x, spanning z */
+  const seg=i=>({ax:g[i*6],az:g[i*6+2],bx:g[i*6+3],bz:g[i*6+5]});
+  const e1=seg(segs-2), e2=seg(segs-1);
+  out.endsAreClosed = Math.abs(e1.ax-e1.bx)<1e-6 && Math.abs(e1.az-e1.bz)>0.05
+                   && Math.abs(e2.ax-e2.bx)<1e-6 && Math.abs(e2.az-e2.bz)>0.05
+                   && Math.abs(e1.ax-e2.ax)>0.5;
+  /* every vertex sits ON the water, which is what the sampling along the long
+     sides is for — two corners cannot follow a surface with a drop in it */
+  let offWater=0;
+  for(let i=0;i<g.length;i+=3) if(Math.abs(g[i+1]-(surfY(g[i])+0.03))>1e-6) offWater++;
+  out.everyVertexOnTheWater = offWater===0;
+
+  for(const k in was) {}
+  P.zoneAuto=was.auto; P.zoneClear=was.clear; P.upMax=was.up;
+  P.latTol=was.lat; P.zoneMin=was.min; P.maxSlip=was.slip;
+  for(const q of fishes) q.reseat();
+  renderer._loop();
+  return out;
+})()`,sandbox);
+console.log('the presentation zone',zone);
+{
+  const bad=Object.entries(zone).filter(([k,v])=>v===false).map(([k])=>k);
+  if(bad.length) console.log('  *** PRESENTATION ZONE FAILURE:',bad.join(', '),'***');
 }
 
 console.log('OK');

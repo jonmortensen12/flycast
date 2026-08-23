@@ -193,6 +193,70 @@ one of them back in its lie and drop a fish you had on. The mesh scale **is** th
 and weight comes off `bodyMass()`, which is length **cubed**, so the card under a landed
 fish and what the rod feels can never disagree with each other.
 
+### 2.7c The presentation zone
+
+The box drawn over each fish used to be **scenery**. `latTol` and `upMax` appeared
+in exactly one place in the whole file — the four vertices of the quad
+`buildZones()` drew — and in no test a fish ever applied. The take was a **circle**
+of radius `takeRadius` in plan view, so a fly landing a foot *behind* a trout was
+offered to him on the same terms as one that came down his lane from six feet
+above. The picture of how a trout feeds and the rule the game applied were two
+different things, and the picture was the one that was right.
+
+Now the box **is** the rule, and it has two halves.
+
+**How big it is** — not one number for the whole reach. The floor is what he can
+physically see: a trout looks at the surface through **Snell's window**, a circle
+whose radius is about **1.13 × his depth below the film**, so a fish hanging in two
+feet of water first picks a floating fly up a long way further upstream than one
+tucked under the bank in six inches. `upMax` is that length for the reference fish
+(0.42 m down, a window of ~0.92 m) and the ratio scales it, clamped to 0.30–1.7×.
+`latTol` widens on the same ratio, because a deeper fish sees a wider patch as well
+as a longer one.
+
+Then it is **extended to reach past whatever is upstream of him** — a rock, a sunk
+log, the lip of a drop — by `zoneClear`. A fish lying behind a boulder or under a
+fall is one whose drift has to survive the seam, not just the last two feet, and
+that is the whole difficulty of pocket water. Two things about that extension are
+load-bearing:
+
+- **"Near" is a couple of rod lengths, not the whole reach.** `ZONE_SCAN` is
+  `max(2.0, upMax·1.25)`. The first version scanned `upMax·3.2` — nineteen metres —
+  and a fish standing eighteen metres below a lip had his window stretched to twenty
+  by it. That is not a fish holding under a waterfall; it is a fish in a pool that
+  happens to have one somewhere above it. `smoke.mjs` asserts both halves: a fish
+  just below a lip is under it, a fish well below the same lip is not.
+- **It is a `max`, not a sum.** A feature already inside a deep fish's window does
+  not lengthen anything — but it still sets `zoneWhy`, so the refusal can name it
+  (*"drag off the rock — refused"*). Whose seam you failed in is the useful half of
+  the message.
+
+`ZONE_SCAN` is shared with the harness on purpose. A test that writes out the rule
+it is checking is a test that can quietly disagree with the code.
+
+**What it measures** — the drift is judged over the box and nothing else. Slip
+accumulates only while the fly is inside it, so eight metres of clean water upstream
+no longer forgives a foot of drag in front of his nose, and one bad instant at the
+splashdown no longer poisons a drift that was fine by the time it arrived. And how
+much of the box the fly actually came down is its own multiplier: `0.25 + 0.75·cover`,
+so a fly that appears on his head is worth about a quarter of the chance and one that
+came the whole way is worth all of it.
+
+`Trout.judge()` is one function returning the whole verdict, called by the frame loop
+and by `smoke.mjs`. The number the game rolls against and the number a test asks about
+cannot be two different numbers.
+
+Slack water has no upstream and no drift, so below 0.08 m/s the box says nothing and
+the old whole-cast average is what is left. That is what keeps the pond sane; it earns
+its takes on the chase path instead.
+
+**It is drawn on all four sides**, and it is live: amber at rest, green while your fly
+is inside it and drifting honestly, **red the moment it starts to drag**. That is the
+piece of feedback that turns *"drag — refused"* from a verdict you get afterwards into
+something you can see and fix on the water. The long sides are sampled at `ZSEG`
+points rather than drawn corner to corner, because two corners cannot follow a surface
+with a drop in it — which is exactly the water this feature exists for.
+
 ### 2.7b Landing one
 
 Netting a fish is two stages, and the first one is the point of the whole game.
@@ -316,7 +380,9 @@ zero). They cycle in and out of feeding; feeding fish sit higher and nose the fi
 rise rings. The take is evaluated **continuously as the fly drifts through** the take radius,
 once per pass — not by where the fly lands. Landing only decides whether you spook them
 (splash, or line dropped within the lining radius). Non-feeders' take chance is multiplied
-down. Fights: tension against tippet; the net lands anything inside the hoop.
+down. **Where** the fly has to have drifted, and how the drift is scored, is the
+presentation zone — section 2.7c. Fights: tension against tippet; the net lands
+anything inside the hoop.
 
 ### Sound
 
@@ -452,15 +518,24 @@ is most of a row — so a setting you want to move by one step is a setting you 
 the pointer for. The right stick was doing nothing at all, and a stick is exactly
 the input that is good at *one step, precisely, without moving my hand*.
 
-- **Up and down walk the rows**, and **run on into the next tab** at either end. So
-  every row in the game is reachable from any other on one axis with no button, and
-  a tab boundary is not a wall.
+- **Up and down walk the rows**, wrapping within the tab.
+- **Up off the top row goes INTO THE TAB BAR**, where left and right walk the tabs
+  and down (or **A**) drops back into the rows of whichever one you stopped on.
+  `menuFocus` is `'rows'` or `'tabs'`, and the bar draws its selection differently
+  when it has the stick — a bright frame and a ◀ ▶ either side — because a
+  selection you cannot see is one you cannot steer.
 - **Left and right move the value by its own step** — the same step the phone and
   the keyboard use, so a 0/1 toggle flips and a 0.05 slider moves 0.05. Held, it
-  repeats after a beat, so a flick is exactly one step.
-- **Click the stick** for the next tab, when up-and-down is too far to walk.
+  repeats after a beat, so a flick is exactly one step. In the bar, sideways is
+  what it looks like: the next tab along, and it never touches a setting.
+- **Click the stick** for the next tab, when you would rather not go up first.
 - **A** pushes an action row, and on a row that is not an action it steps that row's
   range multiplier — the only other thing a row has a button for.
+
+The first version ran straight on into the next tab at either end. It sounds tidy
+and it is not: you cannot see the bar you are moving through, so changing section
+felt like the panel had been swapped under you, and getting from PRESETS to FISH
+meant walking every row of six sections on the way.
 
 **The two never argue.** While the ray is ON the panel the pointer owns the
 selection: it sets `menuSel` from the row under it every frame, and a stick pulling
@@ -889,21 +964,7 @@ reports undeclared identifier reads. `node --check` catches none of this.
 5. **No haul mechanic.** Single and double hauls are the obvious next casting feature.
 6. **One reach of river, four fish, one fly pattern.** No fly selection, no hatch, no
    fish memory of being pricked.
-6b. **The feeding lane is drawn and nothing else.** `latTol` and `upMax` appear in
-   exactly one place in the file — the four vertices of the quad `buildZones()`
-   draws — and in no test the fish ever apply. The take is a **circle** of radius
-   `takeRadius` in plan view, evaluated once per pass, with no upstream/downstream
-   sense at all: a fly that lands a foot BEHIND a fish is offered to him on exactly
-   the same terms as one that drifts down the lane into his nose. So the picture
-   the game draws of how a trout feeds and the rule it actually applies are two
-   different things, and the picture is the one that is right. Making the drawn
-   lane the real window — upstream only, `latTol` wide, `upMax` long — is a small
-   change with a large effect on whether where you stand matters.
-6c. **Drift quality is judged over the whole drift, not the part he saw.** `avgSlip`
-   averages from the instant of touchdown, so eight metres of clean drift can
-   forgive a foot of drag right in front of him, and one bad instant at the landing
-   poisons a drift that was fine by the time it arrived. What a fish sees is the
-   last second or so before the fly reaches him.
+   (The lane and the drift window were both on this list and are now section 2.7c.)
 7. **Performance.** ~116 active nodes at default spacing, ~265 at both minimums. On the CPU
    speck path, specks cost a flow evaluation each and dominate at high density; the GPU path
    removes that entirely. See `STRATEGY.md` for the full headroom analysis.
