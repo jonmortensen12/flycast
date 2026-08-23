@@ -336,6 +336,15 @@ const base={THREE,document,console,Math,JSON,Date,Object,Array,Number,String,Boo
   addEventListener(){},removeEventListener(){},
   XRRigidTransform:class{},
 };
+/* The Proxy below answers `has` with true for EVERYTHING, which is what lets it
+   report an undeclared read instead of throwing — and that also swallows the
+   language's own globals, because they live on the context's intrinsics rather
+   than on this object. `Infinity` came back as undefined, so a perfectly
+   ordinary `let stop=Infinity` inside the game turned into NaN and quietly took
+   six presentation-zone assertions down with it. They are globals, not
+   undeclared variables: put them on the table. */
+base.Infinity=Infinity; base.NaN=NaN; base.undefined=undefined;
+base.parseFloat=parseFloat; base.parseInt=parseInt; base.isFinite=isFinite; base.isNaN=isNaN;
 base.window=base; base.self=base; base.globalThis=base;
 const sandbox=new Proxy(base,{
   has(){return true;},
@@ -1164,7 +1173,7 @@ const fight=vm.runInContext(`(()=>{
   /* 2 & 3. drive the fight hard and watch what reaches him. The rod hand can
      actually be rotated now, so this is a real sweep rather than a shove. */
   const grip=renderer.xr.getControllerGrip(0);
-  let sawT=0, sawV=0, sawAir=0, carried=0;
+  let sawT=0, sawV=0, sawAir=0, carried=0, capBit=false;
   for(let f=0;f<220&&hooked;f++){
     grip.quaternion.setFromAxisAngle(new THREE.Vector3(1,0,0),Math.sin(f*0.55)*1.1);
     if(f===40&&hooked){ hooked.beh='jump'; hooked.behT=0.45; hooked.v.y=3.6; }
@@ -1177,21 +1186,89 @@ const fight=vm.runInContext(`(()=>{
     /* what the GAME applied, not what this test would have applied. Recompute
        the cap here and the assertion is true by construction and worth nothing. */
     carried=Math.max(carried,fishCarried);
+    /* did the tippet cap ACTUALLY engage? Asking whether a rounded peak beat
+       the tippet is a coin toss when the peak lands on it — 49, 51 and 40 over
+       three runs of the same build — and it got flakier the moment the rod
+       started bending, because a rod that bends is a rod absorbing the pull
+       that used to go into the line. Ask the question directly instead. */
+    if(fishTension>fishCarried+1e-6) capBit=true;
   }
   grip.quaternion.set(0,0,0,1);
   for(const f of fishes) f.reseat();
   player.position.set(wasP.x,0,wasP.z); player.rotation.y=wasP.y;
   resetCast();
-  return {dry, on, off, tippet:P.tippet,
-          rawSeen:+sawT.toFixed(0), carriedMax:+carried.toFixed(0),
+  return {dry, on, off, tippet:P.tippet, capBit,
+          rawSeen:+sawT.toFixed(1), carriedMax:+carried.toFixed(1),
           topSpeed:+sawV.toFixed(1), topAir:+sawAir.toFixed(2)};
 })()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
 console.log('a fish on',fight);
 if(!fight.dry.owns || !fight.on.hooked || fight.on.owns || fight.on.arc || fight.on.ring ||
    fight.off.owns || fight.carriedMax>fight.tippet ||
-   fight.rawSeen<=fight.tippet ||     /* the cap must have actually bitten */
+   !fight.capBit ||                   /* the cap must have actually bitten */
    fight.topSpeed>8.05 || fight.topAir>3.4)
   console.log('  *** FISH-ON FAILURE ***');
+
+/* ── the fish bends the rod ──────────────────────────────────────────────
+   The reaction the line puts back into the blank was written into rod
+   VELOCITY only — inside a substep that has already integrated the rod, and
+   that ends by re-deriving every rod velocity from the positions it solved.
+   It was therefore overwritten a few lines later, every substep, and never
+   moved a node: the rod hung at its own dead weight with a fish on. So the
+   claim here is the crude one that would have caught it — a fish pulling
+   across the blank bends it further than its own weight does — plus the one
+   that says the Playing flex knob reaches the same place.
+
+   The pull is pinned ACROSS the rod on purpose. A rod pointed straight at a
+   fish takes almost none of his pull as bend, and that is correct physics
+   rather than a bug, so it is not what this measures. */
+const rodbend=vm.runInContext(`(()=>{
+  applyVenue('cedar'); applyPreset(SHIPPED);
+  const settle=n=>{ for(let i=0;i<n;i++) renderer._loop(); };
+  const fight=(flex)=>{
+    for(const f of fishes) f.reseat();
+    P.fightFlex=flex;
+    lineOut=12; offSpool=lineOut+rodArc+2.2; resetCast(); settle(60);
+    const idle=M.bend;
+    runAction('!hookfish'); settle(4);
+    if(!hooked) return {idle:+idle.toFixed(1), bend:0, carried:0};
+    /* HOLD HIM AT A FIXED STRETCH, SQUARE TO THE BLANK. A fight's own tension
+       swings between nothing and everything run to run, so a peak taken over a
+       swimming fish cannot compare two rods - the same flake the hop test was
+       pinned for. Park him at lineOut + 0.30 m, which is 18 N at the shipped
+       Line stretch, and put him ACROSS the rod: a rod pointed down the line at
+       a fish takes his pull as compression and barely bends at all, which is
+       correct physics and the reason an angler keeps the rod up and off to the
+       side. What is left, after the rod settles, is the bend. */
+    const T=(RN-1)*3;
+    const tip=[rpos[T],rpos[T+1],rpos[T+2]];
+    let ax=tip[0]-rpos[0], az=tip[2]-rpos[2];
+    const al=Math.hypot(ax,az)||1; ax/=al; az/=al;
+    const L=lineOut, d=L+0.30;
+    let carried=0, sum=0, n=0;
+    for(let i=0;i<130&&hooked;i++){
+      hooked.beh='easy'; hooked.behT=9; hooked.stamina=1;
+      hooked.p.set(tip[0]-az*d, tip[1]-0.60, tip[2]+ax*d);
+      hooked.v.set(0,0,0);
+      lineOut=L;
+      renderer._loop();
+      if(!hooked) break;
+      carried=Math.max(carried,fishCarried);
+      if(i>=90){ sum+=M.bend; n++; }
+    }
+    for(const f of fishes) f.reseat();
+    resetCast();
+    return {idle:+idle.toFixed(1), bend:+(sum/Math.max(1,n)).toFixed(1),
+            carried:+carried.toFixed(1)};
+  };
+  const stiff=fight(1.0), soft=fight(3.0);
+  applyPreset(SHIPPED);
+  return {stiff, soft};
+})()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
+console.log('the fish bends the rod',rodbend);
+if(rodbend.stiff.carried<5 ||                        /* he has to have pulled */
+   rodbend.stiff.bend<rodbend.stiff.idle+6 ||        /* and it has to arrive */
+   rodbend.soft.bend<rodbend.stiff.bend+2)           /* and the knob has to bite */
+  console.log('  *** ROD-BEND FAILURE ***');
 
 /* ── the control guide ───────────────────────────────────────────────────
    Every callout says something, both hands are drawn, turning it off hides
@@ -1487,6 +1564,29 @@ const spec=vm.runInContext(`(()=>{
   const onlyRainbowModelled=borrow[0]==='rainbow:model'
     && borrow.slice(1).every(q=>q.endsWith(':procedural'));
 
+  /* A LOADED FISH IS NOT MADE OF METAL. glTF defaults metallicFactor AND
+     roughnessFactor to 1 when a file does not state them, and a model exported
+     without a metal-roughness map is exactly the file that does not state
+     them — assets/trout.glb is one. A metal has no diffuse term, everything it
+     shows is what it reflects, and this scene carries no environment map, so
+     the rainbow rendered as a black silhouette with a highlight sliding over
+     it: measured on the display fish, RGB 5,5,3 out of 255. So the model's
+     finish is held to the species' own paint before any fish is built from it,
+     which is also what makes the wet-shine ramp start where it should. */
+  const bareGltf=new THREE.MeshStandardMaterial({metalness:1,roughness:1});
+  fishFinish(bareGltf,SPECIES.rainbow);
+  P.assetOn=1;
+  troutAssets.rainbow={geo:TROUT_GEO,mat:bareGltf,extra:[]};
+  const lit=makeTrout(0.4,SPECIES.rainbow);
+  const litMat=lit.userData.swim;          /* the body material, wave and all */
+  const finish={metal:+bareGltf.metalness.toFixed(2), rough:+bareGltf.roughness.toFixed(2),
+                fromAsset:!!lit.userData.fromAsset,
+                metal0:+litMat.userData.metal0.toFixed(2),
+                paint:SPECIES.rainbow.paint.metal};
+  delete troutAssets.rainbow;
+  const notMadeOfMetal = finish.fromAsset && finish.metal<=finish.paint+1e-9
+                      && finish.metal0===finish.metal && finish.rough<0.98;
+
   /* and each one is reachable from the menu, so the phone gets it too */
   const rows=SPECIES_ORDER.every(id=>MENU.some(r=>r[1]===SPECIES[id].key)
                                      &&(SPECIES[id].key in P));
@@ -1494,12 +1594,14 @@ const spec=vm.runInContext(`(()=>{
 
   applyPreset(before);
   return {built, errs, noneOn, allOn, stable, spread, kindsHere, borrow,
-          onlyRainbowModelled, kids:[kids0,kids1], kept, size, flat, varied,
+          onlyRainbowModelled, finish, notMadeOfMetal,
+          kids:[kids0,kids1], kept, size, flat, varied,
           rows, sizeRow};
 })()`,sandbox);
 console.log('the species',spec);
 if(spec.errs.length||!spec.noneOn||!spec.allOn||!spec.stable||
    spec.spread>0.03||spec.kindsHere<2||!spec.onlyRainbowModelled||
+   !spec.notMadeOfMetal||
    spec.kids[0]!==spec.kids[1]||!spec.kept||
    spec.size.len!==2||Math.abs(spec.size.wt-8)>0.05||spec.size.scale!==1||
    spec.size.back!==1||!spec.flat||!spec.varied||!spec.rows||!spec.sizeRow)
@@ -1832,22 +1934,41 @@ const zone=vm.runInContext(`(()=>{
     out.deeperSeesWider   = deep.half>shallow.half*1.2;
   }
 
-  /* ON, behind a rock: the box REACHES PAST IT, because the drift has to
-     survive the seam and not just the last two feet. */
+  /* ON, behind a rock — and WHICH half of the rule applies is decided by
+     whether the water is going over it. A drowned boulder is a seam the fly
+     can drift through, so the box reaches past it and the drift has to survive
+     it. One standing out of the river is not a seam, it is a wall: nothing
+     drifts over it, the presentation starts below it, and a box reaching past
+     it asks for a cast the water cannot receive. Same rock, twice, with
+     Obstacle height deciding which it is. */
   const rock=OBST[0];
+  const wasH=P.obstHeight;
   P.zoneClear=0.8;
+  /* sink it until its crown is a clear 25 cm under the film. The crown is the
+     centre the mesh is placed at PLUS the vertical semi-axis, which is the same
+     arithmetic the collision test and the zone rule use — write it out here and
+     the test cannot quietly disagree with them. */
+  const sinkTo=(o,under)=>Math.max(0.02,
+    ((surfY(o.x)-bedY(o.x,o.z))-under-o.r*(o.kind==='log'?0.55:0.72))/o.h);
+  P.obstHeight=sinkTo(rock,0.25);
   put(rock.x+2.2,rock.z,0.35);
   const need=2.2+rock.r+P.zoneClear;
   out.rock={dx:2.2, r:+rock.r.toFixed(2), zoneUp:+f.zoneUp.toFixed(2),
             needs:+need.toFixed(2), why:f.zoneWhy};
-  out.reachesPastTheRock = f.zoneUp>=need-1e-6 && f.zoneWhy==='rock';
+  out.reachesPastTheSunkRock = f.zoneUp>=need-1e-6 && f.zoneWhy==='rock';
   /* and Zone clear is what buys that extra drift */
   P.zoneClear=2.0; f.fitZone();
   out.clearBuysDrift = f.zoneUp>=2.2+rock.r+2.0-1e-6;
   P.zoneClear=0.8;
+  /* the same rock, standing out of the water */
+  P.obstHeight=wasH; f.fitZone();
+  out.proud={zoneUp:+f.zoneUp.toFixed(2), face:+(2.2-rock.r).toFixed(2), why:f.zoneWhy};
+  out.stopsAtTheProudRock = Math.abs(f.zoneUp-(2.2-rock.r))<0.02 && f.zoneWhy==='rock';
+  P.obstHeight=sinkTo(rock,0.25);
   /* a rock OUT OF HIS LINE is not his problem */
   put(rock.x+2.2,rock.z+rock.r+4.0,0.35);
   out.rockOffToTheSideIgnored = f.zoneWhy!=='rock';
+  P.obstHeight=wasH;
 
   /* ON, below a lip: same again for a drop in the free surface */
   const lip=DROPS.filter(d=>d.h*P.grade>=0.06).sort((a,b)=>a.x-b.x)[0];

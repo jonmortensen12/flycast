@@ -32,6 +32,26 @@ has drifted apart.
 `holesJS`/`holesGL` emit gaussian scour pockets into both languages from one
 data list — that is how the plunge pools and the pocket water get their depth.
 
+### Where the fish are, and how long a drift the reach can give
+
+A lie has to be two things at once: water a trout would actually hold in, and water
+a fly can be presented to. Boulder Garden shipped failing both. Two of its six lies
+were typed in by hand against **procedurally placed** boulders and had ended up
+welded to the upstream face of one — a metre of stone directly over the fish's lane,
+0.2 m of clean water above his nose against a 6 m presentation box — and three more
+stood in eight inches of open water between pockets, which is water a trout crosses,
+not water he lives in. Its lies now come **off the rocks**, the same way its scour
+holes do: one fish per chosen boulder, placed 0.62 of the way down that boulder's
+own pocket and a little off the centre line, which is where a pocket-water trout
+lies and the only place in a pocket a drift can reach him from.
+
+`upMax` is in `VENUE_BASE`, so **the drift length is the reach's own number**. Six
+metres is a run or a glide, where a fly can be dropped a long way above a fish and
+tracked the whole way in. Boulder Garden — whose subtitle has always said *short
+drifts* — runs 2.6, and Stairstep Falls runs 4.2, because the pool below a lip is
+the whole of the presentation. The zone rule itself also now **stops** at anything
+the fly cannot come over; see HANDOFF 2.7c.
+
 ## Switching venues
 
 Venues hot-swap. `runAction('!venue:<id>')` calls `requestVenue()`, which queues
