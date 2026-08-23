@@ -44,12 +44,18 @@
 #pvmenu{position:fixed;inset:auto 0 0 0;max-height:62vh;display:none;z-index:50;
   background:rgba(12,18,22,0.96);border-top:1px solid #46606c;
   overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 12px 96px}
-#pvtabs{position:sticky;top:46px;z-index:2;display:flex;gap:6px;overflow-x:auto;
-  background:rgba(12,18,22,0.98);padding:8px 0 10px;border-bottom:1px solid #2c4048;
-  -webkit-overflow-scrolling:touch;scrollbar-width:none}
-#pvtabs::-webkit-scrollbar{display:none}
+/* WRAP, DO NOT SCROLL. This was one flex row with overflow-x:auto and the
+   scrollbar deliberately hidden, which on a 390 px phone put three pills out of
+   fifteen on screen with nothing to say the other twelve existed. SPECIES is
+   the thirteenth, so on a phone it was effectively unreachable — you had to
+   guess that the pill row swiped sideways. Wrapping shows every tab at once.
+   It costs three or four lines at the top of the panel, which is why the bar no
+   longer sticks: showTab already returns you to scrollTop 0, so the tabs are
+   under your thumb exactly when you want them and out of the way otherwise. */
+#pvtabs{display:flex;flex-wrap:wrap;gap:6px;
+  background:rgba(12,18,22,0.98);padding:8px 0 10px;border-bottom:1px solid #2c4048}
 #pvtabs button{flex:0 0 auto;background:#1d2a31;color:#8fb3bd;border:1px solid #344a54;
-  border-radius:999px;padding:11px 16px;font:600 14px/1 system-ui,sans-serif;
+  border-radius:999px;padding:9px 13px;font:600 13px/1 system-ui,sans-serif;
   white-space:nowrap;cursor:pointer}
 #pvtabs button.on{background:#cf8a4a;color:#1b120a;border-color:#cf8a4a}
 .pvgroup{display:none}
@@ -8934,14 +8940,32 @@ function previewUpdate(dt){
       rowByKey[key]={inp,val,fmt};
     }
   }
+  /* MEASURE THE BAR, DO NOT GUESS AT IT. The panel cleared the control bar with
+     a hard-coded 96 px of bottom padding, which was right when the bar was one
+     row of buttons. It wraps: on a 390 px phone it is three rows and about
+     175 px tall, so the last rows of every tab sat underneath it with no way to
+     scroll them out — on SPECIES that is Species traits, on FISH it is Fish
+     size. Take the height from the bar itself, and take it again whenever the
+     phone is turned, since that is what changes how many rows it wraps to. */
+  const fitPanel=()=>{
+    const bar=document.getElementById('pvbar');
+    const h=(bar&&getComputedStyle(bar).display!=='none')
+      ? bar.getBoundingClientRect().height : 0;
+    panel.style.paddingBottom=Math.round(h+28)+'px';
+  };
   const setPanel=open=>{
     panel.style.display=open?'block':'none';
     document.getElementById('pvSet').textContent=open?'Hide settings':'Settings';
-    if(open) for(const k in rowByKey){            /* resync if VR changed them */
-      rowByKey[k].inp.value=P[k];
-      rowByKey[k].val.textContent=rowByKey[k].fmt(P[k]);
+    if(open){
+      fitPanel();
+      for(const k in rowByKey){                   /* resync if VR changed them */
+        rowByKey[k].inp.value=P[k];
+        rowByKey[k].val.textContent=rowByKey[k].fmt(P[k]);
+      }
     }
   };
+  addEventListener('resize',()=>{ if(panel.style.display==='block') fitPanel(); });
+  addEventListener('orientationchange',()=>setTimeout(fitPanel,200));
   if(groupEls.length) showTab(0);
   document.getElementById('pvSet').addEventListener('click',
     ()=>setPanel(panel.style.display!=='block'));
