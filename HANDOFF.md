@@ -228,8 +228,18 @@ variable at a time.
 Each species has a **model slot of its own**, all normalised to a metre nose-to-tail along X
 with the nose at −X and the back at +Y, which is the frame the procedural body uses and the
 reason a loaded model inherits the swim shader untouched. Drop any of these into `assets/`
-and it is used; leave it out and that species stays procedural. A species with no file of
-its own falls back to the generic `trout` slot.
+and it is used; leave it out and that species stays procedural.
+
+**A species uses its own file or it stays procedural — it never borrows another species'
+model.** This shipped the other way round for one build, with the generic `trout` slot
+standing in for anything missing, and the effect was that with `assets/trout.glb` in place —
+the normal case — a brown, a brookie, a cutthroat and a salmon all rendered as that one
+rainbow mesh. The species were indistinguishable until you turned **Use model assets** off:
+the whole feature erased by its own fallback. The procedural body is the better stand-in by a
+long way, because it already carries that species' paint, tail shape and body depth, so a
+reach with only `trout.glb` in it shows a modelled rainbow swimming alongside generated
+browns and brookies that still look like browns and brookies. `smoke.mjs` installs a rainbow
+model and asserts the other four stay procedural.
 
 | species | file, `.glb` tried before `.gltf` |
 |---|---|

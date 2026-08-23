@@ -1398,18 +1398,31 @@ const spec=vm.runInContext(`(()=>{
   P.spTraits=1;
   const varied=beh({sp:SPECIES.brown},'take')!==beh({sp:SPECIES.brook},'take');
 
+  /* A SPECIES WITH NO MODEL OF ITS OWN STAYS PROCEDURAL. It must not borrow
+     another species' mesh: with assets/trout.glb present — the normal case —
+     the generic slot stood in for everything, so a brown, a brookie, a
+     cutthroat and a salmon all rendered as the one rainbow model and the
+     species were indistinguishable until you turned assets off. */
+  P.assetOn=1;
+  troutAssets.rainbow={geo:TROUT_GEO,mat:speciesBodyMat(SPECIES.rainbow),extra:[]};
+  const borrow=SPECIES_ORDER.map(id=>id+':'+(makeTrout(0.4,SPECIES[id]).userData.fromAsset?'model':'procedural'));
+  delete troutAssets.rainbow;
+  const onlyRainbowModelled=borrow[0]==='rainbow:model'
+    && borrow.slice(1).every(q=>q.endsWith(':procedural'));
+
   /* and each one is reachable from the menu, so the phone gets it too */
   const rows=SPECIES_ORDER.every(id=>MENU.some(r=>r[1]===SPECIES[id].key)
                                      &&(SPECIES[id].key in P));
   const sizeRow=MENU.some(r=>r[1]==='fishSize')&&('fishSize' in P);
 
   applyPreset(before);
-  return {built, errs, noneOn, allOn, stable, spread, kindsHere,
-          kids:[kids0,kids1], kept, size, flat, varied, rows, sizeRow};
+  return {built, errs, noneOn, allOn, stable, spread, kindsHere, borrow,
+          onlyRainbowModelled, kids:[kids0,kids1], kept, size, flat, varied,
+          rows, sizeRow};
 })()`,sandbox);
 console.log('the species',spec);
 if(spec.errs.length||!spec.noneOn||!spec.allOn||!spec.stable||
-   spec.spread>0.03||spec.kindsHere<2||
+   spec.spread>0.03||spec.kindsHere<2||!spec.onlyRainbowModelled||
    spec.kids[0]!==spec.kids[1]||!spec.kept||
    spec.size.len!==2||Math.abs(spec.size.wt-8)>0.05||spec.size.scale!==1||
    spec.size.back!==1||!spec.flat||!spec.varied||!spec.rows||!spec.sizeRow)
