@@ -198,7 +198,14 @@ const P = {
   fishSize:1, lookSecs:5, chestDrop:0.35,
   /* which species are in the water, and whether they behave differently */
   spRainbow:1, spBrown:1, spBrook:0, spCutt:0, spSalmon:0, spTraits:1,
-  showZones:1, showMarkers:1,
+  showZones:1, showMarkers:1, tensionMark:1,
+  /* the stats window is off until you ask for it; messages float instead */
+  showStats:0,
+  msgMode:0, msgSize:1, msgSecs:3.6, msgDist:1.6, msgDrop:0.20, msgLag:6,
+  msgChatter:0,
+  msgOpacity:0.72, msgR:0.949, msgG:0.937, msgB:0.855,
+  /* right stick / A / B drive the menu when the pointer is not on it */
+  stickNav:1,
   takeRadius:0.7, maxSlip:0.32, latTol:1.2, upMax:6,
   splashV:4.5, lineRad:0.5, spookT:5, fatigue:1,
   riseRate:0.55, feedChance:0.6, nonFeedMult:0.15, fishPower:1,
@@ -215,7 +222,7 @@ const MENU=[
   ['Hook a test fish','!hookfish',0,0,0,'Hooks the fish nearest your fly straight away, so you can work on the fight without having to earn it first.'],
   ['Motion recorder','!record',0,0,0,'Opens the recorder. Record yourself casting, then replay your own motion as a ghost rod and practise following it. Trim the take with the two timeline handles.'],
   ['Recenter panel','!recenter',0,0,0,'Puts the panel back in front of you at a comfortable distance. Use this if you ever lose track of it.'],
-  ['Stats scale','hudScale',0.40,3.00,0.05,'Size of the statistics window. It has its own drag handle and plus/minus buttons in its top corners, and unlike this panel they work with the menu SHUT: point the rod at the handle strip along the top of the stats window and hold the trigger to move it anywhere you like, including behind you. Nothing else on that window answers the pointer, so the trigger still reels.'],
+  ['Stats scale','hudScale',0.40,3.00,0.05,'Size of the statistics window, which ships off — turn it on under MESSAGES, or with A on the right hand. It has its own drag handle and plus/minus buttons in its top corners, and unlike this panel they work with the menu SHUT: point the rod at the handle strip along the top of the stats window and hold the trigger to move it anywhere you like, including behind you. Nothing else on that window answers the pointer, so the trigger still reels.'],
   ['Panel scale','menuScale',0.40,3.00,0.05,'Size of this panel. The plus and minus buttons in its top right do the same thing, and the handle at the top left drags it around.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
   ['Phone remote','!remote',0,0,0,'Push right to open a room a phone can join, so whoever is running the demo can change any setting on this list from outside the headset while somebody else fishes. The four-letter code appears along the top of this panel and in this strip. On the phone, open this page\u2019s address with remote.html on the end and type the code in. Push right again to close the room.'],
@@ -272,7 +279,21 @@ const MENU=[
   ['Invert walk Y','invertY',0,1,1,'Flip the forward and backward walking direction. Applies to the teleport aim too.'],
   ['Reel hand','reelHand',0,1,1,'Which side of the reel the handle is on. 0 is left-hand wind, the usual setup for a right-handed caster, and puts the handle on the side facing you. 1 is right-hand wind. Takes effect immediately.'],
   ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
+  ['Stick menu','stickNav',0,1,1,'Whether the right stick walks the settings panel while it is open. Up and down pick a row and run on into the next tab at either end, left and right move the value by its own step, clicking the stick is the next tab, and A pushes an action row or steps a slider\u2019s range. Pointing at the panel still works and still wins: while the ray is on it the pointer owns the selection, and the stick takes over the moment you look away. 0 leaves the menu to the pointer alone.'],
   ['Controller labels','handGuide',0,1,1,'Draws a ghost of each controller over your hands with a callout on every button that does something, so somebody who has just put the headset on can read what to press instead of being told. The words follow the settings: with teleport off the stick says WALK, and with a fish on it says the stick wades. 0 turns it off \u2014 do that and Save as my default if you would rather fish without them.'],
+  ['— MESSAGES —',null,0,0,0,''],
+  ['Show stats window','showStats',0,1,1,'Whether the statistics window is drawn at all. It ships OFF: it is a tuning instrument, not part of fishing, and everything it used to be the only place to read — what a fish just did, why one refused you — now floats in front of you instead. Turn it on when you are chasing numbers. Right hand A does the same thing with the menu shut.'],
+  ['Message place','msgMode',0,2,1,'Where a message appears. 0 FOLLOWS YOUR GAZE: it hangs in front of you wherever you look, so you never have to hunt for it — it lags a little rather than being welded to your head, because a panel that cannot be looked away from is the kind of thing that makes people take a headset off. 1 puts it AT THE FISH it is about — a refusal appears over the fish that refused, a spook over the fish you put down — which teaches you which fish did what, at the cost of having to be looking that way. Messages about nothing in particular (a preset loaded, a venue changed) always follow your gaze whatever this says. 2 sends them back to the stats window only, which is what this did before.'],
+  ['Fight commentary','msgChatter',0,1,1,'Whether every change of what a hooked fish is doing \u2014 run, sound, jump, cruise, easy \u2014 floats up as a message. It ships OFF, because a fish picks a new one every second or two and the panel would never be off your face during a fight; the fish\u2019s own movement and the colour of the post above him already tell you, and the words are still on the FISH DOING row of the stats window and on the phone. Turn it on if you are tuning the fight weights and want to see what he picked.'],
+  ['Message size','msgSize',0.40,3.00,0.05,'How big the floating message is. It is scaled with distance, so this is apparent size and it stays the same whether the text is in front of your face or out over the fish.'],
+  ['Message seconds','msgSecs',1.00,12.0,0.50,'How long a message stays up before it fades.'],
+  ['Message distance m','msgDist',0.60,4.00,0.10,'How far in front of you a gaze-following message floats. Closer is easier to read and harder to see past; further sits it out over the water.'],
+  ['Message drop m','msgDrop',-0.60,1.20,0.05,'How far BELOW your eye line the message sits, measured at the distance above. 0 puts it dead centre in front of what you are looking at, which is the one place it should not be. Negative lifts it above the centre.'],
+  ['Message lag','msgLag',0.50,20.0,0.50,'How quickly a gaze-following message catches up with where you are looking. Low is a lazy follow that stays put while you glance at something and drifts back after — comfortable, and it lets you look past it. High welds it to your head.'],
+  ['Message opacity','msgOpacity',0.00,1.00,0.02,'How solid the panel behind the words is. At 0 the text floats on the river with nothing behind it — least distracting, hardest to read against foam.'],
+  ['Message red','msgR',0.00,1.00,0.01,'Red channel of the message text, 0 to 1. All three near 1 is the default bone white; drop green and blue for the amber the rest of the panels use.'],
+  ['Message green','msgG',0.00,1.00,0.01,'Green channel of the message text.'],
+  ['Message blue','msgB',0.00,1.00,0.01,'Blue channel of the message text.'],
   ['— RIVER —',null,0,0,0,''],
   ['Water model','waterModel',0,1,1,'0 is the analytic field: flow painted on by formula, fast but it can only do what was written into it. 1 solves shallow water on a grid — depth from the bed and obstacles, gravity down the surface slope, Manning bed friction and a pressure projection. Rocks divert flow because they ARE bed elevation, and eddies form because the solver makes them.'],
   ['Surface damping','waterSmooth',0.00,0.40,0.01,'Smooths the solved free surface between cells. The solver stores velocity and depth at the same points, which lets odd and even cells drift apart into a checkerboard that shows up as the whole reach rippling for no reason \u2014 measured at plus or minus 0.3 m on a dead flat bed with this at zero. At 0.08 a flat bed solves flat. Higher irons out real detail too.'],
@@ -288,7 +309,7 @@ const MENU=[
   ['Eddy strength','vortex',0.00,2.50,0.10,'Strength of vortices shed off the rocks and log. Zero gives smooth steady flow.'],
   ['Surface relief','surfWave',0.00,2.50,0.05,'How much the water surface is displaced by the SOLVED free surface rather than by decorative sine waves. This is the pillow that stands up in front of a rock, the drawdown over a lip, the standing wave below it. The solver has always computed this; until now the renderer threw it away and drew three hardcoded sines instead. Zero returns to that.'],
   ['Standing waves','standWave',0.00,2.00,0.05,'Adds the one thing the scrolling texture cannot produce: crests that sit ACROSS the current and hold still while the water runs through them. That is what a riffle is, and it is exactly what the specks draw, so this is the setting that lets the surface tell you what the specks tell you. Amplitude and wavelength both come from the Froude number, so the crests appear only where the water is genuinely fast and shallow, they pack tighter as it speeds up, and they vanish in a slow pool. Everything else on the surface is a texture being dragged downstream; this is the only part that is locked to the riverbed. Start at 1.00 and turn Specks down to see whether you can still read the water.'],
-  ['— SPECKS & RIPPLES —',null,0,0,0,''],
+  ['— SPECKS —',null,0,0,0,''],
   ['GPU specks','speckGPU',0,1,1,'0 runs the CPU specks — real particles carried by the flow in JavaScript, capped at 4000 because each one costs a flow evaluation. 1 runs the same simulation on the GPU: as many specks as GPU speck budget squared, living in a float texture, advected once a frame with the same timestep and the same field, so the two paths agree instead of drifting apart. Toggle freely.'],
   ['GPU speck budget','speckBudget',48,2048,16,'The side of the square texture the GPU specks live in, so the count is this number SQUARED: 80 is 6400, 160 is 25600, 512 is 262144, 1024 is a million, 2048 is four million. It ships at 80 because that is what a standalone headset holds 72 fps at — above roughly 160 the Quest starts dropping frames, and dropped frames show up as jittery head tracking rather than as a slow picture, which is the worst way for a budget to overrun. On a desktop GPU you can raise it a long way. The top of the slider is clamped to the largest texture your device will allocate. There is no meaningful ceiling from the simulation — you will run out of fill rate long before you run out of specks, so if raising this costs frames, drop Speck size FIRST: size costs fill quadratically and the count only linearly. Applies when you let go of the slider, and restarts every speck, so the field fades back in rather than snapping. Travels with you between venues like the rest of your settings. No effect on the CPU path, which is genuinely fixed at 4000.'],
   ['Speck density','specks',0.00,1.00,0.02,'How many specks are shown, out of 4000 on the CPU path or GPU speck budget squared on the GPU path. The CPU number is a real ceiling — each of those costs a flow evaluation in JavaScript — but the GPU number is just where the budget was set, so raise that if you want more.'],
@@ -344,7 +365,8 @@ const MENU=[
   ['Foam stain','foamDirt',0.00,1.00,0.02,'How much of the water colour bleeds into the foam. Real foam picks up what the river carries: on a tannic river it is tea-coloured, on a glacial one it is grey. At 0 the foam is exactly the colour you set above regardless of the water; at 1 it is strongly stained by it, so changing the water colour drags the foam along with it automatically.'],
   ['— FISH —',null,0,0,0,''],
   ['Show zones','showZones',0,1,1,'Draw the take radius ring and feeding lane for each fish.'],
-  ['Show markers','showMarkers',0,1,1,'Draw the post above each fish. Green means feeding.'],
+  ['Show markers','showMarkers',0,1,1,'Draw the post above each fish. Green means feeding, grey means not, blue is one you have landed.'],
+  ['Tension marker','tensionMark',0,1,1,'While a fish is on, colour the post above him by how hard the line is loaded: green at slack, through amber, to red as the tension closes on your tippet — and it flashes once it is inside a fifth of breaking, which is the moment to give him line. It is the same number the TENSION row of the stats window reads, so you can fight a fish by eye instead of by instrument. This draws the hooked fish’s post even with Show markers off, because a tension gauge is worth having without a forest of posts in the water.'],
   ['Take radius','takeRadius',0.15,1.60,0.05,'How close the fly must drift before a fish decides on it.'],
   ['Max drag slip','maxSlip',0.05,0.90,0.02,'How much the fly may move relative to the current and still count as drag-free. Lower is stricter.'],
   ['Lane half-width','latTol',0.20,3.00,0.10,'Width of the drawn feeding lane either side of the fish.'],
@@ -5179,6 +5201,43 @@ function makeMarker(){
   head.position.y=0.92;
   g.add(stem,head);return g;
 }
+/* HOW HARD THE LINE IS LOADED, AS A COLOUR.
+
+   `r` is tension over tippet, so 1.0 is the break. Green through amber to red,
+   and above 0.80 it flashes — because the number that matters is not "how much
+   tension is there" but "am I about to lose him", and that wants an alarm
+   rather than a reading. The ramp is deliberately not linear in brightness:
+   the interesting quarter of the range is the top one, so most of the colour
+   travel is spent there.
+
+   It is fed M.tension, which is the SMOOTHED tension the break-off test itself
+   uses. A raw reading spikes on every rod movement and would strobe red at a
+   fish that was never in danger. */
+const _tcol=new THREE.Color(), _TC2=new THREE.Color();
+/* The ramp on its own, with no blink in it. Kept separate from the blink for
+   one reason: a colour that is also a function of the clock cannot be asserted
+   about, and this is the half worth asserting about. */
+function tensionRamp(r){
+  r=Math.max(0,Math.min(1.2,r||0));
+  /* 0 slack green -> 0.55 amber -> 0.85 orange-red -> 1.0 red */
+  let a,b,f;
+  if(r<0.55){ a=0x4fd18b; b=0xe0b04a; f=r/0.55; }
+  else if(r<0.85){ a=0xe0b04a; b=0xe05a28; f=(r-0.55)/0.30; }
+  else { a=0xe05a28; b=0xff2a18; f=Math.min(1,(r-0.85)/0.15); }
+  return _tcol.setHex(a).lerp(_TC2.setHex(b),f).getHex();
+}
+const TENSION_FLASH=0.80, TENSION_DIM=0.45;
+function tensionColour(r,t){
+  const hex=tensionRamp(r);
+  if(r<=TENSION_FLASH) return hex;
+  /* The last fifth blinks, faster the closer it is to going. It only ever goes
+     DARKER than the ramp, never lighter and never a different hue — so the
+     colour still reads as "how loaded is it" at every instant, and the blink
+     is the separate word for "now". */
+  const rate=10+r*14;
+  const k=1-TENSION_DIM*0.5*(1-Math.sin(t*rate));
+  return _tcol.setHex(hex).multiplyScalar(k).getHex();
+}
 class Trout{
   constructor(l){
     this.lie=new THREE.Vector3(l.x,0,l.z);
@@ -5233,7 +5292,7 @@ class Trout{
      jump, 0.22 cruise, 0.20 easy — so with traits off nothing changes. */
   pickBehaviour(){
     const s=this.stamina, r=Math.random();
-    if(s<0.22){ this.beh=r<0.75?'easy':'cruise'; this.behT=1.6+Math.random()*2.2; say('fish: '+this.beh); return; }
+    if(s<0.22){ this.beh=r<0.75?'easy':'cruise'; this.behT=1.6+Math.random()*2.2; say('fish: '+this.beh,this,true); return; }
     const F=P.spTraits>0.5?this.sp.beh.fight:RAINBOW_BEH.fight;
     const w=[0.28*F[0], 0.20*F[1], (s>0.5?0.10*F[2]:0), 0.22*F[3], 0.20*F[4]];
     let tot=0; for(const q of w) tot+=q;
@@ -5250,7 +5309,7 @@ class Trout{
     }
     else if(k===3){ this.beh='cruise'; this.behT=1.0+Math.random()*1.6; this.newRunDir(); }
     else { this.beh='easy'; this.behT=1.0+Math.random()*1.6; }
-    say('fish: '+this.beh);
+    say('fish: '+this.beh,this,true);
   }
   /* Three rises, blended by the Rise style setting. A big fish leans toward
      head-and-tail on its own, because a big fish does. */
@@ -5307,7 +5366,7 @@ class Trout{
     const spd=this.riseKind===0?0.75:this.riseKind===1?1.45:3.10;
     this.strikeDur=Math.max(0.20,Math.min(1.8,d/spd+0.14));
     say(this.riseKind===0?'he\u2019s coming up\u2026':
-        this.riseKind===1?'head and tail\u2026':'he\u2019s charging it');
+        this.riseKind===1?'head and tail\u2026':'he\u2019s charging it',this);
   }
   bodyMass(){ return 0.30*Math.pow(this.len/0.30,3); }
   /* ── LANDED ────────────────────────────────────────────────────────────
@@ -5563,7 +5622,7 @@ class Trout{
       /* if the fly is picked up mid-move he does not follow it into the air */
       if(pos[1]>filmY(pos[0],pos[2],t)+0.22){
         this.state='holding';this.evaluated=true;
-        this.risePitch=0;this.riseRoll=0;say('he came for it and missed');
+        this.risePitch=0;this.riseRoll=0;say('he came for it and missed',this);
       }
       this.strikeT+=dt;
       const u=Math.max(0,Math.min(1,this.strikeT/this.strikeDur));
@@ -5621,7 +5680,7 @@ class Trout{
       } else {
         if(this.showT>0){
           this.showT-=dt;
-          if(this.showT<=0) say('he\u2019s away to rest at the bank');
+          if(this.showT<=0) say('he\u2019s away to rest at the bank',this);
         }
         /* The bob goes in the TARGET, not on top of the position: adding it to
            p every frame is an integral, not an offset, and the fish would
@@ -5786,10 +5845,19 @@ class Trout{
     const wPrev=Math.sin(7.0-(t-0.02)*u.uSpd.value+u.uPh.value);
     m.userData.tail.position.z=w*0.075*u.uAmp.value;
     m.userData.tail.rotation.y=-(w-wPrev)*7.0*u.uAmp.value;
-    this.marker.visible=P.showMarkers>0.5&&this.state!=='spooked';
+    /* The post above a HOOKED fish is a tension gauge, so it is worth having
+       even when you do not want a post over every fish in the reach. */
+    const onRod=this.state==='hooked';
+    this.marker.visible=(P.showMarkers>0.5||(onRod&&P.tensionMark>0.5))
+                        &&this.state!=='spooked';
     this.marker.position.set(this.p.x,Math.max(this.p.y,surfY(this.p.x)+0.02),this.p.z);
     this.marker.children[1].position.y=0.92+Math.sin(t*2.2+this.lie.x)*0.05;
-    const col=this.state==='hooked'?0xe0b04a:this.state==='landed'?0x6ea8d1:
+    let col;
+    if(onRod&&P.tensionMark>0.5){
+      /* the same number the break-off is tested against, and the same one the
+         stats window reads, so the post cannot disagree with either */
+      col=tensionColour(M.tension/Math.max(P.tippet,0.1),t);
+    } else col=onRod?0xe0b04a:this.state==='landed'?0x6ea8d1:
               this.feeding?0x4fd18b:0x8a8f86;
     this.marker.children[0].material.color.setHex(col);
     this.marker.children[1].material.color.setHex(col);
@@ -5799,7 +5867,8 @@ class Trout{
        under a minute and eating again */
     this.state='spooked';this.timer=P.spookT*(mult||1)*beh(this,'wary');
     if(hooked===this){hooked=null;fishTension=0;fishCarried=0;rebuildMasses();}
-    say(msg);
+    /* the message belongs to THIS fish, so msgMode 1 can hang it over him */
+    say(msg,this);
   }
   /* swap the mesh for a freshly built one — used when a model finishes
      loading after the fish already exist */
@@ -5897,7 +5966,7 @@ function commitStrike(f){
   f.v.set(0,0,0);f.p.set(pos[0],pos[1],pos[2]);invM[0]=0;
   const T=(RN-1)*3;
   lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.6);
-  say('EAT \u2014 he\u2019s on');pulse(1.0);spawnRing(pos[0],pos[2],1.2);
+  say('EAT \u2014 he\u2019s on',f);pulse(1.0);spawnRing(pos[0],pos[2],1.2);
   if(SND.ok) sndSplash(f.riseKind===2?4.0:2.0);
 }
 
@@ -6413,6 +6482,9 @@ const HW=512, HH=600;
 const HHANDLE={x:8,y:6,w:200,h:26}, HSC_M={x:404,y:6,w:24,h:26}, HSC_P={x:434,y:6,w:24,h:26};
 const hud=makePanel(0.44,0.515,HW,HH);
 hud.mesh.position.set(-0.56,1.16,-0.64);hud.mesh.rotation.y=0.58;player.add(hud.mesh);
+/* OFF until asked for. It is a tuning instrument, and it used to be the only
+   place the game ever spoke to you — which is why the messages float now. */
+hud.mesh.visible=false;
 const MW=1400, MH=780, ROWH=19, COLW=450, COLX=[16,478,940];
 const HANDLE={x:0,y:8,w:250,h:30}, SCALE_M={x:1240,y:8,w:34,h:30}, SCALE_P={x:1282,y:8,w:34,h:30};
 const TRACKX=168, TRACKW=118, VALX=336, RNGX=352, RNGW=52;
@@ -6430,7 +6502,125 @@ rec.mesh.position.set(0,1.05,-0.95);rec.mesh.visible=false;player.add(rec.mesh);
 let recOpen=false, recDrag=null;
 
 let note='',noteT=0;
-function say(s){note=s;noteT=3.6;}
+/* ── THE FLOATING MESSAGE ───────────────────────────────────────────────
+   The stats window used to be the only place the game ever spoke to you, and
+   it shipped in the corner of your eye at best — so "drag — refused" and "you
+   lined him" went past unread, which is exactly the half of the game that has
+   to be readable if any of it is to be learnable. Now every say() also puts
+   the words up in the world.
+
+   Two placements, and both are wanted for different reasons:
+
+   · FOLLOWING YOUR GAZE (msgMode 0, the default). It hangs a set distance in
+     front of your eyes and below the centre, so you never hunt for it. It
+     LAGS rather than being welded to your head: a panel that cannot be looked
+     away from is the thing that makes people take a headset off, and a lazy
+     follow lets you glance past it and have it drift back after you.
+   · AT THE FISH (msgMode 1). A refusal appears over the fish that refused, a
+     spook over the fish you put down. This is the one that teaches — you find
+     out WHICH fish did what — and the cost is that you have to be looking
+     that way. So say() takes an optional anchor and anything without one
+     (a preset loaded, a venue changed) falls back to the gaze.
+
+   msgMode 2 is the old behaviour: the stats window and nothing else.
+   ───────────────────────────────────────────────────────────────────────── */
+const MSGW=1024, MSGH=200;
+const toast=makePanel(0.62,0.121,MSGW,MSGH);
+toast.mesh.visible=false;toast.mesh.renderOrder=24;
+toast.mesh.material.depthTest=false;
+scene.add(toast.mesh);
+let toastT=0, toastFade=0, toastSaid='';
+const toastAt=new THREE.Vector3();        /* where it is, in world space */
+const toastWant=new THREE.Vector3();      /* where it would like to be */
+const toastPin=new THREE.Vector3();       /* the thing it is about, if any */
+let toastHasPin=false, toastPlaced=false;
+function drawToast(txt){
+  if(toastSaid===txt) return;
+  toastSaid=txt;
+  const c=toast.cx;
+  c.clearRect(0,0,MSGW,MSGH);
+  /* type first, so the plate can be cut to the words rather than the words
+     being centred in a plate the width of the longest message there could be */
+  c.font='700 62px "Space Mono",monospace';
+  const w=Math.min(MSGW-40,c.measureText(txt).width);
+  const plate=w+56;
+  const a=Math.max(0,Math.min(1,P.msgOpacity));
+  if(a>0.004){
+    c.fillStyle='rgba(10,20,24,'+a.toFixed(3)+')';
+    c.fillRect((MSGW-plate)/2,26,plate,148);
+    c.fillStyle='rgba(181,113,63,'+Math.min(1,a+0.25).toFixed(3)+')';
+    c.fillRect((MSGW-plate)/2,26,6,148);
+  }
+  const hex=v=>Math.max(0,Math.min(255,Math.round(v*255)));
+  c.fillStyle='rgb('+hex(P.msgR)+','+hex(P.msgG)+','+hex(P.msgB)+')';
+  c.textAlign='center';
+  c.fillText(txt,MSGW/2,122,MSGW-40);
+  c.textAlign='left';
+  toast.tex.needsUpdate=true;
+}
+/* `where` is the thing the message is ABOUT — a fish, a point on the water —
+   and it is what msgMode 1 hangs the words over. Leave it out and the message
+   follows your gaze whatever the setting says, because there is nowhere else
+   honest to put "settings copied". */
+function say(s,where,quiet){
+  note=s;noteT=Math.max(1,P.msgSecs||3.6);
+  /* Some of what the game says is CHATTER rather than an event: a hooked fish
+     picks a new behaviour every second or two, and floating each one keeps a
+     panel permanently in front of your face for the whole fight. Chatter still
+     reaches the stats window and the phone; it just does not take the sky. */
+  if(quiet&&P.msgChatter<0.5) return;
+  toastT=noteT;
+  toastHasPin=false;
+  if(where){
+    const v=where.isVector3?where:where.p;
+    if(v&&Number.isFinite(v.x)){toastPin.copy(v);toastHasPin=true;}
+  }
+  /* a new message re-places a gaze-following panel rather than sliding the old
+     one across the sky */
+  if(!(P.msgMode>0.5&&toastHasPin)) toastPlaced=false;
+  drawToast(s);
+}
+const _msgFwd=new THREE.Vector3(), _msgUp=new THREE.Vector3(),
+      _msgEye=new THREE.Vector3(), _msgQ=new THREE.Quaternion();
+function toastStep(dt){
+  const mode=Math.round(P.msgMode);
+  if(mode>=2||toastT<=0){
+    if(toastT>0) toastT-=dt;
+    toastFade+=(0-toastFade)*Math.min(1,dt*8);
+    if(toastFade<0.01){toast.mesh.visible=false;return;}
+  } else {
+    toastT-=dt;
+    /* fade in over the first tenth of a second, out over the last half */
+    const want=toastT>0.5?1:Math.max(0,toastT/0.5);
+    toastFade+=(want-toastFade)*Math.min(1,dt*10);
+  }
+  camera.getWorldPosition(_msgEye);
+  camera.getWorldQuaternion(_msgQ);
+  const pinned=mode===1&&toastHasPin;
+  if(pinned){
+    toastWant.copy(toastPin);toastWant.y+=0.42;
+    toastAt.copy(toastWant);                    /* the fish is where it is */
+    toastPlaced=true;
+  } else {
+    _msgFwd.set(0,0,-1).applyQuaternion(_msgQ);
+    _msgUp.set(0,1,0).applyQuaternion(_msgQ);
+    toastWant.copy(_msgEye)
+      .addScaledVector(_msgFwd,Math.max(0.3,P.msgDist))
+      .addScaledVector(_msgUp,-P.msgDrop);
+    if(!toastPlaced){toastAt.copy(toastWant);toastPlaced=true;}
+    else toastAt.lerp(toastWant,Math.min(1,dt*Math.max(0.5,P.msgLag)));
+  }
+  toast.mesh.position.copy(toastAt);
+  /* square-on to the eye, and the same apparent size wherever it ended up:
+     scale with the distance it is actually at, so a message over a fish
+     twenty metres off reads exactly as large as one in front of your face */
+  toast.mesh.quaternion.copy(_msgQ);
+  const d=Math.max(0.3,toastAt.distanceTo(_msgEye));
+  toast.mesh.scale.setScalar(Math.max(0.1,P.msgSize)*d/1.6);
+  toast.mesh.material.opacity=toastFade;
+  toast.mesh.material.transparent=true;
+  toast.mesh.visible=toastFade>0.01&&mode<2;
+}
 const M={bend:0,drift:0,tension:0,depth:0,fps:60,lineVmax:0,lineVnode:0,lineVwhere:'-'};
 const HANDTXT=['free','routing','pinched'];
 function drawHUD(){
@@ -6499,8 +6689,20 @@ function applyPreset(obj){
   for(const k in obj) if(k in P) P[k]=obj[k];
   afterSettingsChange();
 }
+/* The stats window, and the look of the floating message. Both are pure
+   presentation, so they have one place that applies them and every path in —
+   a slider, a preset, the URL, the phone — goes through it. */
+function applyDisplay(){
+  hud.mesh.visible=P.showStats>0.5;
+  hud.mesh.scale.setScalar(P.hudScale);
+  menu.mesh.scale.setScalar(P.menuScale);
+  /* the plate is painted with the colours as they were when it was written */
+  toastSaid='';
+  if(note) drawToast(note);
+}
 function afterSettingsChange(){
   syncSpecies();
+  applyDisplay();
   const oL=leadLen,oN=leadN,oT=leaderTot,oM=nodeLen;
   rebuildSpacing();
   if(nAct>2) redistribute(v=> v<=oT ? v/oL : oN+(v-oT)/oM);
@@ -6565,7 +6767,7 @@ function runAction(key){
       best.v.set(0,0,0);hooked=best;invM[0]=0;
       {const T=(RN-1)*3;
        lineOut=Math.max(lineOut,Math.hypot(pos[0]-rpos[T],pos[1]-rpos[T+1],pos[2]-rpos[T+2])+0.6);}
-      say('test '+best.sp.label+' on \u2014 '+(best.len*100).toFixed(0)+' cm');
+      say('test '+best.sp.label+' on \u2014 '+(best.len*100).toFixed(0)+' cm',best);
     } else say('no fish available to hook');
   }
   else if(key==='!record'){recOpen=!recOpen;rec.mesh.visible=recOpen;if(recOpen)recenterPanel(rec.mesh);say(recOpen?'recorder open':'recorder closed');}
@@ -6661,7 +6863,7 @@ function drawMenu(){
   c.fillStyle=panelDrag?'#e0a45e':'#6d7f82';c.font='700 12px "Space Mono",monospace';
   c.fillText('\u2725  DRAG TO MOVE',HANDLE.x+20,HANDLE.y+20);
   c.fillStyle='#7d8b8c';c.font='700 11px "Space Mono",monospace';
-  c.fillText('POINT WITH THE ROD HAND, TRIGGER TO DRAG. LEFT HAND STILL FISHES. Y CLOSES.',HANDLE.w+30,34);
+  c.fillText('POINT AND DRAG WITH THE TRIGGER, OR USE THE RIGHT STICK. A PUSHES, CLICK IT FOR THE NEXT TAB, B CLOSES. LEFT HAND STILL FISHES.',HANDLE.w+30,34);
   /* the phone's code, where it can be read without hunting for the row */
   if(REMOTE.state!=='off'){
     c.font='700 15px "Space Mono",monospace';
@@ -6688,14 +6890,23 @@ function drawMenu(){
     /* The bar divides the panel width by however many sections MENU has, so
        every tab added narrows all of them. Shrink the type until the longest
        name fits its own slot rather than running into the next one. */
-    let w=0;
-    for(const px of [15,13,11]){
+    let w=0, txt=TABS[i].name;
+    for(const px of [15,13,11,10,9]){
       c.font='700 '+px+'px "Space Mono",monospace';
-      w=c.measureText(TABS[i].name).width;
+      w=c.measureText(txt).width;
       if(w<=b.w-10) break;
     }
+    /* and if the shortest type still will not fit, cut the name rather than
+       letting it run into the tab beside it — which is what a long section
+       name used to do, silently, for as long as the bar has had this many
+       tabs in it */
+    while(w>b.w-10&&txt.length>3){
+      txt=txt.slice(0,-1);
+      w=c.measureText(txt+'\u2026').width;
+      if(w<=b.w-10){txt+='\u2026';break;}
+    }
     c.fillStyle=on?'#e0a45e':'#7d8b8c';
-    c.fillText(TABS[i].name,b.x+Math.max(5,(b.w-w)/2),b.y+b.h/2+6);
+    c.fillText(txt,b.x+Math.max(5,(b.w-w)/2),b.y+b.h/2+6);
   }
   const rows=TABS[selTab]?TABS[selTab].rows:[];
   for(const i of rows){
@@ -6794,6 +7005,94 @@ function drawRec(){
   rec.tex.needsUpdate=true;
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   DRIVING THE MENU WITHOUT POINTING AT IT
+
+   Pointing is still the fast way in, and nothing about it has changed. But a
+   ray off the rod hand is the one input that is also holding a fly rod, and
+   at arm's length a degree of wrist is most of a row — so a setting you want
+   to nudge by one step is a setting you fight the pointer for. The right
+   stick was doing nothing whatsoever, and a stick is exactly the input that
+   is good at "one step, precisely, without moving my hand".
+
+   The two never argue: while the ray is ON the panel the pointer owns the
+   selection (it sets menuSel from the row under it every frame, and the stick
+   pulling the other way would be unusable). Take the ray off the panel and
+   the stick has it. That is `pointerOnMenu`, set once a frame by menuPointer.
+
+   Up and down walk the rows and RUN ON into the next tab at either end, so
+   every row in the game is reachable from any other with one axis and no
+   button. Left and right move the value by its own step — the same step the
+   phone and the keyboard use — so a 0/1 toggle flips and a 0.05 slider moves
+   0.05. Holding either repeats after a beat.
+   ══════════════════════════════════════════════════════════════════════ */
+let pointerOnMenu=false;
+let navX=0, navY=0, navRepX=0, navRepY=0;
+const NAV_DELAY=0.34, NAV_RATE=0.085;
+function menuRowsNow(){ return TABS[selTab]?TABS[selTab].rows:[]; }
+function toggleMenu(v){
+  menuOpen=(v===undefined)?!menuOpen:!!v;
+  menu.mesh.visible=menuOpen;
+  if(menuOpen){
+    if(!TABS[selTab]||!TABS[selTab].rows.length) selTab=0;
+    if(!rowRect(menuSel)) menuSel=firstRowOf(selTab);
+  } else { dragKey=null; navX=0; navY=0; }
+}
+function menuMoveRow(d){
+  const rows=menuRowsNow();
+  const k=rows.indexOf(menuSel);
+  if(k<0){ menuSel=firstRowOf(selTab); return; }
+  const n=k+d;
+  if(n<0){                                   /* off the top: previous tab */
+    selTab=(selTab-1+TABS.length)%TABS.length;
+    const r=menuRowsNow(); menuSel=r.length?r[r.length-1]:1; return;
+  }
+  if(n>=rows.length){                        /* off the bottom: next tab */
+    selTab=(selTab+1)%TABS.length;
+    menuSel=firstRowOf(selTab); return;
+  }
+  menuSel=rows[n];
+}
+function menuNudge(d){
+  const row=MENU[menuSel]; if(!row) return;
+  const key=row[1];
+  if(!key||key.charCodeAt(0)===33) return;   /* an action row has no value */
+  const [lo,hi]=rowRange(key,row[2],row[3]);
+  const st=row[4]>0?row[4]:(hi-lo)/100;
+  /* land ON the step grid rather than drifting off it over a hundred nudges */
+  let v=Math.round((P[key]+d*st)/st)*st;
+  v=Math.max(lo,Math.min(hi,v));
+  if(v===P[key]) return;
+  P[key]=v;
+  onSettingChanged(key);
+}
+function menuTab(d){
+  if(!TABS.length) return;
+  selTab=(selTab+d+TABS.length)%TABS.length;
+  menuSel=firstRowOf(selTab);
+  dragKey=null;
+}
+/* A on a row: push it if it is an action, and if it is not, step its range
+   multiplier — which is the only other thing that row has a button for. */
+function menuPush(){
+  const row=MENU[menuSel]; if(!row||!row[1]) return;
+  if(row[1].charCodeAt(0)===33){ runAction(row[1]); return; }
+  const m=cycleRange(row[1],row[2],row[3]);
+  say(row[0]+' range '+m+'x');
+}
+function navStep(dt,sx,sy){
+  if(!menuOpen||P.stickNav<0.5||pointerOnMenu){ navX=0;navY=0; return false; }
+  const DZ=0.55;                             /* well past a resting thumb */
+  const dx=sx>DZ?1:sx<-DZ?-1:0;
+  const dy=sy>DZ?1:sy<-DZ?-1:0;
+  let used=false;
+  if(dy!==navY){ navY=dy; navRepY=0; if(dy){menuMoveRow(dy);pulse(0.12);used=true;} }
+  else if(dy){ navRepY+=dt; if(navRepY>NAV_DELAY){navRepY=NAV_DELAY-NAV_RATE;menuMoveRow(dy);used=true;} }
+  if(dx!==navX){ navX=dx; navRepX=0; if(dx){menuNudge(dx);pulse(0.10);used=true;} }
+  else if(dx){ navRepX+=dt; if(navRepX>NAV_DELAY){navRepX=NAV_DELAY-NAV_RATE*0.6;menuNudge(dx);used=true;} }
+  return used;
+}
+
 /* ---- pointer: ray from the rod hand onto the panel ---- */
 const _ray=new THREE.Raycaster();
 const _rayOrigin=new THREE.Vector3(), _rayDir=new THREE.Vector3();
@@ -6844,7 +7143,7 @@ function recenterPanel(m){
    the two scale buttons — rather than on the numbers? That strip is the only
    part of it that answers the pointer with the menu shut. */
 function hudChrome(hit){
-  if(!hit||!hit.uv||hit.object!==hud.mesh) return false;
+  if(!hit||!hit.uv||hit.object!==hud.mesh||!hud.mesh.visible) return false;
   const hx=hit.uv.x*HW, hy=(1-hit.uv.y)*HH;
   for(const b of [HHANDLE,HSC_M,HSC_P])
     if(hx>=b.x&&hx<=b.x+b.w&&hy>=b.y&&hy<=b.y+b.h) return true;
@@ -6853,6 +7152,7 @@ function hudChrome(hit){
 function menuPointer(trigPressed, trigEdge){
   if(!rodGrip){
     pointerDot.visible=false;rayLine.visible=false;dragKey=null;panelDrag=false;recDrag=null;
+    pointerOnMenu=false;
     return false;
   }
   rodGrip.getWorldPosition(_rayOrigin);
@@ -6865,9 +7165,18 @@ function menuPointer(trigPressed, trigEdge){
      buttons answer, and only they light the pointer: the trigger the reel
      needs is never swallowed by the rod happening to sweep across the numbers
      mid-fight, and there is no ray hanging off the rod while you cast. */
-  const hits=_ray.intersectObjects(
-    menuOpen?(recOpen?[menu.mesh,hud.mesh,rec.mesh]:[menu.mesh,hud.mesh]):[hud.mesh],false);
+  /* A hidden stats window is not a thing the ray can touch. Raycaster does not
+     check visibility for you, so a window switched off would still swallow the
+     trigger the reel needs. */
+  const targets=[];
+  if(menuOpen){targets.push(menu.mesh);if(recOpen)targets.push(rec.mesh);}
+  if(hud.mesh.visible)targets.push(hud.mesh);
+  const hits=targets.length?_ray.intersectObjects(targets,false):[];
   const hit=hits[0];
+  /* Who owns the selection this frame. The ray on the panel wins, because it
+     is the one that moves menuSel every frame just by being there; take it
+     off and the right stick has the menu. */
+  pointerOnMenu=panelDrag||!!dragKey||!!(menuOpen&&hit&&hit.object===menu.mesh);
   if(!menuOpen&&!panelDrag&&!hudChrome(hit)){
     pointerDot.visible=false;rayLine.visible=false;dragKey=null;recDrag=null;
     return false;
@@ -7031,6 +7340,7 @@ function onSettingChanged(key){
   if(key==='speckBudget') gsResizeWanted=true;
   if(key==='menuScale')menu.mesh.scale.setScalar(P.menuScale);
   if(key==='hudScale')hud.mesh.scale.setScalar(P.hudScale);
+  if(key==='showStats'||key.indexOf('msg')===0) applyDisplay();
   /* Which species are in the water, and whether they behave differently. Both
      are cheap when nothing moved — syncSpecies compares a five-bit signature
      first — and the display fish follows whatever is now in the river. */
@@ -7134,7 +7444,18 @@ addEventListener('mousemove',e=>{mouse.x=(e.clientX/innerWidth-0.5)*2.4;mouse.y=
 const keys={};
 addEventListener('keydown',e=>{keys[e.code]=true;
   if(e.code==='KeyR')resetCast();
-  if(e.code==='KeyM'){menuOpen=!menuOpen;menu.mesh.visible=menuOpen;}});
+  if(e.code==='KeyM')toggleMenu();
+  if(e.code==='KeyH'){P.showStats=P.showStats>0.5?0:1;applyDisplay();}
+  /* the same walk the right stick does, so the menu can be driven — and
+     tested — without a headset on */
+  if(menuOpen){
+    if(e.code==='ArrowUp'){menuMoveRow(-1);e.preventDefault();}
+    else if(e.code==='ArrowDown'){menuMoveRow(1);e.preventDefault();}
+    else if(e.code==='ArrowLeft'){menuNudge(-1);e.preventDefault();}
+    else if(e.code==='ArrowRight'){menuNudge(1);e.preventDefault();}
+    else if(e.code==='Tab'){menuTab(e.shiftKey?-1:1);e.preventDefault();}
+    else if(e.code==='Enter'){menuPush();e.preventDefault();}
+  }});
 addEventListener('keyup',e=>{keys[e.code]=false;});
 
 function handTargets(){
@@ -7651,8 +7972,12 @@ const GUIDE={built:false, hands:[]};
 const _gq=new THREE.Quaternion(), _gcq=new THREE.Quaternion();
 
 /* one callout: a small canvas with a bold action and a quieter hint */
+/* Two lines of hint used to be all any of these needed. The menu words are
+   longer than that, and a hint that runs off the bottom of its own canvas is
+   a label that lies — so the plate is taller, and the plane with it, in the
+   same aspect. */
 function guideLabel(){
-  const p=makePanel(0.112,0.042,336,126);
+  const p=makePanel(0.112,0.056,336,168);
   p.mesh.renderOrder=22;
   p.said='';
   return p;
@@ -7660,7 +7985,7 @@ function guideLabel(){
 function guideDraw(p,title,hint){
   if(p.said===title+'|'+hint) return;      /* canvas work is not free */
   p.said=title+'|'+hint;
-  const c=p.cx, W=336, H=126;
+  const c=p.cx, W=336, H=168;
   c.clearRect(0,0,W,H);
   c.fillStyle='rgba(10,20,24,0.82)';c.fillRect(0,0,W,H);
   c.fillStyle='#b5713f';c.fillRect(0,0,6,H);
@@ -7736,16 +8061,18 @@ function guidePart(at){
    face of each handle and the thumb buttons are on the outside of the plate,
    which is why the two hands mirror on X and only on X. */
 const GUIDE_RIGHT=[
+  ['stick',  [0,0.030,0.048],[0.000,0.170,0.090]],
   ['trigger',[0,-0.028,0.012],[0.000,-0.150,-0.020]],
   ['grip',   [-0.021,-0.014,0.034],[-0.175,-0.105,0.055]],
-  ['a',      [0.015,0.026,0.026],[0.185,-0.030,0.000]],
-  ['b',      [0.015,0.026,0.050],[0.185,0.075,0.075]],
+  ['a',      [0.015,0.026,0.026],[0.195,-0.045,0.000]],
+  ['b',      [0.015,0.026,0.050],[0.195,0.070,0.075]],
 ];
 const GUIDE_LEFT=[
-  ['stick',  [0,0.030,0.048],[0.000,0.155,0.090]],
+  ['stick',  [0,0.030,0.048],[0.000,0.170,0.090]],
   ['trigger',[0,-0.028,0.012],[0.000,-0.150,-0.020]],
   ['grip',   [0.021,-0.014,0.034],[0.175,-0.105,0.055]],
-  ['y',      [-0.015,0.026,0.050],[-0.185,0.075,0.075]],
+  ['x',      [-0.015,0.026,0.026],[-0.195,-0.045,0.000]],
+  ['y',      [-0.015,0.026,0.050],[-0.195,0.070,0.075]],
 ];
 function buildGuide(){
   if(GUIDE.built) return;
@@ -7769,9 +8096,13 @@ function buildGuide(){
 /* What a button does RIGHT NOW, in this hand, at these settings. */
 function guideWords(key,hand){
   if(key==='stick'){
-    if(hooked) return ['WADE','he is on — the stick walks you to him'];
-    return P.teleport>0.5 ? ['TELEPORT','push it, aim the ring, let go']
-                          : ['WALK','push it to wade'];
+    if(hand==='right')
+      return menuOpen ? ['MENU','up-down picks, left-right changes, click for the next tab']
+                      : ['MENU','open it and this walks around it'];
+    const tail=' · click it for the menu';
+    if(hooked) return ['WADE','he is on — it walks you to him'+tail];
+    return P.teleport>0.5 ? ['TELEPORT','push, aim the ring, let go'+tail]
+                          : ['WALK','push it to wade'+tail];
   }
   if(key==='trigger') return hand==='right'
     ? ['REEL IN', menuOpen?'and aims the menu while that is open'
@@ -7781,9 +8112,14 @@ function guideWords(key,hand){
   if(key==='grip') return hand==='right'
     ? ['CLAMP','holds the line against the cork']
     : ['NET','hold it out and steer him over it'];
-  if(key==='a') return ['RESET CAST','puts the line back at your feet'];
-  if(key==='b') return ['FISH BACK','sends them home and starts over'];
-  if(key==='y') return ['MENU','every setting, on a panel you point at'];
+  if(key==='a') return menuOpen
+    ? ['SELECT','pushes an action, or steps a slider range']
+    : (P.showStats>0.5 ? ['HIDE STATS','the numbers window']
+                       : ['SHOW STATS','the numbers window']);
+  if(key==='b') return menuOpen ? ['CLOSE','shuts the settings panel']
+                                : ['MENU','every setting, on a panel you point at'];
+  if(key==='x') return ['RESET CAST','puts the line back at your feet'];
+  if(key==='y') return ['FISH BACK','sends them home and starts over'];
   return null;
 }
 function guideStep(){
@@ -7814,7 +8150,9 @@ function guideStep(){
 const nowMs=()=>(typeof performance!=='undefined'&&performance.now)?performance.now():0;
 const clock=new THREE.Clock();
 let sndAcc=0,crankAcc=0,gridAccum=0,gridMs=0,started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
-let prevTrigR=false,prevY=false,prevA=false,prevB=false,lastGrade=P.grade,prevHandActive=0,prevRodPinch=false;
+let prevTrigR=false,prevY=false,prevX=false,prevA=false,prevB=false,
+    prevLStick=false,prevRStick=false,
+    lastGrade=P.grade,prevHandActive=0,prevRodPinch=false;
 let lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13, lastTipSoft=P.tipSoft,
     lastTaper=P.rodTaper, lastCell=P.gridCell, lastObst=P.obstHeight;
 const _lh=new THREE.Vector3(),_camQ=new THREE.Quaternion(),_camW=new THREE.Vector3(),_netP=new THREE.Vector3();
@@ -7867,17 +8205,49 @@ renderer.setAnimationLoop(()=>{
   const trigL=offPad?(offPad.buttons[0]?.value??0):(keys['ShiftLeft']?1:keys['KeyF']?0.5:0);
   rodPinch=rodPad?!!rodPad.buttons[1]?.pressed:!!keys['KeyC'];
   const netOn=offPad?!!offPad.buttons[1]?.pressed:!!keys['KeyN'];
+  /* ---- the buttons ----
+     The two hands each own one job now. The LEFT hand is the one you are not
+     fishing with while the menu is up, so it owns getting the menu up and the
+     two things that put the world back: X resets the cast, Y sends the fish
+     home, and clicking the stick opens and shuts the panel. The RIGHT hand
+     drives the panel once it is there — A pushes, B shuts it, and the stick
+     that was doing nothing at all now walks the rows.
+
+     A note on the Quest's own menu button, since it is the obvious place for
+     this: the system reserves it. The browser never delivers it to a WebXR
+     page — there is no button index for it in the xr-standard mapping — so a
+     page cannot bind it however much it would like to. Clicking the left
+     stick is the nearest thing that is actually ours: left hand, not a face
+     button, and it was unused. */
   const aBtn=rodPad?!!rodPad.buttons[4]?.pressed:false;
   const bBtn=rodPad?!!rodPad.buttons[5]?.pressed:false;
+  const xBtn=offPad?!!offPad.buttons[4]?.pressed:false;
   const yBtn=offPad?!!offPad.buttons[5]?.pressed:false;
-  if(aBtn&&!prevA)resetCast();prevA=aBtn;
-  if(bBtn&&!prevB){for(const f of fishes)f.reseat();say('fish reset');}prevB=bBtn;
-  if(yBtn&&!prevY){menuOpen=!menuOpen;menu.mesh.visible=menuOpen;}prevY=yBtn;
+  const lStick=offPad?!!offPad.buttons[3]?.pressed:false;
+  const rStick=rodPad?!!rodPad.buttons[3]?.pressed:false;
+
+  if(xBtn&&!prevX){resetCast();say('line back at your feet');}prevX=xBtn;
+  if(yBtn&&!prevY){for(const f of fishes)f.reseat();say('fish reset');}prevY=yBtn;
+  if(lStick&&!prevLStick){toggleMenu();pulse(0.25);}prevLStick=lStick;
+  if(bBtn&&!prevB){toggleMenu();pulse(0.25);}prevB=bBtn;
+  if(aBtn&&!prevA){
+    if(menuOpen) menuPush();
+    else { P.showStats=P.showStats>0.5?0:1; applyDisplay();
+           say(P.showStats>0.5?'stats window on':'stats window off'); }
+  }prevA=aBtn;
+  if(rStick&&!prevRStick&&menuOpen){menuTab(1);pulse(0.15);}prevRStick=rStick;
 
   const ax=offPad&&offPad.axes.length>=4?offPad.axes[2]:0;
   const ay=offPad&&offPad.axes.length>=4?offPad.axes[3]:0;
+  /* The right stick, which nothing else wants. It reads pointerOnMenu as
+     menuPointer left it on the PREVIOUS frame, which is a frame of lag on
+     "the ray just came off the panel" and is the right way round: the
+     alternative is the two of them fighting over menuSel within one frame. */
+  const rx2=rodPad&&rodPad.axes.length>=4?rodPad.axes[2]:0;
+  const ry2=rodPad&&rodPad.axes.length>=4?rodPad.axes[3]:0;
+  navStep(dt,rx2,ry2);
 
-  /* the menu is pointer-driven now, so the stick always moves you and the left
+  /* the LEFT stick always moves you, whatever the menu is doing, and the left
      hand keeps full line control while you tune */
   const stickFwd=(P.invertY>0.5?-ay:ay);
   const onStick=teleportStep(ax,stickFwd);
@@ -7950,7 +8320,7 @@ renderer.setAnimationLoop(()=>{
         fishHeld=f;f.held=true;
         /* offset = hand^-1 * fish, so the current relative pose is preserved */
         f.inspect.copy(_inspQ).invert().multiply(f.mesh.quaternion);
-        pulse(0.35);say('got him \u2014 turn him over');
+        pulse(0.35);say('got him \u2014 turn him over',f);
         break;
       }
     }
@@ -8132,7 +8502,7 @@ renderer.setAnimationLoop(()=>{
       const chance=(f.feeding?1:P.nonFeedMult)*(clean?1:0.06)*beh(f,'take');
       if(Math.random()<chance){
         f.beginStrike();pulse(0.35);
-      } else say(!clean?'drag \u2014 refused':(f.feeding?'the '+f.sp.label+' looked and passed':'that one isn\u2019t feeding'));
+      } else say(!clean?'drag \u2014 refused':(f.feeding?'the '+f.sp.label+' looked and passed':'that one isn\u2019t feeding'),f);
     }
   }
 
@@ -8154,7 +8524,7 @@ renderer.setAnimationLoop(()=>{
         else if(f.badT>P.chaseGiveUp||d>P.chaseRadius*2.0){
           f.state='holding'; f.badT=0; f.evaluated=false;
           say(strip>=P.chaseMax?'too fast \u2014 he gave up on it'
-                               :'he lost interest');
+                               :'he lost interest',f);
         }
         continue;
       }
@@ -8163,7 +8533,7 @@ renderer.setAnimationLoop(()=>{
       if(d>P.chaseRadius) continue;
       const eager=(f.feeding?1:P.nonFeedMult)*(1-d/P.chaseRadius)*beh(f,'chase');
       if(Math.random()<eager*P.chaseChance*dt){
-        f.state='chasing'; f.badT=0; say('he\u2019s following it'); pulse(0.20);
+        f.state='chasing'; f.badT=0; say('he\u2019s following it',f); pulse(0.20);
       }
     }
   }
@@ -8184,7 +8554,7 @@ renderer.setAnimationLoop(()=>{
         const f=hooked;
         hooked=null;fishTension=0;fishCarried=0;rebuildMasses();pulse(0.6);
         f.land();
-        say('netted a '+f.sp.label+' \u2014 '+f.lengthIn().toFixed(1)+' in, '+f.weightText());
+        say('netted a '+f.sp.label+' \u2014 '+f.lengthIn().toFixed(1)+' in, '+f.weightText(),f);
       }
     }
     M.drift=0;
@@ -8226,6 +8596,7 @@ renderer.setAnimationLoop(()=>{
     if(hooked)pulse(Math.min(1,M.tension/P.tippet));
     else if(M.bend>6)pulse(Math.min(1,M.bend/55)*0.7);}
   noteT-=dt;
+  toastStep(dt);
 
   if(P.vortex>0.01) for(const o of OBST){
     o.sh-=dt;
@@ -8457,7 +8828,7 @@ renderer.setAnimationLoop(()=>{
   }
 
   hudT+=dt;
-  if(hudT>0.1){hudT=0;drawHUD();if(menuOpen)drawMenu();if(recOpen)drawRec();}
+  if(hudT>0.1){hudT=0;if(hud.mesh.visible)drawHUD();if(menuOpen)drawMenu();if(recOpen)drawRec();}
   previewUpdate(dt);
   if(previewOn) pvFishUpdate(dt,t);
   renderer.render(scene,camera);
@@ -9088,11 +9459,12 @@ document.getElementById('preview').addEventListener('click',previewStart);
 if(!navigator.xr){
   enterBtn.disabled=true;enterBtn.textContent='WebXR unavailable';
   hint.innerHTML='<b>No WebXR here.</b> Mouse aims, Space reels, F routes / Shift pinches line, '+
-    'C clamps at the cork, N nets, M menu, R resets. Open in the Meta Quest Browser for the real thing.';
+    'C clamps at the cork, N nets, M menu, H stats, arrows and Enter drive the menu, R resets. Open in the Meta Quest Browser for the real thing.';
 } else {
   navigator.xr.isSessionSupported('immersive-vr').then(ok=>{
     if(!ok){enterBtn.disabled=true;enterBtn.textContent='Headset not detected';}});
 }
+applyDisplay();
 /* restore a shared settings string, e.g. #s=nodeLen=0.200&... */
 if(location.hash&&location.hash.indexOf('s=')>=0){
   try{

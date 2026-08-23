@@ -371,9 +371,27 @@ timestep-dependent, so **any calibration must be redone if those change.** XPBD 
 | Left trigger | under 15% free · 15–85% **routes** (a PULLEY: the material point at your fingers is set by the straight run from the stripping guide, so the span is never over-taut and never blocks line feeding out) · 15-85% old behaviour was to pin one node, which was what stopped casting past the hand · over 85% **pinches** |
 | ~~old~~ | under 15% free · 15–85% **routes** (line slides through the hand, held point re-chosen every frame) · over 85% **pinches** (one material point held fast) |
 | Left grip | net |
+| Left stick click | **open / close the menu** |
+| Left X | reset cast |
+| Left Y | send the fish home and start over |
 | Right trigger | reel in, analog · **drives the menu pointer while the menu is open** |
 | Right grip | clamp line at the cork |
-| A | reset cast · B | reseat fish · Y | toggle menu |
+| Right stick | **walks the menu** while it is open — up/down picks a row, left/right moves it |
+| Right stick click | **next tab** |
+| Right A | menu open: **push** an action row, or step a slider's range · menu shut: **show/hide the stats window** |
+| Right B | **open / close the menu** |
+
+**The left hand puts the world back and gets the panel up; the right hand drives
+the panel.** That is the whole of the map. It moved from A-resets / B-reseats /
+Y-menu, which had the two resets on the hand holding the rod and the menu button
+on the hand doing the line.
+
+**About the Quest's own menu button.** It is the obvious place to hang "open the
+menu" and it is not available: Meta reserves the left controller's ☰ for the
+system, the browser consumes it, and it has no index in the WebXR `xr-standard`
+mapping — a page cannot bind it however much it would like to. Clicking the left
+stick is the nearest thing that is actually ours: left hand, not a face button,
+and nothing else wanted it.
 
 Nobody should have to be told any of that. **PLAYER → Control labels** draws a ghost
 of each controller over your hands with a callout on every button that does something
@@ -426,6 +444,34 @@ a range button cycling **0.01x / 0.1x / 1x / 10x / 100x**, so no setting is ever
 either direction. Below 1x the range zooms in around the value at the moment you pressed it,
 and that window is frozen so the slider does not slide out from under you mid-drag.
 
+### Two ways round the menu, and why neither wins
+
+Pointing is still the fast way in and nothing about it changed. But the ray comes
+off the hand that is also holding a fly rod, and at arm's length a degree of wrist
+is most of a row — so a setting you want to move by one step is a setting you fight
+the pointer for. The right stick was doing nothing at all, and a stick is exactly
+the input that is good at *one step, precisely, without moving my hand*.
+
+- **Up and down walk the rows**, and **run on into the next tab** at either end. So
+  every row in the game is reachable from any other on one axis with no button, and
+  a tab boundary is not a wall.
+- **Left and right move the value by its own step** — the same step the phone and
+  the keyboard use, so a 0/1 toggle flips and a 0.05 slider moves 0.05. Held, it
+  repeats after a beat, so a flick is exactly one step.
+- **Click the stick** for the next tab, when up-and-down is too far to walk.
+- **A** pushes an action row, and on a row that is not an action it steps that row's
+  range multiplier — the only other thing a row has a button for.
+
+**The two never argue.** While the ray is ON the panel the pointer owns the
+selection: it sets `menuSel` from the row under it every frame, and a stick pulling
+the other way would be unusable. Take the ray off the panel and the stick has it.
+That is `pointerOnMenu`, set once a frame by `menuPointer()`. **PLAYER → Stick
+menu** turns the stick half off entirely.
+
+Arrow keys, Tab and Enter do the same on the flat page, which is also how the walk
+is driven in `smoke.mjs` — the Raycaster stub returns no hits, so `pointerOnMenu`
+is false in there and the harness is testing exactly the state that matters.
+
 ### The control guide
 
 **PLAYER → Controller labels**, shipped ON. A ghost of each controller drawn where the
@@ -455,6 +501,84 @@ Three things about it are deliberate:
 Turn it off and **Save as my default** if you would rather fish without them. It is on
 the phone remote too, so you can switch it on for a guest and off for yourself without
 taking the headset back.
+
+### 4a. The stats window is off, and the words are in the world
+
+The stats window now **ships off** (`showStats`, or **A** on the right hand with the
+menu shut). It is a tuning instrument, and shipping it on had a second cost that was
+not obvious: it was the only place the game ever spoke to you, and it sat in the
+corner of your eye at best. *"drag — refused"*, *"you lined him"*, *"he came for it
+and missed"* — that is the half of the game that has to be readable if any of it is
+to be learnable, and it was going past unread over the angler's shoulder.
+
+So every `say()` now also puts the words up in the world, on a plate cut to their own
+width. **MESSAGES** owns where and how:
+
+| | |
+|---|---|
+| `msgMode` 0 | **follows your gaze.** A set distance in front and below the centre, so you never hunt for it |
+| `msgMode` 1 | **at the fish it is about.** A refusal over the fish that refused, a spook over the one you put down |
+| `msgMode` 2 | the stats window and nothing else, which is what this did before |
+| `msgSize` · `msgDist` · `msgDrop` | apparent size, how far in front, how far below the eye line |
+| `msgSecs` · `msgLag` · `msgOpacity` | how long it holds, how fast it catches up, how solid the plate is |
+| `msgR/G/B` | the colour of the words |
+| `msgChatter` | whether a hooked fish's change of behaviour floats. **Off** — see below |
+
+Three things in there are load-bearing:
+
+- **The gaze follow LAGS.** `msgLag` is a rate, not a switch. A panel welded to your
+  head is one you cannot look away from, and that is the specific thing that makes
+  people take a headset off; a lazy follow lets you glance past it and drift it back
+  after you. The default catches up over about a fifth of a second.
+- **`say()` takes an ANCHOR, and most calls give one.** `say(msg, fish)` is what lets
+  mode 1 exist at all — the fish is who the message is about, and the words go over
+  him. A message about nothing in particular (*settings copied*, a venue change) has
+  no anchor and **falls back to the gaze whatever the mode says**, because there is
+  nowhere honest to put it. `Trout.spook()` passes `this`, so every spook, every
+  refusal, every take and every netted fish is anchored.
+- **The plate is sized to the words, and the panel is scaled by the distance it
+  actually ended up at.** So a message hanging over a fish twenty metres off reads
+  exactly as large as one in front of your face, and `msgSize` is apparent size
+  rather than metres.
+
+**Not everything the game says is an event.** A hooked fish picks a new behaviour
+every second or two, and floating each one puts a panel in front of your face for
+the entire fight. `say()` takes a third argument, `quiet`, and `pickBehaviour()` is
+the only caller that passes it: chatter still reaches the stats window and the phone
+(`FISH DOING`), it just does not take the sky. `msgChatter` turns it back on for
+anyone tuning the fight weights.
+
+A hidden stats window also stops answering the pointer ray — `Raycaster` does not
+check visibility for you, and a window nobody switched on would otherwise still
+swallow the trigger the reel needs. `smoke.mjs` checks both states.
+
+### 4c. The post over a hooked fish is a tension gauge
+
+`tensionMark`, shipped on. While a fish is on, the marker above him is coloured by
+`M.tension / P.tippet`: green at slack, through amber, to red as it closes on the
+tippet, and it **blinks inside the last fifth**, faster the closer it gets. You can
+fight a fish by eye instead of by instrument, which is the whole point — the number
+was previously only on a window that is now off by default.
+
+Two decisions worth keeping:
+
+- **It is fed `M.tension`, the SMOOTHED tension** — the same number the break-off is
+  tested against and the same one the stats window reads, so the post cannot disagree
+  with either. The raw pull spikes on every rod movement and would strobe red at a
+  fish that was never in danger.
+- **`tensionRamp()` and the blink are separate functions.** A colour that is also a
+  function of the clock cannot be asserted about, and the ramp is the half worth
+  asserting about. The blink only ever **darkens** the ramp — never lighter, never a
+  different hue — so the colour still reads as *how loaded is it* at every instant
+  and the blink is a separate word meaning *now*.
+
+It draws the hooked fish's post **even with Show markers off**, because a tension
+gauge is worth having without a forest of posts standing over every fish in the reach.
+
+Worth recording about the harness: this is the feature that finally forced the
+`THREE.Color` stub to be real. It answered `setHex()` with itself and `getHex()` with
+`0` — the exact stub shape section 5 warns about, plausibly wrong rather than
+obviously incomplete, and it made every colour the game computes untestable.
 
 ---
 
@@ -736,6 +860,14 @@ have caught years earlier. **When you add a stub, make it obviously incomplete r
 than plausibly wrong.** When adding a stub, prefer
 one that is obviously incomplete to one that is plausibly wrong.
 
+**A new check must not be able to fail an old one by standing in front of it.**
+The menu-navigation, control-guide and marker/message checks press buttons, hook a
+fish, spook one and move another — all of which consume RNG and leave the reach in a
+different state. Dropped in the middle of the file they changed what a fight was
+doing at the instant a later test hopped the rig, and that test measures the tension
+it finds there: a green build went red on a feature that touches none of it. They run
+last for that reason, and they put the fish back when they are done.
+
 **Therefore: run `smoke.mjs` before shipping.** It stubs Three.js and the DOM with real
 Vector3/Quaternion maths, executes the module, **connects a left and right controller with
 triggers held**, and ticks six frames. Connecting the controllers matters — bugs 8 and 9 both
@@ -757,6 +889,21 @@ reports undeclared identifier reads. `node --check` catches none of this.
 5. **No haul mechanic.** Single and double hauls are the obvious next casting feature.
 6. **One reach of river, four fish, one fly pattern.** No fly selection, no hatch, no
    fish memory of being pricked.
+6b. **The feeding lane is drawn and nothing else.** `latTol` and `upMax` appear in
+   exactly one place in the file — the four vertices of the quad `buildZones()`
+   draws — and in no test the fish ever apply. The take is a **circle** of radius
+   `takeRadius` in plan view, evaluated once per pass, with no upstream/downstream
+   sense at all: a fly that lands a foot BEHIND a fish is offered to him on exactly
+   the same terms as one that drifts down the lane into his nose. So the picture
+   the game draws of how a trout feeds and the rule it actually applies are two
+   different things, and the picture is the one that is right. Making the drawn
+   lane the real window — upstream only, `latTol` wide, `upMax` long — is a small
+   change with a large effect on whether where you stand matters.
+6c. **Drift quality is judged over the whole drift, not the part he saw.** `avgSlip`
+   averages from the instant of touchdown, so eight metres of clean drift can
+   forgive a foot of drag right in front of him, and one bad instant at the landing
+   poisons a drift that was fine by the time it arrived. What a fish sees is the
+   last second or so before the fly reaches him.
 7. **Performance.** ~116 active nodes at default spacing, ~265 at both minimums. On the CPU
    speck path, specks cost a flow evaluation each and dominate at high density; the GPU path
    removes that entirely. See `STRATEGY.md` for the full headroom analysis.
