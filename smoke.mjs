@@ -177,11 +177,31 @@ const THREE={
   BufferAttribute:function(a,i){return attr(a,i);},
   Float32BufferAttribute:function(a,i){return attr(Float32Array.from(a),i);},
   InstancedBufferAttribute:function(a,i){return attr(a,i);},
-  Color:class{constructor(c){this.r=1;this.g=1;this.b=1;this._h=c;}
-    set(){return this;}setHex(){return this;}setHSL(){return this;}
+  /* A REAL colour, not a plausible one. This used to answer setHex() with
+     itself and getHex() with 0, which is precisely the stub shape the handoff
+     warns about: nothing throws, everything reports health, and any code that
+     computes a colour is untestable in here. The hooked-fish tension ramp is
+     exactly that code. */
+  Color:class{constructor(c){this.r=1;this.g=1;this.b=1;if(typeof c==='number')this.setHex(c);}
+    set(c){if(typeof c==='number')this.setHex(c);return this;}
+    setHex(h){h=Math.floor(h)||0;this.r=((h>>16)&255)/255;this.g=((h>>8)&255)/255;this.b=(h&255)/255;return this;}
     setRGB(r,g,b){this.r=r;this.g=g;this.b=b;return this;}
-    clone(){return new THREE.Color();}lerp(){return this;}copy(){return this;}
-    getHex(){return 0;}convertSRGBToLinear(){return this;}multiplyScalar(){return this;}},
+    setHSL(h,s2,l){
+      if(s2===0){this.r=this.g=this.b=l;return this;}
+      const q=l<0.5?l*(1+s2):l+s2-l*s2, p2=2*l-q;
+      const hue=(t)=>{t=(t%1+1)%1;
+        if(t<1/6)return p2+(q-p2)*6*t;
+        if(t<1/2)return q;
+        if(t<2/3)return p2+(q-p2)*(2/3-t)*6;
+        return p2;};
+      this.r=hue(h+1/3);this.g=hue(h);this.b=hue(h-1/3);return this;}
+    clone(){return new THREE.Color().copy(this);}
+    lerp(c,t){this.r+=(c.r-this.r)*t;this.g+=(c.g-this.g)*t;this.b+=(c.b-this.b)*t;return this;}
+    copy(c){this.r=c.r;this.g=c.g;this.b=c.b;return this;}
+    getHex(){const q=v=>Math.max(0,Math.min(255,Math.round(v*255)));
+      return (q(this.r)<<16)|(q(this.g)<<8)|q(this.b);}
+    convertSRGBToLinear(){return this;}
+    multiplyScalar(s){this.r*=s;this.g*=s;this.b*=s;return this;}},
   Sphere:class{constructor(c,r){this.center=c;this.radius=r;}},
   Box3:class{setFromObject(){return this;}getSize(v){return v;}getCenter(v){return v;}},
   Matrix4:class{constructor(){this.elements=new Array(16).fill(0);}
@@ -868,15 +888,25 @@ if(trophy.parked>trophy.cap||trophy.strayCards||!trophy.allWet||!trophy.allCarde
 const hudDrag=vm.runInContext(`(()=>{
   const uvAt=(x,y)=>({object:hud.mesh,uv:{x:x/HW,y:1-y/HH}});
   const mid=HH/2+60;
-  return {handle:hudChrome(uvAt(HHANDLE.x+4,HHANDLE.y+4)),
+  /* The window ships OFF now, and a window that is not drawn must not answer
+     the ray at all — otherwise a feature nobody turned on quietly swallows the
+     trigger the reel needs. So both states are checked. */
+  P.showStats=0; applyDisplay();
+  const whenOff=hudChrome(uvAt(HHANDLE.x+4,HHANDLE.y+4));
+  P.showStats=1; applyDisplay();
+  const r={offAnswersNothing:!whenOff,
+          handle:hudChrome(uvAt(HHANDLE.x+4,HHANDLE.y+4)),
           minus:hudChrome(uvAt(HSC_M.x+4,HSC_M.y+4)),
           plus:hudChrome(uvAt(HSC_P.x+4,HSC_P.y+4)),
           numbers:hudChrome(uvAt(HW/2,mid)),
           menuPanel:hudChrome({object:menu.mesh,uv:{x:0.01,y:0.99}}),
           nothing:hudChrome(null)};
+  P.showStats=0; applyDisplay();
+  return r;
 })()`,sandbox);
 console.log('stats panel handle live with the menu shut',hudDrag);
-if(!(hudDrag.handle&&hudDrag.minus&&hudDrag.plus)||hudDrag.numbers||hudDrag.menuPanel||hudDrag.nothing)
+if(!(hudDrag.handle&&hudDrag.minus&&hudDrag.plus&&hudDrag.offAnswersNothing)||
+   hudDrag.numbers||hudDrag.menuPanel||hudDrag.nothing)
   console.log('  *** HUD HANDLE FAILURE ***');
 
 /* Teleport locomotion. What must hold: it never lands you somewhere wading
@@ -1043,10 +1073,24 @@ const hop=vm.runInContext(`(()=>{
   lineOut=12; offSpool=lineOut+rodArc+2.2; resetCast(); settle(50);
   runAction('!hookfish'); settle(30);
   const hookedBefore=!!hooked;
-  const fbase=peaks(30);
+  /* PIN WHAT HE IS DOING ACROSS BOTH WINDOWS.
+     peaks() is the maximum over 30-40 frames, a hooked fish picks a new
+     behaviour every second or two, and a run that happens to land inside the
+     second window is thirty newtons of FISH rather than thirty newtons of hop.
+     This check therefore failed at random, on builds that touch none of it,
+     roughly one run in four — and the comment below already knew why: "a
+     fight's own tension swings between nothing and everything run to run".
+     A test that has to be re-run to be believed is a test nobody believes.
+     (No backticks in here: this comment lives inside a template literal.)
+     Pinned to RUN, the hardest steady pull, with a fixed direction and
+     full stamina, both windows see the same fish and the only difference left
+     between them is the hop, which is the thing being measured. */
+  const pin=()=>{ if(hooked){ hooked.beh='run'; hooked.behT=9;
+                              hooked.stamina=1; hooked.run.set(-1,0,0); } };
+  pin(); const fbase=peaks(30);
   camera.getWorldPosition(_camWorld);
   blinkTo_(_camWorld.x-8,_camWorld.z);
-  const fafter=peaks(40);
+  pin(); const fafter=peaks(40);
   const fish={hookedBefore, stillOn:!!hooked,
               wet:hooked?+(surfY(hooked.p.x)-bedY(hooked.p.x,hooked.p.z)).toFixed(2):null,
               base:fbase, after:fafter, tippet:P.tippet};
@@ -1460,5 +1504,270 @@ if(spec.errs.length||!spec.noneOn||!spec.allOn||!spec.stable||
    spec.size.len!==2||Math.abs(spec.size.wt-8)>0.05||spec.size.scale!==1||
    spec.size.back!==1||!spec.flat||!spec.varied||!spec.rows||!spec.sizeRow)
   console.log('  *** SPECIES FAILURE ***');
+
+/* These three run LAST on purpose. They press buttons, hook a fish, spook
+   one and move another, and every one of those consumes RNG and leaves the
+   reach in a different state — which is enough to change what a fight is
+   doing at the moment a later test hops the rig, and that test measures the
+   tension it finds. A new check should not be able to fail an old one by
+   standing in front of it. */
+/* ── DRIVING THE MENU WITH THE STICK AND THE FACE BUTTONS ──────────────
+   The controls moved: the left hand opens the menu and owns the two resets,
+   the right hand walks it. Every one of those is an edge on a gamepad button
+   or a push on an axis nothing used to read, and every one of them is the kind
+   of thing that is silently wrong in a headset ("nothing happens when I press
+   that") rather than throwing. So they are driven here, through the real frame
+   loop, off the real pads.
+
+   Note the Raycaster stub returns no hits, so pointerOnMenu is false and the
+   stick has the menu — which is exactly the state being tested. */
+const nav=vm.runInContext(`(()=>{
+  const loop=renderer._loop, out={};
+  const press=(pad,i,n)=>{ pad.buttons[i].pressed=true; for(let k=0;k<(n||1);k++) loop();
+                           pad.buttons[i].pressed=false; loop(); };
+  const stick=(dx,dy,n)=>{ rodPad.axes[2]=dx; rodPad.axes[3]=dy;
+                           for(let k=0;k<(n||1);k++) loop();
+                           rodPad.axes[2]=0; rodPad.axes[3]=0; loop(); };
+  /* the pads the game actually bound, not new ones */
+  out.pads = !!rodPad && !!offPad && rodPad!==offPad;
+
+  /* left stick click opens it, and again shuts it */
+  toggleMenu(false);
+  press(offPad,3); out.stickOpens=menuOpen;
+  press(offPad,3); out.stickShuts=!menuOpen;
+  /* B does the same from the right hand */
+  press(rodPad,5); out.bOpens=menuOpen;
+
+  /* up and down walk the rows of the tab you are on */
+  selTab=TABS.findIndex(t=>t.name==='FISH'); menuSel=firstRowOf(selTab);
+  const first=menuSel;
+  stick(0,1); const second=menuSel;
+  stick(0,1); const third=menuSel;
+  stick(0,-1); const back=menuSel;
+  out.rowsWalk = second!==first && third!==second && back===second;
+
+  /* running off the bottom of a tab lands on the next one, so every row in
+     the game is reachable on one axis */
+  const tabWas=selTab;
+  const rows=TABS[selTab].rows; menuSel=rows[rows.length-1];
+  stick(0,1);
+  out.runsOnToNextTab = selTab===(tabWas+1)%TABS.length && menuSel===firstRowOf(selTab);
+  /* and off the top of that one comes back */
+  menuSel=firstRowOf(selTab);
+  stick(0,-1);
+  out.runsBack = selTab===tabWas;
+
+  /* left and right move the value by its own step, exactly */
+  selTab=TABS.findIndex(t=>t.name==='FISH');
+  const row=MENU.findIndex(r=>r[1]==='takeRadius');
+  menuSel=row; P.takeRadius=0.70;
+  const st=MENU[row][4];
+  stick(1,0); const up=P.takeRadius;
+  stick(-1,0); const down=P.takeRadius;
+  out.step={st, up:+up.toFixed(4), down:+down.toFixed(4)};
+  out.oneStepUp   = Math.abs(up-(0.70+st))<1e-6;
+  out.oneStepBack = Math.abs(down-0.70)<1e-6;
+
+  /* held, it repeats — but only after a beat, so a flick is one step */
+  P.takeRadius=0.70; menuSel=row;
+  rodPad.axes[2]=1; for(let k=0;k<3;k++) loop();
+  const flick=P.takeRadius;
+  for(let k=0;k<40;k++) loop();
+  const held=P.takeRadius;
+  rodPad.axes[2]=0; loop();
+  out.flickIsOneStep = Math.abs(flick-(0.70+st))<1e-6;
+  out.holdRepeats = held>flick+st*0.5;
+
+  /* a value is never driven outside its own range */
+  const [lo,hi]=rowRange('takeRadius',MENU[row][2],MENU[row][3]);
+  P.takeRadius=hi; menuSel=row; stick(1,0,2);
+  out.clampsHigh = P.takeRadius<=hi+1e-9;
+  P.takeRadius=lo; stick(-1,0,2);
+  out.clampsLow = P.takeRadius>=lo-1e-9;
+  P.takeRadius=0.70;
+
+  /* clicking the right stick is the next tab */
+  selTab=0; menuSel=firstRowOf(0);
+  press(rodPad,3);
+  out.stickClickTabs = selTab===1;
+
+  /* A pushes an action row, and steps the range of one that is not */
+  selTab=TABS.findIndex(t=>t.name==='PRESETS');
+  menuSel=MENU.findIndex(r=>r[1]==='!recenter');
+  menu.mesh.position.set(9,9,9);
+  press(rodPad,4);
+  out.aPushesAction = menu.mesh.position.x!==9;
+  menuSel=row; RANGEX['takeRadius']=1;
+  press(rodPad,4);
+  out.aStepsRange = RANGEX['takeRadius']!==1;
+  RANGEX['takeRadius']=1;
+
+  /* the pointer wins while the ray is on the panel */
+  selTab=TABS.findIndex(t=>t.name==='FISH'); menuSel=firstRowOf(selTab);
+  const keep=menuSel;
+  pointerOnMenu=true; stick(0,1); pointerOnMenu=false;
+  out.pointerWins = menuSel===keep;
+
+  /* and the whole thing can be switched off */
+  P.stickNav=0; stick(0,1); P.stickNav=1;
+  out.navOffIsOff = menuSel===keep;
+
+  /* the left hand's two resets, from the buttons that now carry them */
+  toggleMenu(false);
+  lineOut=3.0; press(offPad,4); out.xResets = lineOut>7.0;
+  fishes[0].state='spooked'; press(offPad,5); out.yReseats = fishes[0].state==='holding';
+
+  /* A with the menu shut is the stats window */
+  P.showStats=0; applyDisplay();
+  press(rodPad,4); out.aShowsStats = P.showStats>0.5 && hud.mesh.visible;
+  press(rodPad,4); out.aHidesStats = P.showStats<0.5 && !hud.mesh.visible;
+  return out;
+})()`,sandbox);
+console.log('menu navigation',nav);
+{
+  const bad=Object.entries(nav).filter(([k,v])=>v===false).map(([k])=>k);
+  if(bad.length) console.log('  *** MENU NAVIGATION FAILURE:',bad.join(', '),'***');
+}
+
+/* The ghost has to say what the buttons now do. A label that lies is worse
+   than no label, and the words are the only place the new map is written down
+   where a player can read it. */
+const ghost=vm.runInContext(`(()=>{
+  P.handGuide=1; buildGuide(); renderer._loop();
+  const out={hands:GUIDE.hands.length}, missing=[], toolong=[];
+  const seen={};
+  for(const [name,parts] of [['right',GUIDE_RIGHT],['left',GUIDE_LEFT]]){
+    for(const [key,at,to] of parts){
+      const k=name+':'+to.join(',');
+      if(seen[k]) missing.push(name+' two labels in one place');
+      seen[k]=1;
+      for(const open of [false,true]){
+        menuOpen=open;
+        const w=guideWords(key,name);
+        if(!w||!w[0]) { missing.push(name+'/'+key+(open?' (menu open)':'')); continue; }
+        /* 22 px Space Mono over 302 usable px is ~22 characters, and the plate
+           holds three wrapped lines before it stops drawing */
+        if(String(w[1]||'').length>66) toolong.push(name+'/'+key+' '+w[1].length);
+      }
+    }
+  }
+  menuOpen=false;
+  out.keys=[...GUIDE_RIGHT.map(r=>'R:'+r[0]),...GUIDE_LEFT.map(r=>'L:'+r[0])].join(' ');
+  out.silent=missing; out.overflowing=toolong;
+  /* the map itself: X and Y are the resets, A and B are on the rod hand */
+  out.leftHasXY = GUIDE_LEFT.some(r=>r[0]==='x') && GUIDE_LEFT.some(r=>r[0]==='y');
+  out.rightHasAB = GUIDE_RIGHT.some(r=>r[0]==='a') && GUIDE_RIGHT.some(r=>r[0]==='b');
+  out.rightHasStick = GUIDE_RIGHT.some(r=>r[0]==='stick');
+  out.noYOnRight = !GUIDE_RIGHT.some(r=>r[0]==='y');
+  menuOpen=true; const a=guideWords('a','right'); menuOpen=false;
+  const a2=guideWords('a','right');
+  out.aWordsFollowMenu = a[0]!==a2[0];
+  return out;
+})()`,sandbox);
+console.log('control guide',ghost);
+if(ghost.silent.length||ghost.overflowing.length||!ghost.leftHasXY||!ghost.rightHasAB||
+   !ghost.rightHasStick||!ghost.noYOnRight||!ghost.aWordsFollowMenu)
+  console.log('  *** CONTROL GUIDE FAILURE ***');
+
+/* ── THE TENSION MARKER AND THE FLOATING MESSAGE ──────────────────────── */
+const disp=vm.runInContext(`(()=>{
+  const loop=renderer._loop, out={};
+  const red=h=>(h>>16)&255, grn=h=>(h>>8)&255;
+  /* the ramp: green at slack, red at the tippet, and never going backwards */
+  const at=r=>tensionRamp(r);
+  out.slackIsGreen = grn(at(0))>red(at(0));
+  out.breakingIsRed = red(at(1.0))>grn(at(1.0))*2;
+  let mono=true, last=-1e9;
+  for(let r=0;r<=1.201;r+=0.02){
+    const v=red(at(r))-grn(at(r));
+    if(v<last-1) mono=false;
+    last=v;
+  }
+  out.rampIsMonotone=mono;
+  out.overTippetStaysRed = red(at(1.2))>200;
+  /* the blink only ever darkens, and only in the last fifth */
+  let dims=true, quiet=true, brighter=false;
+  for(let k=0;k<80;k++){
+    const t=k*0.017;
+    if(tensionColour(0.5,t)!==at(0.5)) quiet=false;
+    const c=tensionColour(0.98,t);
+    if(red(c)>red(at(0.98))+1) brighter=true;
+    if(red(c)<red(at(0.98))-8) dims=false;   /* it does dim somewhere */
+  }
+  out.blinkOnlyNearTheBreak = quiet;
+  out.blinkNeverBrightens = !brighter;
+  out.blinkActuallyBlinks = !dims;
+
+  /* the post over a hooked fish shows even with the forest of posts off */
+  P.showMarkers=0; P.tensionMark=1;
+  const f=fishes[0]; f.state='holding'; loop();
+  out.holdingHiddenWithMarkersOff = !f.marker.visible;
+  runAction('!hookfish'); loop();
+  out.hookedShows = !!hooked && hooked.marker.visible;
+  /* and it is the colour the tension says it is */
+  M.tension=P.tippet*0.02; loop(); const cool=hooked.marker.children[1].material.color.getHex();
+  M.tension=P.tippet*0.75; loop(); const hot =hooked.marker.children[1].material.color.getHex();
+  out.colourFollowsTension = red(hot)>red(cool) && grn(hot)<grn(cool);
+  P.tensionMark=0; loop(); out.offIsOff = !hooked.marker.visible;
+  P.tensionMark=1; P.showMarkers=1;
+  if(hooked) hooked.spook('test done',1);
+  M.tension=0; loop();
+
+  /* the stats window ships off, and the words go into the world instead */
+  out.statsOffByDefault = SHIPPED_SHOWSTATS===0;
+  P.showStats=0; applyDisplay(); out.statsHidden=!hud.mesh.visible;
+  P.showStats=1; applyDisplay(); out.statsShows=hud.mesh.visible;
+  P.showStats=0; applyDisplay();
+
+  P.msgMode=0; P.msgSecs=6; say('a message about nothing');
+  loop(); loop();
+  out.toastShows = toast.mesh.visible && toastSaid==='a message about nothing';
+  /* gaze mode puts it in front of the eye */
+  const eye=new THREE.Vector3(); camera.getWorldPosition(eye);
+  for(let k=0;k<40;k++) loop();
+  out.gazeDistance = +toast.mesh.position.distanceTo(eye).toFixed(2);
+  out.inFrontOfYou = Math.abs(out.gazeDistance-P.msgDist)<0.45;
+
+  /* at the fish, it is at the fish */
+  P.msgMode=1;
+  const g=fishes[1]; g.p.set(4,0.3,-6);
+  say('over this one',g);
+  for(let k=0;k<6;k++) loop();
+  out.atFishDistance = +Math.hypot(toast.mesh.position.x-4,toast.mesh.position.z+6).toFixed(3);
+  out.sitsOnTheFish = out.atFishDistance<0.01;
+  /* a message about nothing in particular still follows the gaze */
+  say('settings copied');
+  for(let k=0;k<6;k++) loop();
+  out.anchorlessFallsBack = toast.mesh.position.distanceTo(eye)<P.msgDist+1.2;
+
+  /* mode 2 is the old behaviour: the stats window and nothing else */
+  /* chatter is chatter: it reaches the stats window and stops there */
+  P.msgChatter=0; P.msgMode=0; say('a real event');
+  for(let k=0;k<4;k++) loop();
+  say('fish: run',fishes[0],true);
+  for(let k=0;k<4;k++) loop();
+  out.chatterStaysOffTheSky = toastSaid==='a real event' && note==='fish: run';
+  P.msgChatter=1; say('fish: sound',fishes[0],true);
+  for(let k=0;k<4;k++) loop();
+  out.chatterOnFloats = toastSaid==='fish: sound';
+  P.msgChatter=0;
+
+  P.msgMode=2; say('quiet please');
+  for(let k=0;k<20;k++) loop();
+  out.mode2Silent = !toast.mesh.visible;
+  P.msgMode=0;
+  /* and it goes away on its own */
+  P.msgSecs=1; say('brief');
+  for(let k=0;k<140;k++) loop();
+  out.fades = !toast.mesh.visible;
+  P.msgSecs=3.6; P.msgMode=0;
+  for(const f of fishes) f.reseat();          /* leave the reach as we found it */
+  return out;
+})()`.replace('SHIPPED_SHOWSTATS',JSON.stringify(shipped.showStats)),sandbox);
+console.log('markers and messages',disp);
+{
+  const bad=Object.entries(disp).filter(([k,v])=>v===false).map(([k])=>k);
+  if(bad.length) console.log('  *** MARKER / MESSAGE FAILURE:',bad.join(', '),'***');
+}
 
 console.log('OK');
