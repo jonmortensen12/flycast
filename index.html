@@ -172,7 +172,7 @@ import * as THREE from 'three';
 const P = {
   nodeLen:0.08, leadNode:0.03, leaderLen:2.74, tippetLen:0.9,
   rodModel:1, rodE:200, rodMass:0.077,
-  stiffMul:1.434, rodDamp:14, tipSoft:0.6, rodTaper:1,
+  stiffMul:1.434, rodDamp:14, tipSoft:0.6, rodTaper:1, fightFlex:1.6,
   massMul:1, lineBend:1, lineSmooth:0.15, menuScale:1, hudScale:1, dragMul:0.85, lineWt:5, statFric:0.05,
   reelSpeed:2.6, reelPower:60, lineStretch:60, spoolDrag:3, spoolDead:0.05, buoyancy:1, stick:1, tippet:40,
   guideMu:0.15, slipInertia:0.06, dragHeld:1, routeOn:0, handSlide:8, reelSlack:0.1, lineVis:0.8, flySize:1.8, haptics:1,
@@ -255,6 +255,7 @@ const MENU=[
   ['— ROD & TACKLE —',null,0,0,0,''],
   ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 1.43 puts the first bending mode at 4.0 Hz, which is what a real 9 ft 5wt measures. Calibrating on frequency rather than static sag is what stopped it feeling like a noodle.'],
   ['Rod damping','rodDamp',0.00,60.0,1.00,'Internal damping of the blank, per second. Damps how fast the rod deforms, not how it swings. Around 14 kills tip ring in about half a second, which is what a good graphite rod does. Zero rings for three seconds.'],
+  ['Playing flex','fightFlex',1.00,4.00,0.10,'How much softer the blank goes once a fish is ON, as a multiple of its compliance — 1.00 is the same rod you cast with, 2.00 bends twice as far under the same pull. A stiff enough rod to throw a tight loop is not always the rod you want to play a fish on, and this is the one number that lets you have both: it does nothing at all until you are into one, eases in over about a third of a second so the take does not snap the blank into a new shape, and eases back out when he comes off or comes to the net. It moves bend, not strength — the tippet still breaks at the same tension.'],
   ['Taper model','rodTaper',0,1,1,'0 uses the earlier hand-drawn stiffness curve. 1 uses the real second moment of area of a tapered tube, shaped by Tip softness below.'],
   ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip, as an exponent on the blank\u2019s real second moment of area. 1.00 is the true tube, whose tip is 500x softer than the butt and goes noodly at this node count. 0.60 keeps the shape without the flop.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
@@ -421,7 +422,7 @@ const PHYSICAL={
   rodModel:1, rodE:200.0, rodMass:0.077, massMul:1.00,
   lineBend:1.00, lineSmooth:0.15, leadNode:0.03,
   stiffMul:1.434,   /* first bending mode at 4.0 Hz, which is what a real 5wt does */
-  rodDamp:14.0, tipSoft:0.60, rodTaper:1,
+  rodDamp:14.0, tipSoft:0.60, rodTaper:1, fightFlex:1.60,
   leaderLen:2.74, tippetLen:0.90,
   dragMul:0.85,     /* felt value. 1.00 is the isolated-cylinder physics */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
@@ -527,6 +528,16 @@ const VENUE_BASE={
   clarity:1, sediment:0.06, specks:0.16, speckSize:0.051, speckRange:45,
   treeRange:38, takeRadius:0.7, maxSlip:0.32, lineRad:0.5, splashV:4.5,
   spookT:5, riseAggro:0.35, riseRate:0.55, feedChance:0.6,
+  /* HOW LONG A DRIFT THE WATER CAN ACTUALLY GIVE YOU. Six metres is a run or
+     a glide, where the fly can be put down a long way above a fish and tracked
+     the whole way in. Pocket water cannot do that and neither can a plunge
+     pool — there is a boulder or a fall two metres above his nose, and the
+     drift you get is the pocket. Leaving one number at six for every reach was
+     asking for a presentation the reach does not contain: measured, the fish
+     in Boulder Garden had two metres of clean water above them against a
+     six-metre box, so the best cast anyone could make covered a third of it
+     and every one of those fish was capped at a quarter of his chance. */
+  upMax:6,
   flySink:0, branchOn:0, cruiseSpeed:1,
 };
 
@@ -551,8 +562,15 @@ float scDep(float x,float zr){return 1.5*scCross(zr/7.0)*(0.55+0.45*sin(x*0.13+1
         {x: 1.5,z:-1.4,r:1.05,h:1.60,kind:'rock',sh:0,sgn:-1},
         {x: 6.5,z:2.1,r:0.62,h:1.05,kind:'rock',sh:0,sgn:1},
         {x:-3.0,z:-3.2,r:1.60,h:0.90,kind:'log',sh:0,sgn:-1}],
+  /* The big one used to sit at x 2.6, which is one metre behind the centre of
+     a 1.05 m boulder — five centimetres off its downstream face, inside the
+     boil. Nothing holds in the boil; a trout behind a rock lies back in the
+     TAIL of the cushion where the seam closes, three or four body lengths
+     down, and that is also the only place in the pocket a fly can be drifted
+     to him from. Moved to the tail of the same pocket: same rock, same fish,
+     two and a half metres of drift instead of twenty centimetres. */
   lies:[{x:-2.0,z:1.8,len:0.40},{x:-6.2,z:2.4,len:0.32},
-        {x:2.6,z:-2.0,len:0.46},{x:7.4,z:1.0,len:0.35}],
+        {x:4.8,z:-2.0,len:0.46},{x:7.4,z:1.0,len:0.35}],
   spawn:{x:0,z:0},
   par:{}
 };
@@ -565,6 +583,23 @@ float scDep(float x,float zr){return 1.5*scCross(zr/7.0)*(0.55+0.45*sin(x*0.13+1
   const rocks=boulderRow(11,-42,8.4,9973);
   const holes=rocks.map(o=>({x:o.x+o.r*1.9,z:o.z,rx:o.r*2.0,rz:o.r*1.6,d:0.50}));
   const hF=holesJS(holes);
+  /* THE FISH COME OFF THE ROCKS, like the pockets do. Six lies used to be
+     typed in by hand beside procedurally placed boulders, and the two had
+     drifted apart: two fish were welded to the upstream face of a boulder
+     with a metre of stone directly over their lane, and three were standing
+     in eight inches of open water between pockets, which is not water a trout
+     holds in — it is water he crosses. A pocket-water trout lies in the
+     scour, and within the scour he lies at the TAIL of it, where the seam
+     closes and the food funnels down to him, rather than in the boil against
+     the rock. So each lie is placed off its own hole: down the pocket by
+     0.62 of its length, and a little off the centre line into the softer
+     side. That is where he would be, and it is also the only place in a
+     pocket that a drift can reach him from. */
+  const PKT=[[1,0.26,-1],[3,0.30,1],[4,0.24,-1],[6,0.33,1],[8,0.28,-1],[9,0.31,1]];
+  const bLies=PKT.map(([i,len,sd])=>{
+    const h=holes[i];
+    return {x:+(h.x+h.rx*0.62).toFixed(2), z:+(h.z+sd*h.rz*0.30).toFixed(2), len};
+  });
   SCENES.boulder={
     name:'Boulder Garden', sub:'pocket water, short drifts, forty targets',
     hwMax:5.4, dzMax:0.6, dMax:1.1, slope:0.030,
@@ -583,12 +618,14 @@ float scDep(float x,float zr){
   ${holesGL(holes)}
   return d;}`,
     obst:rocks,
-    lies:[{x:-33.5,z:-0.6,len:0.26},{x:-16.0,z:1.4,len:0.30},
-          {x:-1.5,z:-1.9,len:0.24},{x:9.5,z:0.8,len:0.33},
-          {x:22.0,z:-2.2,len:0.28},{x:35.0,z:1.6,len:0.31}],
+    lies:bLies,
     par:{grade:1, current:0.85, gridCell:0.30, gridSpan:52, obstHeight:0.95,
          vortex:0.9, foam:0.35, takeRadius:0.45, maxSlip:0.42, riseAggro:0.55,
-         speckRange:26}
+         speckRange:26,
+         /* the pocket IS the drift: about two metres of it between one
+            boulder and the tail of its scour, and that is what he is asked
+            to have seen */
+         upMax:2.6}
   };
 }
 
@@ -632,7 +669,12 @@ float scDep(float x,float zr){
           {x:31.0,z:0.8,len:0.36}],
     par:{grade:1, current:1.05, gridCell:0.32, gridSpan:56, foam:0.55,
          foamLife:3.0, vortex:1.1, surfWave:0.9, waveShade:0.9,
-         riseAggro:0.65, takeRadius:0.8}
+         riseAggro:0.65, takeRadius:0.8,
+         /* nothing drifts over a four-foot fall and keeps drifting, so the
+            water above the lip is not water you can present from: the pool
+            below it is the whole of the drift, and it is about four metres
+            from the foam to the fish */
+         upMax:4.2}
   };
 }
 
@@ -714,7 +756,13 @@ float scDep(float x,float zr){
   /* sweepers, leaning off the cut bank at each apex */
   obst:[{x:-24,z:-9.6,r:1.70,h:1.00,kind:'log',sh:0,sgn:-1},
         {x: 26,z: 9.4,r:1.50,h:0.95,kind:'log',sh:0,sgn:1}],
-  lies:[{x:-27,z:-9.0,len:0.48},{x:-22,z:-8.6,len:0.54},
+  /* The heaviest fish in the game keeps his sweeper — he is just no longer
+     INSIDE it. At x -22 he sat within the log's own footprint with 40 cm of
+     water above him to present in; now he lies three and a half metres below
+     the trunk, still in its shade and still in the deep water along the cut
+     bank, with a two-metre drift down the seam. That is the cast the lie was
+     always meant to ask for. */
+  lies:[{x:-27,z:-9.0,len:0.48},{x:-20.4,z:-8.0,len:0.54},
         {x:0,z:0.4,len:0.40},{x:23,z:8.8,len:0.46},{x:28,z:1.0,len:0.28}],
   par:{grade:1, current:0.95, gridCell:0.38, gridSpan:58, vortex:0.7,
        takeRadius:0.6, lineRad:0.6, riseAggro:0.45}
@@ -1571,6 +1619,18 @@ function rodDist(a,b,rest){
   rpos[B]-=dx*rinvM[b];rpos[B+1]-=dy*rinvM[b];rpos[B+2]-=dz*rinvM[b];
 }
 const rodLam=new Float64Array(RN);
+/* HOW SOFT THE BLANK IS RIGHT NOW. One number, 1.0 while you are casting and
+   easing toward P.fightFlex while a fish is on, and it multiplies compliance
+   in the XPBD rod and divides stiffness in the legacy one — the same physical
+   statement in each model's own currency. It is eased rather than switched
+   because a rod that changes stiffness in one frame visibly snaps into a new
+   shape, and the moment it would do that is the moment of the take, which is
+   the last moment in the game that wants a glitch in it. */
+let flexNow=1;
+function flexStep(dt){
+  const want=(hooked&&hooked.state==='hooked')?Math.max(0.05,P.fightFlex):1;
+  flexNow+=(want-flexNow)*Math.min(1,dt*3.2);
+}
 function rodBendXPBD(i,h2){
   const a=i-1,b=i,c=i+1,A=a*3,B=b*3,C=c*3;
   const dx=rpos[B]-(rpos[A]+rpos[C])*0.5;
@@ -1580,7 +1640,7 @@ function rodBendXPBD(i,h2){
   if(Cv<1e-12) return;
   const w=rinvM[a]*0.25+rinvM[b]+rinvM[c]*0.25;
   if(w<=0) return;
-  const at=rodAlpha[i]/h2;
+  const at=rodAlpha[i]*flexNow/h2;
   const dl=(-Cv-at*rodLam[i])/(w+at);
   rodLam[i]+=dl;
   const nx=dx/Cv*dl, ny=dy/Cv*dl, nz=dz/Cv*dl;
@@ -2009,6 +2069,7 @@ function sanity(){
 function physics(dt){
   const h=dt/SUB, h2=h*h;
   slipOut=0;spoolOut=0;
+  flexStep(dt);
   updateSlipMass();
   sinkStep(dt);
   for(let s=1;s<=SUB;s++){
@@ -2057,7 +2118,7 @@ function physics(dt){
     for(let it=0;it<ITER;it++){
       for(let i=0;i<RN-1;i++) rodDist(i,i+1,ROD_SEG);
       if(P.rodModel>0.5){ for(let i=1;i<RN-1;i++) rodBendXPBD(i,h2); }
-      else { for(let i=1;i<RN-1;i++) rodBend(i-1,i,i+1,Math.min(1,rbendK[i]*P.stiffMul)); }
+      else { for(let i=1;i<RN-1;i++) rodBend(i-1,i,i+1,Math.min(1,rbendK[i]*P.stiffMul/flexNow)); }
       /* alternate sweep direction: a one-way sweep biases which end of the
          chain converges first, and reversing on odd iterations roughly halved
          the residual at coarse spacing for no extra cost */
@@ -3126,6 +3187,31 @@ function tameMaterial(m){
   if(m.map) m.map.anisotropy=1;
   return m;
 }
+/* A LOADED FISH IS NOT MADE OF METAL. glTF's metallicFactor and roughnessFactor
+   both DEFAULT TO 1 when the file does not state them, and a model exported
+   without a metal-roughness map is exactly the file that does not state them.
+   The rainbow in assets/ is one: its body material declares a base colour
+   texture, a roughness and nothing else, so it arrives claiming to be solid
+   metal. A metal has no diffuse term at all — everything it shows is what it
+   reflects — and this scene is lit by three lights and carries no environment
+   map, so there was nothing for it to reflect. The fish rendered as a black
+   silhouette with a highlight sliding over it. Measured on the display fish:
+   RGB 5,5,3 out of 255.
+
+   So the model's finish is held to the species' own paint: never shinier in
+   the metal channel than the painted fish is, and a "roughness" that is really
+   just the unstated default is replaced by the species' number rather than
+   left chalk-flat. Colour, texture and clearcoat are the model's business and
+   are not touched. This also hands makeSwimMaterial a sane pair to capture as
+   rough0/metal0, so a loaded fish goes glossy out of the water on exactly the
+   same curve the procedural one does instead of starting where it should end. */
+function fishFinish(m,S){
+  if(!m) return m;
+  const paint=(S&&S.paint)||SPECIES.rainbow.paint;
+  if(m.metalness!==undefined) m.metalness=Math.min(m.metalness,paint.metal);
+  if(m.roughness>=0.98) m.roughness=paint.rough;
+  return m;
+}
 const triCount=geo=>Math.floor(((geo.index?geo.index.count:geo.attributes.position.count))/3);
 
 let assetLoader=null;
@@ -3297,6 +3383,7 @@ async function loadSceneAssets(){
       const fv=await loadSlot(S.slot);
       if(!fv||!fv.length) continue;
       const G=fv[0];
+      for(const it of G.items) fishFinish(it.mat,S);
       const a={geo:G.items[0].geo,mat:G.items[0].mat,extra:G.items.slice(1)};
       /* shared by every fish built from the asset — see emptyGroup */
       markShared(a.geo); markShared(a.mat);
@@ -5443,13 +5530,35 @@ class Trout{
        standing eighteen metres below a lip had his window stretched to twenty
        metres by it, which is not a fish holding under a waterfall, it is a
        fish in a pool that happens to have one somewhere above it. */
+    /* AND STOP AT WHAT THE FLY CANNOT COME OVER. The two halves are not the
+       same feature. Water runs over a sunk log, over a rock that is awash,
+       over a six-inch lip — the fly goes with it, so the drift genuinely does
+       have to survive that seam and the box reaching past it is the whole
+       point. Nothing at all drifts over a boulder standing a foot out of the
+       river, or over a four-foot fall: below one of those, the drift STARTS,
+       and no cast anybody can make will have the fly tracking above it.
+       Stretching the box past that asked for a presentation the water cannot
+       receive. Measured before this: every fish in Boulder Garden sat with
+       about two metres of clean water above him and a four-and-a-half metre
+       box over him, so the best possible drift covered 45% of it and each of
+       those fish was pinned near the floor of the chance multiplier for
+       reasons no one standing in the river could see.
+       `PROUD` is where "the water is going over it" stops being true, and the
+       top of a rock is `bedY + h*obstHeight` — which is the CENTRE the mesh is
+       placed at, the same trap the line's own collision test fell into once —
+       plus the vertical semi-axis the collision ellipsoid uses. */
+    const PROUD=0.10;
+    const crown=o=>bedY(o.x,o.z)+o.h*P.obstHeight
+                  +o.r*(o.kind==='log'?0.55:0.72);
     const scan=ZONE_SCAN(base), clear=Math.max(0,P.zoneClear);
-    let why='window';
+    let why='window', stop=Infinity;
     for(const o of OBST){
       const dx=this.p.x-o.x;                       /* >0: it is upstream of him */
       if(dx<=0.15||dx>scan) continue;
       if(Math.abs(o.z-this.p.z)>o.r+this.zoneHalf+0.35) continue;
       up=Math.max(up,dx+o.r+clear);
+      /* in HIS line, and standing out of the water: the drift starts below it */
+      if(Math.abs(o.z-this.p.z)<o.r&&crown(o)>surfY(o.x)+PROUD) stop=Math.min(stop,dx-o.r);
       /* Whose seam he is sitting in, for the refusal to be able to name it.
          Set when the feature is IN the box, not only when it stretched it —
          a rock already inside a deep fish's window is still the thing your
@@ -5461,9 +5570,11 @@ class Trout{
       if(dx<=0.15||dx>scan) continue;
       if(d.h*P.grade<0.06) continue;               /* not a lip, just a grade */
       up=Math.max(up,dx+d.w*0.5+clear);
+      /* a step you can drift over lengthens the box; a plunge ends it */
+      if(d.h*P.grade>0.50) stop=Math.min(stop,dx);
       if(why==='window') why='drop';               /* a rock in his lane wins */
     }
-    this.zoneUp=Math.max(Math.max(0.4,P.zoneMin),Math.min(base*3.4,up));
+    this.zoneUp=Math.max(Math.max(0.4,P.zoneMin),Math.min(base*3.4,up,stop));
     this.zoneWhy=why;
   }
   /* One frame of the drift running through his box. `fx/fz` is the fly, `slip`
@@ -5678,6 +5789,22 @@ class Trout{
        taking all of it, and the constraints have nothing left to argue with.
        12.4 g instead of 1.85 g, and `fishCarried` instead of the raw pull,
        is about a hundredfold reduction in the worst case. */
+    /* AND IT HAS TO ARRIVE AS A POSITION, NOT AS A VELOCITY. This wrote the
+       impulse into rvel alone — and the substep that calls it has already
+       integrated the rod's positions by the time the fish is stepped, and ends
+       by re-deriving every rod velocity from the positions it solved:
+       `rvel = (rpos - rprd)/h`. So the pull was overwritten a few lines later,
+       every substep, and never moved a single node. That is the whole of "the
+       rod does not bend when I am into a fish": the blank never heard about
+       him. Measured before the fix, 3.5 N on the tip: 7 degrees of total bend,
+       against 3 degrees for the rod's own weight hanging in still air.
+
+       Adding the same impulse to the position as well — dv*h, exactly the
+       displacement it would have produced had it landed before the integration
+       — puts the load in front of the constraint solve, which is the only
+       place a PBD rod can feel anything. rvel is still written for the same
+       reason it always was: it is the honest bookkeeping, and the end-of-step
+       re-derivation now agrees with it instead of erasing it. */
     if(fishCarried>0){
       let msum=0;
       for(let i=RN-ROD_REACT;i<RN;i++) if(rinvM[i]>0) msum+=1/rinvM[i];
@@ -5687,6 +5814,7 @@ class Trout{
           if(rinvM[i]<=0) continue;
           const p=i*3;
           rvel[p]-=lx*dv; rvel[p+1]-=ly*dv; rvel[p+2]-=lz*dv;
+          rpos[p]-=lx*dv*h; rpos[p+1]-=ly*dv*h; rpos[p+2]-=lz*dv*h;
         }
       }
     }

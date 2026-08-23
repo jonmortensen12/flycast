@@ -167,6 +167,13 @@ the most interesting open question in the project. Likely suspects: 12 nodes is 
 for a 500:1 stiffness taper; effective modal mass may be too high; the wall-thickness
 assumption is a guess.
 
+**Playing flex.** `fightFlex` multiplies the blank's compliance while a fish is on — XPBD
+compliance up, legacy stiffness down, the same statement in each model's currency — eased
+in over about a third of a second so the take does not snap the rod into a new shape, and
+eased back out when he is off. The rod you want to throw a tight loop with is not always
+the rod you want to play a fish on, and this is the one number that lets a build have
+both. It ships at 1.6. It moves bend only: the tippet still parts at the same tension.
+
 Rod damping targets the **deformation** velocity — each node against the velocity it would
 have if the rod were rigid with the hand, with ω recovered from the two driven nodes as
 `(r × Δv)/|r|²`. Damping toward world zero drags the rod backwards and folds it at the first
@@ -233,6 +240,29 @@ load-bearing:
 
 `ZONE_SCAN` is shared with the harness on purpose. A test that writes out the rule
 it is checking is a test that can quietly disagree with the code.
+
+**And it stops at what the fly cannot come over.** Extending and stopping are not
+the same feature, and treating them as one asked for casts the river cannot
+receive. Water runs over a sunk log, over a boulder that is awash, over a
+six-inch lip — the fly goes with it, so the drift really does have to survive
+that seam. Nothing drifts over a rock standing a foot out of the water or over a
+four-foot fall: below one of those the drift *starts*. So a feature in his own
+line (`|Δz| < r`) that is proud of the film by more than `PROUD` = 0.15 m, or a
+drop over 0.50 m, **clips** `zoneUp` to the near face of it instead of pushing it
+past. Cedar Run's boulders crown 2 cm under the surface and still lengthen the
+box; Boulder Garden's stand 40–100 cm clear and now end it.
+
+Measured before that clip: every fish in Boulder Garden had about two metres of
+clean water above him under a four-and-a-half metre box, so the best drift anybody
+could make covered 45% of it and each of those fish sat near the floor of the
+`0.25 + 0.75·cover` multiplier for a reason nothing in the headset could show you.
+Now the box is the pocket: 1.8–2.1 m of zone over 1.9–2.4 m of water, and the
+drawn box ends where the water does.
+
+**`upMax` is a venue number.** It is in `VENUE_BASE`, so a reach can own the drift
+it can actually give: 6 m in a run or a glide, `2.6` in Boulder Garden — whose own
+subtitle says *short drifts* — and `4.2` under Stairstep Falls, where the pool
+below the lip is the whole of the presentation.
 
 **What it measures** — the drift is judged over the box and nothing else. Slip
 accumulates only while the fly is inside it, so eight metres of clean water upstream
@@ -895,12 +925,42 @@ Recorded because each one was mis-diagnosed at least once.
    `solveGuide()`, which couples every guide to the line **both ways** while a hooked
    fish holds `invM[0] = 0`, i.e. an infinitely heavy end on a chain of 1.5 µg nodes.
 
+20. **And then none of it reached the rod at all.** Reported as *the rod does not bend
+   when I am fighting a fish*, and it was exactly that. The reaction from (19) was
+   written into `rvel` — and `Trout.step()` is called from inside the substep **after**
+   the rod's positions have already been integrated, in a loop that ends with
+   `rvel[i] = (rpos[i] - rprd[i]) / h` for every free node. So the impulse was
+   overwritten a few lines later, every substep, and never moved anything. The blank
+   hung at its own dead weight with a fish on: measured under a steady 3.5 N at the tip,
+   **7° of total bend against 3° for the rod hanging in still air**.
+
+   Note what this does to the measurement in (19). "Total bend 7.0° → 4.1°" was read as
+   the fix working. It was the fish's pull being thrown away more thoroughly.
+
+   The impulse now lands on the position as well — `dv*h`, the displacement it would have
+   produced had it arrived before the integration — which puts it in front of the
+   constraint solve, the only place a PBD rod can feel anything. Measured across the same
+   static rig, rod held **across** the pull: 10 N → 15° and 0.34 m of tip deflection,
+   20 N → 39° and 0.44 m. Pointed straight down the line at him it is still almost
+   nothing, which is not a bug — a rod pointed at a fish is out of the fight.
+
+   `smoke.mjs` asserts the crude version of this: a pinned fish pulling across the blank
+   bends it further than its own weight does, and `Playing flex` moves that number.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
 stub: the proxy's `set` trap silently discards assignments, so `THREE.Clock` has to be handled
 in the `construct` trap. It wasn't, `dt` was NaN, and the harness reported healthy nonsense for
 a while.
+
+**The sandbox has to hand over the language's own globals.** `smoke.mjs` answers `has`
+with true for everything, which is what lets it *report* an undeclared read instead of
+throwing — and that same trap swallows `Infinity`, `NaN` and the rest, because those live
+on the vm context's intrinsics rather than on the sandbox object. An ordinary
+`let stop = Infinity` in `fitZone` came back `undefined`, turned the zone length into
+`NaN`, and took six presentation-zone assertions down with it while the harness printed
+`UNDECLARED READ: Infinity` and nobody read it. They are now on the table explicitly.
 
 **Two harnesses, and they catch different things.** `smoke.mjs` runs the module in a **plain**
 vm context — an earlier version wrapped the global in a Proxy whose `has` trap returned true,
