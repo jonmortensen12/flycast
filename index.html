@@ -199,6 +199,7 @@ const P = {
   /* which species are in the water, and whether they behave differently */
   spRainbow:1, spBrown:1, spBrook:0, spCutt:0, spSalmon:0, spTraits:1,
   showZones:1, showMarkers:1, tensionMark:1,
+  zoneAuto:1, zoneClear:0.8, zoneMin:0.30,
   /* the stats window is off until you ask for it; messages float instead */
   showStats:0,
   msgMode:0, msgSize:1, msgSecs:3.6, msgDist:1.6, msgDrop:0.20, msgLag:6,
@@ -364,13 +365,16 @@ const MENU=[
   ['Foam brightness','foamBright',0.00,2.00,0.05,'How strongly foam covers the water under it. At 0 the foam pattern still drives the surface roughness and the opacity, so the water still goes flat and opaque where it churns — it just is not painted white. Above 1 it covers completely and reads as heavier aeration.'],
   ['Foam stain','foamDirt',0.00,1.00,0.02,'How much of the water colour bleeds into the foam. Real foam picks up what the river carries: on a tannic river it is tea-coloured, on a glacial one it is grey. At 0 the foam is exactly the colour you set above regardless of the water; at 1 it is strongly stained by it, so changing the water colour drags the foam along with it automatically.'],
   ['— FISH —',null,0,0,0,''],
-  ['Show zones','showZones',0,1,1,'Draw the take radius ring and feeding lane for each fish.'],
+  ['Show presentation zone','showZones',0,1,1,'Draw each fish\u2019s presentation zone \u2014 the box upstream of him that the fly has to drift down, drawn on all four sides so you can see what is inside it and what is not \u2014 together with the ring at which he finally makes up his mind. It is live: amber at rest, green while your fly is inside it and drifting honestly, and red the moment it starts to drag, which is the one thing that turns \u201Cdrag \u2014 refused\u201D from a verdict you get afterwards into something you can see and fix on the water. Turn it off once you can read the current without it.'],
   ['Show markers','showMarkers',0,1,1,'Draw the post above each fish. Green means feeding, grey means not, blue is one you have landed.'],
   ['Tension marker','tensionMark',0,1,1,'While a fish is on, colour the post above him by how hard the line is loaded: green at slack, through amber, to red as the tension closes on your tippet — and it flashes once it is inside a fifth of breaking, which is the moment to give him line. It is the same number the TENSION row of the stats window reads, so you can fight a fish by eye instead of by instrument. This draws the hooked fish’s post even with Show markers off, because a tension gauge is worth having without a forest of posts in the water.'],
-  ['Take radius','takeRadius',0.15,1.60,0.05,'How close the fly must drift before a fish decides on it.'],
-  ['Max drag slip','maxSlip',0.05,0.90,0.02,'How much the fly may move relative to the current and still count as drag-free. Lower is stricter.'],
-  ['Lane half-width','latTol',0.20,3.00,0.10,'Width of the drawn feeding lane either side of the fish.'],
-  ['Lane length','upMax',1.00,12.0,0.50,'How far upstream the drawn lane extends.'],
+  ['Take radius','takeRadius',0.15,1.60,0.05,'How close the fly must come before a fish makes up his mind about it. This is the moment of decision, not the test: what he decides on is the drift he watched come down his presentation zone before it got here.'],
+  ['Max drag slip','maxSlip',0.05,0.90,0.02,'How much the fly may move relative to the water it is sitting in and still count as drag-free. This is measured over the presentation zone and nowhere else, so a clean landing eight metres up no longer forgives a foot of drag in front of his nose, and one bad instant at the splashdown no longer poisons a drift that was fine by the time it arrived. Lower is stricter.'],
+  ['Zone half-width','latTol',0.20,3.00,0.10,'How wide the presentation zone is either side of the fish, before Fit zone to the water widens it for a deep fish. Outside this the fly is not in his lane and he is not judging it \u2014 or eating it.'],
+  ['Zone length','upMax',1.00,12.0,0.50,'How far upstream the presentation zone reaches, for a fish at the reference holding depth. This is the distance the fly has to have been drifting honestly before it arrives, and how much of it the fly actually came down is its own multiplier on the take: a fly that lands on his head has covered none of it and is worth about a quarter of the chance, one that came the whole way is worth all of it. With Fit zone to the water on, this is a scale rather than a fixed length \u2014 see that row.'],
+  ['Fit zone to the water','zoneAuto',0,1,1,'Whether each fish gets a zone sized by the water he is actually sitting in, or every fish in the reach gets the same box. On, two things set it. First what he can SEE: a trout looks at the surface through Snell\u2019s window, a circle whose radius is about 1.13 times his depth below the film, so a fish hanging in two feet of water first picks a floating fly up a long way further upstream than one tucked under the bank in six inches \u2014 deep pool fish therefore want a long clean drift and a pocket fish will forgive a short one. Second what is IN THE WAY: if a rock, a sunk log or the lip of a drop sits upstream in his line, the zone grows to reach past it by Zone clear, so the fly has to come over or around the feature and still be drifting when it gets to him. That is the whole difficulty of pocket water and the game did not have it before. Off gives every fish exactly Zone length by Zone half-width.'],
+  ['Zone clear m','zoneClear',0.00,3.00,0.10,'How far PAST an upstream rock, log or lip a fish\u2019s presentation zone reaches. This is the drift you have to buy with a mend or with where you stand: at 0 the zone stops at the feature and dropping the fly into the seam behind it is enough, and by a metre you have to have the fly tracking properly before it comes over. Nothing at all if Fit zone to the water is off.'],
+  ['Zone minimum m','zoneMin',0.10,3.00,0.10,'The shortest a fitted zone may get, whatever the water says. A fish in a few inches of pocket water has almost no window, and without a floor here he would eat anything dropped anywhere near him.'],
   ['Splash limit','splashV',1.00,9.00,0.20,'Landing speed above which the fly slaps down and spooks nearby fish.'],
   ['Lining radius','lineRad',0.10,2.00,0.05,'How close fly line may land to a fish before he is lined and put down.'],
   ['Spook seconds','spookT',1.00,20.0,0.50,'How long a spooked fish sulks before returning to his lie.'],
@@ -5191,6 +5195,11 @@ function speciesFor(l){
 }
 const fishes=[];
 const fishGroup=new THREE.Group();
+/* How far upstream of a fish a rock, a log or a lip is still HIS feature —
+   the water he is holding in rather than something that happens to be in the
+   same pool. A couple of rod lengths. Shared with the harness so a test cannot
+   quietly disagree with the rule it is checking. */
+const ZONE_SCAN=base=>Math.max(2.0,base*1.25);
 function makeMarker(){
   const g=new THREE.Group();
   const stem=new THREE.Mesh(new THREE.CylinderGeometry(0.005,0.005,0.85,5),
@@ -5267,6 +5276,12 @@ class Trout{
     this.beh='cruise';this.behT=0;this.effort=0.5;this.v=new THREE.Vector3();
     /* a cruiser works a circuit instead of holding a lie: [rx, rz, rad/s] */
     this.cr=l.cr||null; this.cruA=Math.random()*6.2832; this.cruHead=0; this.badT=0;
+    /* THE PRESENTATION ZONE. How far upstream of him the fly has to have been
+       behaving itself, how wide that window is, and the bookkeeping for the
+       drift currently running through it. zoneUp/zoneHalf are recomputed on a
+       slow timer because they depend on where he is, and he moves. */
+    this.zoneUp=P.upMax; this.zoneHalf=P.latTol; this.zoneT=0; this.zoneAcc=0;
+    this.zoneEnter=null; this.zoneRun=0; this.zoneFit=0; this.zoneWhy='';
     this.mesh=makeTrout(this.len,this.sp);fishGroup.add(this.mesh);
     this.marker=makeMarker();fishGroup.add(this.marker);
   }
@@ -5369,6 +5384,121 @@ class Trout{
         this.riseKind===1?'head and tail\u2026':'he\u2019s charging it',this);
   }
   bodyMass(){ return 0.30*Math.pow(this.len/0.30,3); }
+  /* ── THE PRESENTATION ZONE ─────────────────────────────────────────────
+     The box drawn over each fish used to be scenery: `latTol` and `upMax`
+     appeared in exactly one place in this file — the vertices of that quad —
+     and in no test a fish ever applied. The take was a CIRCLE, evaluated once
+     per pass, with no upstream sense at all, so a fly landing a foot behind a
+     trout was offered to him on the same terms as one that came down his lane
+     from six feet above. The picture and the rule were two different things,
+     and the picture was the one that was right.
+
+     Now the box IS the rule. Two halves:
+
+     · HOW BIG IT IS. Not one number for the whole reach — the water he is
+       sitting in decides. The floor is what he can physically see: a trout
+       looks at the surface through Snell's window, a circle whose radius is
+       about 1.13x his depth below the film, so a fish hanging in two feet of
+       water first sees a floating fly a long way further up than one tucked
+       under the bank in six inches. Then it is EXTENDED to reach past
+       whatever is upstream of him — a rock, a log, the lip of a drop —
+       because a fish lying behind a boulder or under a fall is one whose
+       drift has to survive the seam, not just the last two feet. That is the
+       whole difficulty of pocket water, and until now the game did not have
+       it.
+
+     · WHAT IT MEASURES. The drift is judged over the box and nothing else.
+       Slip is accumulated only while the fly is inside, so eight metres of
+       clean water upstream no longer forgives a foot of drag right in front
+       of his nose, and one bad instant at the landing no longer poisons a
+       drift that was fine by the time it arrived. And how much of the box the
+       fly actually came down is its own multiplier: a fly that appears on his
+       head has covered none of it and is worth a quarter of the chance, a fly
+       that came the whole way is worth all of it.
+     ───────────────────────────────────────────────────────────────────────*/
+  zoneReset(){ this.zoneT=0; this.zoneAcc=0; this.zoneEnter=null; this.zoneRun=0; }
+  /* Recomputed on a slow timer rather than every frame: it walks the obstacle
+     list and samples the surface, and neither answer changes inside a second. */
+  fitZone(){
+    const base=Math.max(0.5,P.upMax), half0=Math.max(0.15,P.latTol);
+    if(P.zoneAuto<0.5){ this.zoneUp=base; this.zoneHalf=half0; this.zoneWhy=''; return; }
+    /* SNELL'S WINDOW: the circle of surface he can see through, radius about
+       1.13x his depth, plus a little for the blurred rim. The reference fish
+       this reach was tuned on lies about 0.42 m down, so a window of ~0.92 m
+       is what `Zone length` means at 1.00. */
+    const deep=Math.max(0.05,surfY(this.p.x)-this.p.y);
+    const win=Math.max(0.30,Math.min(1.7,(1.13*deep+0.45)/0.92));
+    let up=base*win;
+    /* a deeper fish sees a wider patch of surface as well as a longer one, and
+       this has to be set BEFORE the obstacle scan, which asks how wide his
+       lane is when deciding whether a rock is in it */
+    this.zoneHalf=half0*Math.max(0.45,win);
+    /* REACH PAST WHAT IS UPSTREAM. A rock, a sunk log, the lip of a drop: if
+       one sits in his line and NEAR him, the box grows to clear it by `Zone
+       clear`, so the fly has to come over or around the feature and still be
+       drifting when it gets to him.
+
+       "Near" is a couple of rod lengths, not the whole scan of the reach. The
+       first version looked base*3.2 upstream — nineteen metres — and a fish
+       standing eighteen metres below a lip had his window stretched to twenty
+       metres by it, which is not a fish holding under a waterfall, it is a
+       fish in a pool that happens to have one somewhere above it. */
+    const scan=ZONE_SCAN(base), clear=Math.max(0,P.zoneClear);
+    let why='window';
+    for(const o of OBST){
+      const dx=this.p.x-o.x;                       /* >0: it is upstream of him */
+      if(dx<=0.15||dx>scan) continue;
+      if(Math.abs(o.z-this.p.z)>o.r+this.zoneHalf+0.35) continue;
+      up=Math.max(up,dx+o.r+clear);
+      /* Whose seam he is sitting in, for the refusal to be able to name it.
+         Set when the feature is IN the box, not only when it stretched it —
+         a rock already inside a deep fish's window is still the thing your
+         drift has to survive. */
+      why=o.kind==='log'?'log':'rock';
+    }
+    for(const d of DROPS){
+      const dx=this.p.x-(d.x+d.w);
+      if(dx<=0.15||dx>scan) continue;
+      if(d.h*P.grade<0.06) continue;               /* not a lip, just a grade */
+      up=Math.max(up,dx+d.w*0.5+clear);
+      if(why==='window') why='drop';               /* a rock in his lane wins */
+    }
+    this.zoneUp=Math.max(Math.max(0.4,P.zoneMin),Math.min(base*3.4,up));
+    this.zoneWhy=why;
+  }
+  /* One frame of the drift running through his box. `fx/fz` is the fly, `slip`
+     is how fast it is moving relative to the water it is sitting in. */
+  zoneStep(dt,fx,fz,slip,live){
+    if(!live||this.state!=='holding'){ this.zoneReset(); return; }
+    const dx=this.p.x-fx;                          /* >0: fly is upstream */
+    const dz=Math.abs(fz-this.p.z);
+    if(dx>-0.25&&dx<this.zoneUp&&dz<this.zoneHalf){
+      if(this.zoneEnter===null) this.zoneEnter=dx;
+      this.zoneT+=dt; this.zoneAcc+=slip*dt;
+      this.zoneRun=Math.max(this.zoneRun,this.zoneEnter-dx);
+    } else if(dx<=-0.25||dz>this.zoneHalf*1.7||dx>=this.zoneUp*1.25){
+      this.zoneReset();
+    }
+  }
+  /* How much of the box the fly actually came down, 0 to 1. */
+  zoneCover(){ return Math.max(0,Math.min(1,this.zoneRun/Math.max(0.35,this.zoneUp))); }
+  /* WHAT HE MAKES OF IT. One function, so the number the game rolls against
+     and the number a test asks about cannot be two different numbers — the
+     frame loop calls this and so does smoke.mjs. `slip` is the fly's speed
+     relative to the water right now; `drifting` is whether there is any
+     current worth speaking of; `fallback` is the whole-cast average, which is
+     all there is in slack water or before the fly has reached anybody's box. */
+  judge(slip,drifting,fallback){
+    const seen=drifting&&this.zoneT>0.05;
+    const avgSlip=seen?this.zoneAcc/this.zoneT:fallback;
+    const clean=avgSlip<P.maxSlip&&slip<P.maxSlip*0.9;
+    const cover=drifting?this.zoneCover():1;
+    /* a fly that appeared on his head has covered none of his window and is
+       worth a quarter; one that came the whole way down it is worth all of it */
+    const pres=drifting?0.25+0.75*cover:1;
+    const chance=(this.feeding?1:P.nonFeedMult)*(clean?1:0.06)*pres*beh(this,'take');
+    return {avgSlip,clean,cover,pres,chance,seen};
+  }
   /* ── LANDED ────────────────────────────────────────────────────────────
      Two stages, and the first one is the point of the whole game.
 
@@ -5906,7 +6036,7 @@ class Trout{
   }
   reseat(){
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
-    this.badT=0;this.trophy=0;this.showT=0;
+    this.badT=0;this.trophy=0;this.showT=0;this.zoneReset();
     this.hideLabel();
     if(this.held){this.held=false;if(fishHeld===this)fishHeld=null;}
     this.p.copy(this.lie);this.p.y=this.restY();
@@ -5971,19 +6101,26 @@ function commitStrike(f){
 }
 
 const zoneGrp=new THREE.Group();scene.add(zoneGrp);
-let zoneRings=[],zoneLanes=[];
-/* one ring and one lane per lie, so this is rebuilt whenever the lies are */
+let zoneRings=[],zoneBoxes=[];
+/* THE BOX, ALL FOUR SIDES OF IT.
+   It used to be two rails running off upstream with no top and no bottom, and
+   an open shape reads as a hint rather than as a boundary — which was honest
+   at the time, because it WAS only a hint. Now it is the rule, so it is drawn
+   as a thing with an inside: the two long sides sampled along their length so
+   they sit on the water over a lip instead of cutting through it, and closed
+   at both ends. ZSEG segments a side, so 2*ZSEG + 2 in all. */
+const ZSEG=8, ZVERTS=(ZSEG*2+2)*2;
 function buildZones(){
-  emptyGroup(zoneGrp); zoneRings=[]; zoneLanes=[];
+  emptyGroup(zoneGrp); zoneRings=[]; zoneBoxes=[];
   for(let i=0;i<LIES.length;i++){
     const r=new THREE.Mesh(new THREE.RingGeometry(0.94,1.0,40),
       new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true,opacity:0.8,
         side:THREE.DoubleSide,depthWrite:false}));
     r.rotation.x=-Math.PI/2;r.renderOrder=5;zoneGrp.add(r);zoneRings.push(r);
     const g=new THREE.BufferGeometry();
-    g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(4*3),3));
+    g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(ZVERTS*3),3));
     const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xe0c26a,transparent:true,opacity:0.55}));
-    l.renderOrder=5;zoneGrp.add(l);zoneLanes.push(l);
+    l.renderOrder=5;zoneGrp.add(l);zoneBoxes.push(l);
   }
 }
 buildZones();
@@ -6863,7 +7000,7 @@ function drawMenu(){
   c.fillStyle=panelDrag?'#e0a45e':'#6d7f82';c.font='700 12px "Space Mono",monospace';
   c.fillText('\u2725  DRAG TO MOVE',HANDLE.x+20,HANDLE.y+20);
   c.fillStyle='#7d8b8c';c.font='700 11px "Space Mono",monospace';
-  c.fillText('POINT AND DRAG WITH THE TRIGGER, OR USE THE RIGHT STICK. A PUSHES, CLICK IT FOR THE NEXT TAB, B CLOSES. LEFT HAND STILL FISHES.',HANDLE.w+30,34);
+  c.fillText('POINT AND DRAG, OR USE THE RIGHT STICK: UP OFF THE TOP ROW IS THE TAB BAR, LEFT-RIGHT WALKS IT, DOWN GOES BACK IN. B CLOSES.',HANDLE.w+30,34);
   /* the phone's code, where it can be read without hunting for the row */
   if(REMOTE.state!=='off'){
     c.font='700 15px "Space Mono",monospace';
@@ -6883,10 +7020,21 @@ function drawMenu(){
   c.fillStyle='#5d6f72';c.font='700 11px "Space Mono",monospace';
   c.fillText(P.menuScale.toFixed(2)+'x',SCALE_P.x+42,SCALE_P.y+20);
   /* tab bar */
+  const tabsHot=menuFocus==='tabs';
   for(let i=0;i<TABS.length;i++){
     const b=tabRect(i), on=i===selTab;
-    c.fillStyle=on?'#3a2a1c':'#141d21';c.fillRect(b.x,b.y,b.w,b.h);
+    c.fillStyle=on?(tabsHot?'#5a3f22':'#3a2a1c'):'#141d21';c.fillRect(b.x,b.y,b.w,b.h);
     if(on){c.fillStyle='#b5713f';c.fillRect(b.x,b.y+b.h-4,b.w,4);}
+    /* Where the stick is, drawn. The bar is a place you can be standing in,
+       and a selection you cannot see is one you cannot steer. */
+    if(on&&tabsHot){
+      c.strokeStyle='#ffb320';c.lineWidth=3;
+      c.strokeRect(b.x+1.5,b.y+1.5,b.w-3,b.h-3);
+      c.fillStyle='#ffb320';
+      c.font='700 20px "Space Mono",monospace';
+      c.fillText('\u25C0',b.x-16,b.y+b.h/2+7);
+      c.fillText('\u25B6',b.x+b.w+2,b.y+b.h/2+7);
+    }
     /* The bar divides the panel width by however many sections MENU has, so
        every tab added narrows all of them. Shrink the type until the longest
        name fits its own slot rather than running into the next one. */
@@ -6914,7 +7062,8 @@ function drawMenu(){
     const R=rowRect(i); if(!R) continue;
     const X=R.x, y=R.y;
     const on=i===menuSel;
-    if(on){c.fillStyle='rgba(181,113,63,0.22)';c.fillRect(X-10,y-30,ROWW,ROWH2-4);}
+    if(on){c.fillStyle=tabsHot?'rgba(181,113,63,0.09)':'rgba(181,113,63,0.22)';
+           c.fillRect(X-10,y-30,ROWW,ROWH2-4);}
     c.font='700 18px "Space Mono",monospace';
     c.fillStyle=on?'#e8e3d4':'#a3b0b0';c.fillText(label,X,y);
     if(key.charCodeAt(0)===33){
@@ -7020,14 +7169,21 @@ function drawRec(){
    pulling the other way would be unusable). Take the ray off the panel and
    the stick has it. That is `pointerOnMenu`, set once a frame by menuPointer.
 
-   Up and down walk the rows and RUN ON into the next tab at either end, so
-   every row in the game is reachable from any other with one axis and no
-   button. Left and right move the value by its own step — the same step the
-   phone and the keyboard use — so a 0/1 toggle flips and a 0.05 slider moves
-   0.05. Holding either repeats after a beat.
+   THE TAB BAR IS A PLACE YOU GO, not something that happens to you. Pushing
+   up off the first row moves the focus INTO the bar, where left and right walk
+   the tabs and down drops back into the rows of whichever one you stopped on.
+   The first version ran straight on into the next tab at either end, which
+   sounds tidy and is not: you cannot see the bar you are moving through, so
+   changing tab felt like the panel had been swapped under you, and getting
+   from PRESETS to FISH meant walking every row of six sections on the way.
+   Left and right move the value by its own step — the same step the phone and
+   the keyboard use — so a 0/1 toggle flips and a 0.05 slider moves 0.05.
+   Holding either repeats after a beat.
    ══════════════════════════════════════════════════════════════════════ */
 let pointerOnMenu=false;
 let navX=0, navY=0, navRepX=0, navRepY=0;
+/* 'rows' or 'tabs' — which half of the panel the stick is driving */
+let menuFocus='rows';
 const NAV_DELAY=0.34, NAV_RATE=0.085;
 function menuRowsNow(){ return TABS[selTab]?TABS[selTab].rows:[]; }
 function toggleMenu(v){
@@ -7036,24 +7192,26 @@ function toggleMenu(v){
   if(menuOpen){
     if(!TABS[selTab]||!TABS[selTab].rows.length) selTab=0;
     if(!rowRect(menuSel)) menuSel=firstRowOf(selTab);
-  } else { dragKey=null; navX=0; navY=0; }
+    menuFocus='rows';
+  } else { dragKey=null; navX=0; navY=0; menuFocus='rows'; }
 }
 function menuMoveRow(d){
+  if(menuFocus==='tabs'){
+    /* in the bar, down is the way back in and up is already as high as it goes */
+    if(d>0) menuFocus='rows';
+    return;
+  }
   const rows=menuRowsNow();
   const k=rows.indexOf(menuSel);
   if(k<0){ menuSel=firstRowOf(selTab); return; }
   const n=k+d;
-  if(n<0){                                   /* off the top: previous tab */
-    selTab=(selTab-1+TABS.length)%TABS.length;
-    const r=menuRowsNow(); menuSel=r.length?r[r.length-1]:1; return;
-  }
-  if(n>=rows.length){                        /* off the bottom: next tab */
-    selTab=(selTab+1)%TABS.length;
-    menuSel=firstRowOf(selTab); return;
-  }
+  if(n<0){ menuFocus='tabs'; return; }        /* off the top: up into the bar */
+  if(n>=rows.length){ menuSel=rows[0]; return; }   /* off the bottom: wrap */
   menuSel=rows[n];
 }
 function menuNudge(d){
+  /* in the bar, sideways is what it looks like: the next tab along */
+  if(menuFocus==='tabs'){ menuTab(d); return; }
   const row=MENU[menuSel]; if(!row) return;
   const key=row[1];
   if(!key||key.charCodeAt(0)===33) return;   /* an action row has no value */
@@ -7075,6 +7233,8 @@ function menuTab(d){
 /* A on a row: push it if it is an action, and if it is not, step its range
    multiplier — which is the only other thing that row has a button for. */
 function menuPush(){
+  /* A in the tab bar is the same as down: it takes you into the tab */
+  if(menuFocus==='tabs'){ menuFocus='rows'; menuSel=firstRowOf(selTab); return; }
   const row=MENU[menuSel]; if(!row||!row[1]) return;
   if(row[1].charCodeAt(0)===33){ runAction(row[1]); return; }
   const m=cycleRange(row[1],row[2],row[3]);
@@ -7275,7 +7435,7 @@ function menuPointer(trigPressed, trigEdge){
     for(let i=0;i<TABS.length;i++){
       const b=tabRect(i);
       if(px>=b.x&&px<=b.x+b.w&&py>=b.y&&py<=b.y+b.h){
-        selTab=i;menuSel=firstRowOf(i);dragKey=null;return true;
+        selTab=i;menuSel=firstRowOf(i);dragKey=null;menuFocus='rows';return true;
       }
     }
   }
@@ -7286,7 +7446,7 @@ function menuPointer(trigPressed, trigEdge){
     if(px>=R.x-10&&px<=R.x-10+ROWW&&py>=R.y-30&&py<=R.y+ROWH2-32){row=i;break;}
   }
   if(row<0){if(!trigPressed)dragKey=null;return true;}
-  menuSel=row;
+  menuSel=row;menuFocus='rows';
   const [,key,mn,mx,st]=MENU[row], R=rowRect(row);
   if(trigEdge){
     if(key.charCodeAt(0)===33){ runAction(key); return true; }
@@ -8097,8 +8257,11 @@ function buildGuide(){
 function guideWords(key,hand){
   if(key==='stick'){
     if(hand==='right')
-      return menuOpen ? ['MENU','up-down picks, left-right changes, click for the next tab']
-                      : ['MENU','open it and this walks around it'];
+      return menuOpen
+        ? (menuFocus==='tabs'
+             ? ['TABS','left-right picks a tab, down goes into it']
+             : ['MENU','up-down picks a row, left-right changes it, up again for the tabs'])
+        : ['MENU','open it and this walks around it'];
     const tail=' · click it for the menu';
     if(hooked) return ['WADE','he is on — it walks you to him'+tail];
     return P.teleport>0.5 ? ['TELEPORT','push, aim the ring, let go'+tail]
@@ -8113,7 +8276,8 @@ function guideWords(key,hand){
     ? ['CLAMP','holds the line against the cork']
     : ['NET','hold it out and steer him over it'];
   if(key==='a') return menuOpen
-    ? ['SELECT','pushes an action, or steps a slider range']
+    ? (menuFocus==='tabs' ? ['OPEN TAB','drops into the rows of this one']
+                          : ['SELECT','pushes an action, or steps a slider range'])
     : (P.showStats>0.5 ? ['HIDE STATS','the numbers window']
                        : ['SHOW STATS','the numbers window']);
   if(key==='b') return menuOpen ? ['CLOSE','shuts the settings panel']
@@ -8149,7 +8313,7 @@ function guideStep(){
    ════════════════════════════════════════════════════════════ */
 const nowMs=()=>(typeof performance!=='undefined'&&performance.now)?performance.now():0;
 const clock=new THREE.Clock();
-let sndAcc=0,crankAcc=0,gridAccum=0,gridMs=0,started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0;
+let sndAcc=0,crankAcc=0,gridAccum=0,gridMs=0,started=false,hudT=0,hapT=0,flyAir=true,driftAcc=0,driftT=0,speckPhase=0,zoneFitT=9;
 let prevTrigR=false,prevY=false,prevX=false,prevA=false,prevB=false,
     prevLStick=false,prevRStick=false,
     lastGrade=P.grade,prevHandActive=0,prevRodPinch=false;
@@ -8487,22 +8651,44 @@ renderer.setAnimationLoop(()=>{
     } else {M.drift=0;flyAir=true;}
   }
 
-  if(!hooked&&onWater&&!flyAir&&driftT>0.20){
-    const avgSlip=driftAcc/Math.max(driftT,0.01);
+  /* Every holding fish keeps its own book on the drift running through its
+     presentation zone. Four to six fish and a handful of arithmetic each, so
+     this is cheaper than the flow evaluation already done above. The boxes
+     themselves are refitted on a slow timer, because they depend on where the
+     fish is and he moves at a few centimetres a second. */
+  zoneFitT+=dt;
+  const refit=zoneFitT>0.5; if(refit) zoneFitT=0;
+  const driftLive=!hooked&&onWater&&!flyAir;
+  for(const f of fishes){
+    if(refit&&f.state==='holding') f.fitZone();
+    f.zoneStep(dt,fx,fz,slip,driftLive);
+  }
+
+  if(driftLive&&driftT>0.20){
+    /* Slow water has no drift to judge and no upstream to come from, so the
+       zone means nothing there and the old circle is what is left. The pond
+       earns its takes on the chase path below instead. */
+    const flowSpd=Math.hypot(flowX,flowZ);
+    const drifting=flowSpd>0.08;
     for(const f of fishes){
       if(f.state!=='holding')continue;
       const near=Math.hypot(fx-f.p.x,fz-f.p.z);
       if(near>P.takeRadius){if(near>P.takeRadius*1.6)f.evaluated=false;continue;}
       if(f.evaluated)continue;
       f.evaluated=true;
-      const clean=avgSlip<P.maxSlip&&slip<P.maxSlip*0.9;
-      /* Willingness is the species' own. A brookie eats over half again as
-         much of what goes over him as a rainbow; a brown refuses most of it
-         and a salmon is not feeding at all, so his takes are temper. */
-      const chance=(f.feeding?1:P.nonFeedMult)*(clean?1:0.06)*beh(f,'take');
+      /* THE DRIFT HE ACTUALLY SAW, not the whole cast. Willingness inside it
+         is the species' own: a brookie eats over half again as much of what
+         goes over him as a rainbow; a brown refuses most of it and a salmon
+         is not feeding at all, so his takes are temper. */
+      const J=f.judge(slip,drifting,driftAcc/Math.max(driftT,0.01));
+      const clean=J.clean, cover=J.cover, chance=J.chance;
       if(Math.random()<chance){
         f.beginStrike();pulse(0.35);
-      } else say(!clean?'drag \u2014 refused':(f.feeding?'the '+f.sp.label+' looked and passed':'that one isn\u2019t feeding'),f);
+      } else say(!clean?(f.zoneWhy==='rock'?'drag off the rock \u2014 refused'
+                        :f.zoneWhy==='drop'?'drag over the lip \u2014 refused'
+                        :'drag \u2014 refused')
+                 :(drifting&&cover<0.45)?'it landed on his head \u2014 no drift'
+                 :(f.feeding?'the '+f.sp.label+' looked and passed':'that one isn\u2019t feeding'),f);
     }
   }
 
@@ -8685,13 +8871,33 @@ renderer.setAnimationLoop(()=>{
     zoneRings[i].position.set(f.p.x,sy+0.028,f.p.z);
     zoneRings[i].scale.setScalar(P.takeRadius);
     zoneRings[i].material.color.setHex(f.feeding?0x4fd18b:0x7d8b8c);
-    const a=zoneLanes[i].geometry.attributes.position.array;
-    a[0]=f.p.x;a[1]=sy+0.03;a[2]=f.p.z-P.latTol;
-    a[3]=f.p.x-P.upMax;a[4]=surfY(f.p.x-P.upMax)+0.03;a[5]=f.p.z-P.latTol;
-    a[6]=f.p.x;a[7]=sy+0.03;a[8]=f.p.z+P.latTol;
-    a[9]=f.p.x-P.upMax;a[10]=surfY(f.p.x-P.upMax)+0.03;a[11]=f.p.z+P.latTol;
-    zoneLanes[i].geometry.attributes.position.needsUpdate=true;
-    zoneLanes[i].visible=f.state==='holding';
+    const box=zoneBoxes[i];
+    box.visible=f.state==='holding';
+    if(box.visible){
+      const a=box.geometry.attributes.position.array;
+      const x0=f.p.x, x1=f.p.x-f.zoneUp, w=f.zoneHalf;
+      let k=0;
+      const put=(x,z)=>{a[k++]=x;a[k++]=surfY(x)+0.03;a[k++]=z;};
+      /* the two long sides, sampled so they lie ON the water over a drop */
+      for(const z of [f.p.z-w,f.p.z+w])
+        for(let j=0;j<ZSEG;j++){
+          put(x0+(x1-x0)*(j/ZSEG),z);
+          put(x0+(x1-x0)*((j+1)/ZSEG),z);
+        }
+      /* and the two ends, which is what makes it a box you can be outside of */
+      put(x0,f.p.z-w); put(x0,f.p.z+w);
+      put(x1,f.p.z-w); put(x1,f.p.z+w);
+      box.geometry.attributes.position.needsUpdate=true;
+      /* THE BOX TELLS YOU HOW THE DRIFT IS GOING while it is going. Amber at
+         rest, green while a fly is inside it behaving, red the moment it
+         starts to drag — which is the one piece of feedback that turns "drag
+         — refused" from a verdict you get afterwards into something you can
+         see and fix on the water. */
+      const live=f.zoneT>0.02&&!hooked;
+      box.material.color.setHex(!live?0xe0c26a
+        :(f.zoneAcc/f.zoneT<P.maxSlip?0x4fd18b:0xe05a28));
+      box.material.opacity=live?0.85:0.55;
+    }
   }
   for(const r of ringPool){
     r.t+=dt;
