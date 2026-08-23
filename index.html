@@ -3031,12 +3031,21 @@ function placeTrees(){
   broadMesh.instanceMatrix.needsUpdate=true;
 }
 
-let troutAsset=null;   /* set if a fish model is found */
-/* Species that have a model of their own. Anything missing falls back to the
-   generic 'trout' slot, and anything with neither stays procedural — so you
-   can drop in one salmon and leave the trout as they are. */
+/* ── ONE MODEL PER SPECIES, AND NO BORROWING ──────────────────────────────
+   A species uses its OWN file or it stays procedural. It does not fall back
+   to another species' model, which is what this did at first: the generic
+   'trout' slot stood in for anything missing, so with assets/trout.glb in
+   place — which is the normal case — a brown, a brookie, a cutthroat and a
+   salmon all rendered as that one rainbow mesh. Every species looked
+   identical until you turned Use model assets off, which is the whole feature
+   erased by its own fallback.
+
+   The procedural body is the better stand-in by a mile: it already carries
+   that species' paint, its tail shape and its body depth. So a reach with
+   only trout.glb in it now shows a modelled rainbow swimming alongside
+   generated browns and brookies that still look like browns and brookies. */
 const troutAssets={};
-const speciesAsset=sp=>troutAssets[sp.id]||troutAsset;
+const speciesAsset=sp=>troutAssets[sp.id]||null;
 
 /* ── MODEL ASSETS ─────────────────────────────────────────────────────────
    Every slot in the game that can take a model. Drop a file at one of these
@@ -3060,8 +3069,9 @@ const ASSET_SLOTS={
   /* The fish. One slot per species, all normalised to a metre nose-to-tail
      along X with the nose at -X and the back at +Y — the same frame the
      procedural body uses, which is what lets a loaded model inherit the swim
-     shader untouched. A species with no file of its own falls back to 'trout',
-     and 'trout' itself is the rainbow. */
+     shader untouched. 'trout' is the RAINBOW's slot, not a catch-all: a
+     species with no file of its own stays procedural rather than borrowing
+     another species' mesh and losing its own markings. */
   trout: {files:['trout','rainbow','rainbow-trout','fish'],
                                                   fit:1.00,  axis:'x', kind:'trout'},
   brown: {files:['brown-trout','browntrout','brown'],
@@ -3192,7 +3202,7 @@ function applyAssetToggle(){
     group.visible=on;
     for(const ch of anchor.children) if(ch!==group) ch.visible=!on;
   }
-  if(troutAsset||Object.keys(troutAssets).length){
+  if(Object.keys(troutAssets).length){
     for(const f of fishes) f.rebuildMesh();
     /* the display fish is a plain mesh, not a Trout, so it needs its own swap */
     pvFishReset();
@@ -3264,7 +3274,6 @@ async function loadSceneAssets(){
       markShared(a.geo); markShared(a.mat);
       for(const it of a.extra){ markShared(it.geo); markShared(it.mat); }
       troutAssets[S.id]=a;
-      if(S.id==='rainbow') troutAsset=a;       /* the fallback for the rest */
       fishModels++;
       say(S.label+' model loaded, '+G.tris+' tris');
     }
@@ -5003,6 +5012,7 @@ function makeTrout(len,sp){
   const g=new THREE.Group();
   g.userData.species=sp.id;
   const asset=speciesAsset(sp);
+  g.userData.fromAsset=!!(asset&&useAssets());
   if(asset&&useAssets()){
     /* the model's own material inherits the swim shader, so a loaded fish
        still undulates and still goes glossy the moment it clears the water */
