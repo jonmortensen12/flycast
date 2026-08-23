@@ -792,11 +792,35 @@ const trophy=vm.runInContext(`(()=>{
      the distance launches a beaten fish off the net at eight metres a second —
      then settle there, keep its card under it, and never time out and vanish. */
   const p0=parked[0];
+  /* ── HE IS OFFERED TO YOU BEFORE HE IS PARKED ─────────────────────────
+     Landing has to hold the fish up first: chest height, an arm's length
+     along the way you are looking, carded, and grabbable for lookSecs. */
+  const eye=camera.getWorldPosition(new THREE.Vector3());
+  const chestY=q=>Math.max(bedY(q.x,q.z)+0.15,eye.y-P.chestDrop);
+  const offered={secs:+p0.showT.toFixed(2),
+                 reach:+Math.hypot(p0.present.x-eye.x,p0.present.z-eye.z).toFixed(3),
+                 atChest:Math.abs(p0.present.y-chestY(p0.present))<1e-6,
+                 carded:!!(p0.label&&p0.label.mesh.visible)};
+  /* a second of it: he closes on the offer and stays there */
+  const toOffer=p0.p.distanceTo(p0.present);
+  for(let f=0;f<72;f++) p0.update(1/72,f/72);
+  const camePresent=+(toOffer-p0.p.distanceTo(p0.present)).toFixed(3);
+  const waitsThere=p0.showT>0;
+  /* taking him in your hand stops the clock — he leaves when you let go */
+  p0.held=true; p0.update(1/72,0);
+  const heldStops=p0.showT===0;
+  p0.held=false; p0.showT=1.0;
+  /* and when it runs out he goes on to the bank */
+  for(let f=0;f<144;f++) p0.update(1/72,f/72);
+  const wentOn=p0.showT<=0;
+  /* the bank spot is chest height too, not sunk into the margin */
+  const bankAtChest=Math.abs(p0.bank.y-chestY(p0.bank))<1e-6;
+  const bankOverWater=+(p0.bank.y-surfY(p0.bank.x)).toFixed(2);
+  /* drop it a metre short and let it arrive */
+  p0.p.set(p0.bank.x+1.0,p0.bank.y,p0.bank.z);
   const far0=p0.p.distanceTo(p0.bank);
   for(let f=0;f<72;f++) p0.update(1/72,f/72);
   const swimSpeed=+(far0-p0.p.distanceTo(p0.bank)).toFixed(2);   /* m in one second */
-  /* drop it a metre short and let it arrive */
-  p0.p.set(p0.bank.x+1.0,p0.bank.y,p0.bank.z);
   for(let f=0;f<220;f++) p0.update(1/72,f/72);
   const far1=p0.p.distanceTo(p0.bank);
   const cardUnder=p0.label.mesh.position.y<p0.p.y&&
@@ -818,7 +842,9 @@ const trophy=vm.runInContext(`(()=>{
           allWet:out.every(o=>o.depth>=0.10&&o.inRiver),
           allCarded:out.every(o=>o.label),
           swimSpeed, settled:+far1.toFixed(3),
-          stillLanded:p0.state==='landed', cardUnder};
+          stillLanded:p0.state==='landed', cardUnder,
+          eyeY:+eye.y.toFixed(2), look:P.lookSecs, offered, camePresent,
+          waitsThere, heldStops, wentOn, bankAtChest, bankOverWater};
   for(const f of fishes) f.reseat();            /* leave the river as we found it */
   trophySeq=0;
   return res;
@@ -827,7 +853,14 @@ console.log('landed fish rest in the margin',trophy);
 if(trophy.parked>trophy.cap||trophy.strayCards||!trophy.allWet||!trophy.allCarded||
    !trophy.stillLanded||!trophy.cardUnder||trophy.settled>0.05||
    trophy.swimSpeed<0.5||trophy.swimSpeed>2.0||
-   trophy.badSplit.bad||!trophy.badSplit.plain)
+   trophy.badSplit.bad||!trophy.badSplit.plain||
+   /* he is held up for you first, at chest height and within reach, with his
+      card showing; the clock stops if you take him and runs out if you do not */
+   trophy.offered.secs!==trophy.look||Math.abs(trophy.offered.reach-0.55)>0.01||
+   !trophy.offered.atChest||!trophy.offered.carded||
+   trophy.camePresent<=0||!trophy.waitsThere||!trophy.heldStops||!trophy.wentOn||
+   /* and the bank is chest height too, not the bed */
+   !trophy.bankAtChest)
   console.log('  *** LANDED FISH FAILURE ***');
 
 /* The stats panel must be movable with the menu SHUT, and must not eat the
