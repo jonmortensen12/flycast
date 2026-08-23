@@ -195,7 +195,7 @@ const P = {
   ripple:0.95, rippleSpan:60, rippleScale:1.7,
   ripOpacity:0.26, ripR:0, ripG:0, ripB:0, ripStain:1,
   riseAggro:0.35, wetShine:1, fishDetail:1,
-  fishSize:1,
+  fishSize:1, lookSecs:5, chestDrop:0.35,
   /* which species are in the water, and whether they behave differently */
   spRainbow:1, spBrown:1, spBrook:0, spCutt:0, spSalmon:0, spTraits:1,
   showZones:1, showMarkers:1,
@@ -358,6 +358,8 @@ const MENU=[
   ['Feeding chance','feedChance',0.00,1.00,0.05,'Odds a fish is actively feeding when he re-evaluates. Feeding fish are the catchable ones.'],
   ['Non-feeder mult','nonFeedMult',0.00,1.00,0.05,'Take chance multiplier for a fish that is not feeding.'],
   ['Fish power','fishPower',0.30,2.50,0.05,'How hard a hooked fish pulls and runs.'],
+  ['Look seconds','lookSecs',0.00,20.0,0.50,'How long a netted fish hangs in front of you before he goes to the bank. He comes up to chest height an arm\u2019s length away with his flank turned toward you and his card under him, and for these seconds he is yours to take: let go of the net button and pinch to have him in your hand. Take hold of him and the clock stops \u2014 he only leaves when you let go. At 0 he goes straight to the bank, which is what this did before.'],
+  ['Chest drop m','chestDrop',0.05,1.20,0.05,'How far below your eyes a landed fish floats, both while he is in front of you and afterwards at the bank. 0.35 is about chest height on most people. Raise it if he sits too high to look down on, lower it to bring him up toward your face. He is never allowed below the bed, however deep you are wading.'],
   ['Fish size','fishSize',0.30,3.00,0.05,'Multiplier on the length of every fish in the reach, on top of the length the venue gives each lie and the size the species runs to. Weight follows length CUBED, off the same body mass the fight is fought with, so 1.5x length is a fish three and a half times heavier that pulls correspondingly harder \u2014 this is the one knob that changes the card, the fight and the silhouette together. 1.00 is the venue as tuned.'],
   ['\u2014 SPECIES \u2014',null,0,0,0,''],
   ['Rainbows','spRainbow',0,1,1,'Whether rainbow trout are in the water. The reference fish: heavy small spotting right down over the flank and onto the tail, a pink lateral band and a hot red gill plate. Every constant in the game was tuned against this one, so all the multipliers below are relative to a rainbow. Turn every species off and rainbows come back anyway \u2014 the river is never empty.'],
@@ -5198,6 +5200,9 @@ class Trout{
     this.held=false;this.inspect=new THREE.Quaternion();
     /* where a landed fish is parked, the way it is heading to get there, and
        the card that goes under it */
+    /* where he is held up for you, where he goes afterwards, and the clock
+       that runs between the two */
+    this.present=new THREE.Vector3();this.presentHead=0;this.showT=0;
     this.bank=new THREE.Vector3();this.bankHead=0;this.trophy=0;this.label=null;
     this.run=new THREE.Vector3(-1,0,0);this.runT=0;
     this.beh='cruise';this.behT=0;this.effort=0.5;this.v=new THREE.Vector3();
@@ -5306,17 +5311,34 @@ class Trout{
   }
   bodyMass(){ return 0.30*Math.pow(this.len/0.30,3); }
   /* ── LANDED ────────────────────────────────────────────────────────────
-     A netted fish used to float up in front of your face for four seconds and
-     then vanish back to its lie, which is the one moment of the whole game you
-     want to take your time over. Now it goes to the nearest margin and STAYS
-     there, finning in the shallows with its length and weight on a card under
-     it, so you can carry on fishing and go back and look at it whenever you
-     like — or wade over and pick it up, which still works exactly as it did.
-     The river is only four or five fish deep, so the bank cannot become a
-     permanent graveyard: past MAX_TROPHY the oldest one kicks off and swims
-     back to its lie. */
+     Two stages, and the first one is the point of the whole game.
+
+     He comes UP TO YOU: chest height, an arm's length along the way you are
+     looking, turned broadside so you get the flank and the markings, with his
+     length and weight on a card under him. For `lookSecs` he is yours to take
+     — let go of the net and pinch and he is in your hand, and while you are
+     holding him the clock does not run. This is the moment the earlier
+     versions kept losing: the very first build floated him in front of your
+     face and then vanished him back to his lie before you were done, and the
+     fix for that sent him straight to the margin instead, which meant you
+     never got a look at him at all.
+
+     Then he goes and RESTS, at the nearest margin and at the same chest
+     height, so he reads from across the reach and can still be picked up
+     without stooping into the shallows. He stays there: nothing times out, and
+     you can carry on fishing and come back to him. The river is only four or
+     five fish deep, so the bank cannot become a permanent graveyard — past
+     MAX_TROPHY the oldest one kicks off and swims back to its lie. */
   land(){
     this.state='landed';this.held=false;this.timer=0;this.trophy=++trophySeq;
+    /* HE COMES UP TO YOU FIRST. A fish that goes straight to the margin is one
+       you never actually looked at — the whole moment of the game is the few
+       seconds with him in front of your face, and it used to be spent watching
+       him swim away. So he floats up to chest height an arm's length in front
+       of you, broadside, with his card under him, and stays there long enough
+       to be picked up. Only then does he go and rest. */
+    this.pickPresent();
+    this.showT=Math.max(0,P.lookSecs);
     this.pickBank();
     this.showLabel();
     /* Keep the shallows from silting up with everything you have caught. The
@@ -5336,11 +5358,40 @@ class Trout{
      landing, so it does not trail you around the reach afterwards. */
   pickBank(){
     camera.getWorldPosition(_bankTmp);
+    const eye=_bankTmp.y;
     const x=Math.max(-48,Math.min(48,_bankTmp.x))+((this.trophy%3)-1)*0.55;
     const cz=CZ+SC.dz(x), side=_bankTmp.z>=cz?1:-1;
     let u=0.98, z=cz+side*SC.hw(x)*u;
     while(u>0.45&&bedDepth(x,z)<0.22){u-=0.03;z=cz+side*SC.hw(x)*u;}
-    this.bank.set(x,Math.max(bedY(x,z)+0.06,surfY(x)-0.11),z);
+    /* CHEST HEIGHT, NOT THE BED. He used to settle into two inches of margin,
+       which put him below the waterline and out of sight from anywhere but
+       directly above him — you had to wade over and look down to find what you
+       had caught. He now hangs at the same height he was held up at, so the
+       fish on the bank reads from across the reach and can still be taken in
+       the hand without stooping into the shallows. The bed is the only floor. */
+    this.bank.set(x,Math.max(bedY(x,z)+0.15,eye-P.chestDrop),z);
+  }
+  /* Chest height, an arm's length along the way you are actually looking, and
+     turned broadside so it is the flank and the markings you get rather than a
+     nose. Fixed at the moment of landing rather than tracked every frame: a
+     fish welded to your head is the kind of thing that makes people take a
+     headset off, and a fixed point is one you can lean into and walk around. */
+  pickPresent(){
+    camera.getWorldPosition(_bankTmp);
+    camera.getWorldQuaternion(_fishQA);
+    _lookF.set(0,0,-1).applyQuaternion(_fishQA);
+    _lookF.y=0;
+    if(_lookF.lengthSq()<1e-6) _lookF.set(0,0,-1);
+    _lookF.normalize();
+    this.present.set(_bankTmp.x+_lookF.x*0.55,
+                     _bankTmp.y-P.chestDrop,
+                     _bankTmp.z+_lookF.z*0.55);
+    /* wading deep enough and chest height is under the gravel */
+    const floor=bedY(this.present.x,this.present.z)+0.15;
+    if(this.present.y<floor) this.present.y=floor;
+    /* nose is local -X and a heading is atan2(dz,-dx) along the way he points,
+       so rotating your view vector a quarter turn puts his side to you */
+    this.presentHead=Math.atan2(-_lookF.x,-_lookF.z);
   }
   lengthIn(){ return this.len*39.3701; }
   /* pounds and ounces off the same body mass the fight is fought with, so the
@@ -5558,17 +5609,24 @@ class Trout{
       if(this.p.y>fm-0.03) this.p.y=fm-0.03;
       this.riseAnim=0;
     } else if(this.state==='landed'){
-      /* A landed fish swims to the nearest margin and waits there. It can be
-         taken in the left hand and turned over — pinch to hold, let go and it
-         drifts back to its spot in the shallows. Nothing times out: the only
-         thing that sends it home is another fish needing the room. */
+      /* A landed fish comes up in front of you to be looked at, and then goes
+         and rests near the margin. Either way he can be taken in the left hand
+         and turned over — pinch to hold, let go and he drifts to his spot.
+         Nothing times out at the bank: the only thing that sends him home is
+         another fish needing the room. */
       if(this.held){
         this.p.copy(_inspP);
+        /* in your hand is the end of the offer — he leaves when you let go */
+        this.showT=0;
       } else {
+        if(this.showT>0){
+          this.showT-=dt;
+          if(this.showT<=0) say('he\u2019s away to rest at the bank');
+        }
         /* The bob goes in the TARGET, not on top of the position: adding it to
            p every frame is an integral, not an offset, and the fish would
            wander half a metre up and down the margin. */
-        _bankTmp.copy(this.bank);
+        _bankTmp.copy(this.showT>0?this.present:this.bank);
         _bankTmp.y+=Math.sin(t*1.3+this.lie.x)*0.012;
         /* It SWIMS there, at a beaten fish's pace. A lerp on the distance
            would have launched it off the net at eight metres a second, which
@@ -5648,14 +5706,18 @@ class Trout{
          now walk round it instead. */
       if(this.held) m.quaternion.copy(_inspQ).multiply(this.inspect);
       else{
-        /* nose on the way it is swimming while it is still going, easing round
-           into the current over the last metre */
-        const away=Math.max(0,Math.min(1,this.p.distanceTo(this.bank)/0.90));
-        _fishQA.setFromEuler(_fishE.set(Math.sin(t*0.9+this.lie.x)*0.05,
-                                        (this.bankHead||0)*away
-                                          +Math.sin(t*0.45+this.lie.x)*0.20*(1-away),
+        /* Held up for you he stays broadside, so what you get is the flank and
+           the markings rather than a nose. On the way to the bank the nose
+           follows the way he is swimming, easing round into the current over
+           the last metre. */
+        const yaw=this.showT>0
+          ? this.presentHead+Math.sin(t*0.5+this.lie.x)*0.10
+          : (()=>{const away=Math.max(0,Math.min(1,this.p.distanceTo(this.bank)/0.90));
+                  return (this.bankHead||0)*away
+                         +Math.sin(t*0.45+this.lie.x)*0.20*(1-away);})();
+        _fishQA.setFromEuler(_fishE.set(Math.sin(t*0.9+this.lie.x)*0.05,yaw,
                                         Math.sin(t*0.7)*0.06,'YZX'));
-        m.quaternion.slerp(_fishQA,Math.min(1,dt*1.6));
+        m.quaternion.slerp(_fishQA,Math.min(1,dt*(this.showT>0?3.0:1.6)));
       }
       this.marker.visible=false;
       /* still breathing: the same tail drive the swimming fish use, idled down */
@@ -5775,7 +5837,7 @@ class Trout{
   }
   reseat(){
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
-    this.badT=0;this.trophy=0;
+    this.badT=0;this.trophy=0;this.showT=0;
     this.hideLabel();
     if(this.held){this.held=false;if(fishHeld===this)fishHeld=null;}
     this.p.copy(this.lie);this.p.y=this.restY();
@@ -5807,7 +5869,8 @@ for(const l of LIES) fishes.push(new Trout(l));
 /* scratch for the landed-fish inspection, filled by the controller pass */
 const _inspP=new THREE.Vector3(),_inspQ=new THREE.Quaternion(),
       _camQW=new THREE.Quaternion(),_fishQA=new THREE.Quaternion(),
-      _fishE=new THREE.Euler(),_bankTmp=new THREE.Vector3();
+      _fishE=new THREE.Euler(),_bankTmp=new THREE.Vector3(),
+      _lookF=new THREE.Vector3();
 let fishHeld=null;
 /* How many caught fish may be resting in the margin at once. A venue is four
    or five fish deep, so this is the line between a bank you can go back and

@@ -193,6 +193,35 @@ one of them back in its lie and drop a fish you had on. The mesh scale **is** th
 and weight comes off `bodyMass()`, which is length **cubed**, so the card under a landed
 fish and what the rod feels can never disagree with each other.
 
+### 2.7b Landing one
+
+Netting a fish is two stages, and the first one is the point of the whole game.
+
+**He comes up to you.** Chest height (`chestDrop` below your eyes, 0.35 m by default), an
+arm's length along the way you are actually looking, turned broadside so you get the flank
+and the markings rather than a nose, with his length, weight and species on a card under him.
+The point is fixed at the moment of landing rather than tracked every frame — a fish welded
+to your head is the kind of thing that makes people take a headset off, and a fixed point is
+one you can lean into and walk around.
+
+For `lookSecs` (5 s by default) he is yours to take. The net is a held button, not a toggle,
+so letting go of it and pinching puts him straight in your hand; **while you are holding him
+the clock does not run**, and he only leaves when you let go. At `lookSecs` 0 he goes straight
+to the bank, which is what this did before.
+
+**Then he goes and rests**, at the nearest margin and at the same chest height, so he reads
+from across the reach and can still be picked up without stooping into the shallows. Nothing
+times out there — you can carry on fishing and come back to him. Past `MAX_TROPHY` the oldest
+one kicks off and swims back to its lie, so the bank never becomes a graveyard.
+
+This has now been round the houses three times and it is worth writing down why. The first
+build floated him in front of your face for four seconds and then **vanished him back to his
+lie**, which cut the moment off before you were done with it. The fix for that sent him
+**straight to the margin** and left him finning in two inches of water — no vanishing, but
+you never got a look at him at all, and you had to wade over and look down to find what you
+had caught. The shape above is both halves: the look first, then the rest, and chest height
+for both.
+
 ### 2.7a The five species
 
 `SPECIES` in section 5 is the whole of the difference between them: the paint, the tail
