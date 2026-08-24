@@ -106,6 +106,14 @@ Two traps, both of which bit during the build:
 - Obstacle heights must actually approach the surface. The original rocks sat half a metre
   under; the solver correctly flowed straight over them and produced no wake at all.
 
+**It starts at Manning's answer, not at rest.** The solver's own equilibrium *is* Manning's
+formula, and it gets there by accelerating at `g·S` — which on a steep freestone is a few
+seconds and on a big slow river is well over a minute. Boat Drift falls 45 cm in a hundred
+metres, and from a standing start it sat at **0.02 m/s for the first minute and a half** of
+play against an eventual 0.6. So `gridAlloc()` seeds every column from the analytic field and
+lets the solver correct it, which is exactly what a column newly exposed by the window sliding
+has always done. Every reach now opens at its real speed.
+
 Verified in `diag2.mjs`: parabolic cross-channel profile (0 at the banks, 1.6 m/s mid), thin
 riffles at 1.7 m/s against deep pools at 0.7 m/s, zero velocity inside the rock, **negative
 velocity in its lee** — real recirculation — and flow deflecting outward on both shoulders.
@@ -120,6 +128,11 @@ faked with shed point vortices.
 
 The grid field also feeds the GPU specks and the water surface colour through a byte texture
 (velocity encoded at +/-6 m/s), so what you see is what the line feels.
+- The surface mesh is **thirty metres** wide, not twenty. It has to cover the widest channel
+  any venue asks for, and two had outgrown it: the Beaver Pond is 28 m across and The Long Run
+  23, so both had a band along the far side that the bed knew about, the fish swam in, and the
+  shader never drew — clear water you could see the gravel through because there was nothing
+  there at all.
 - Depth-averaged **2D** flow. 3D would buy plunge-pool recirculation you would never see.
 - Surface elevation `surfY(x)` is a pool-drop profile: a base grade plus six discrete drops.
   Flow accelerates over each lip via a surface-slope term. The GLSL twin of `surfY` is
@@ -463,7 +476,7 @@ timestep-dependent, so **any calibration must be redone if those change.** XPBD 
 
 | Input | Action |
 |---|---|
-| Left stick | move — teleport by default, sliding walk with **Teleport move** off. See *Moving* below |
+| Left stick | move — teleport by default, sliding walk with **Teleport move** off. See *Moving* below. **In Boat Drift it is the oars**: push away to row downstream, pull back to hold against the current, left and right still snap-turn |
 | Left trigger | under 15% free · 15–85% **routes** (a PULLEY: the material point at your fingers is set by the straight run from the stripping guide, so the span is never over-taut and never blocks line feeding out) · 15-85% old behaviour was to pin one node, which was what stopped casting past the hand · over 85% **pinches** |
 | ~~old~~ | under 15% free · 15–85% **routes** (line slides through the hand, held point re-chosen every frame) · over 85% **pinches** (one material point held fast) |
 | Left grip | net |
@@ -539,6 +552,52 @@ line control while the menu is open, deliberately, so changes can be felt live. 
 a range button cycling **0.01x / 0.1x / 1x / 10x / 100x**, so no setting is ever out of reach in
 either direction. Below 1x the range zooms in around the value at the moment you pressed it,
 and that window is frozen so the slider does not slide out from under you mid-drag.
+
+### The boat, and a river that comes round again
+
+Boat Drift is the one reach you do not wade, and it is built on one idea: **`SC.loop` is a
+period in metres, and every function of x in the venue repeats over it**. The water at x and
+the water at x+96 is the same water, so the boat can be lifted off one end of the lap and set
+down at the other with nothing changing. Ninety-six metres of geometry is an hour of drifting.
+
+What the join has to move is everything that is *in your hands* and everything the river is
+*carrying*, and nothing else:
+
+- the rig, the rod's twelve nodes, every line node, the hand targets the substep interpolates
+  from, and a fish you are playing, holding or looking at — all translated by one lap, plus
+  one lap's **fall**, because the reach still runs downhill and the same water a lap upstream
+  sits 4.3 cm higher. The lift is measured off `surfY` at the moment of the join rather than
+  derived from the slope, so a venue with a different fall is right without being told;
+- the shed vortices, both speck fields (the GPU one gets a one-pass `uSlide` rather than being
+  reset — every speck would otherwise be outside its window on the next line and respawn on
+  the same frame), and the spreading rings;
+- the solved grid, but only if it is set to follow you: move the frame, rebuild the bed
+  heights, and **keep the velocities, the depths and the foam**, because the window it spent
+  the last minute developing is the window it is about to be in. Pinned — the default, and
+  what Boat Drift ships with, its span covering the whole lap — there is nothing to do at all.
+
+What does **not** move is the fish. Six of them is the whole population, they are the reason
+to come round again, and copying them would mean eighteen trout in the reach. That makes them
+the one thing on the river that is not periodic, so no lie sits within eighteen metres of the
+join in either direction; `smoke.mjs` asserts that, along with the reach repeating to within
+2e-4 m, every rock and log having an image a lap up and a lap down, and the fly and the rod
+tip coming out of a join at exactly the same place relative to the boat and the film.
+
+The join is put at the **apex of a bend** rather than at the crossover, which is where the
+heading, the curvature and the shape all match trivially and where the outside bank is in the
+way of the longest sightline.
+
+**The boat itself** is a McKenzie dory lofted from fourteen stations, with a leaning bar in
+the bow to brace against — the one piece of a drift boat that exists for the angler rather
+than the rower. It carries the rig rather than the other way round: the hull moves, the rig
+moves with it by the same delta each frame, and where you chose to stand in the boat stays
+yours. **She rocks and you do not.** The roll and the pitch are on the hull; the floor under
+the rig is exactly level and exactly `free` above the film every frame, because vertical
+motion of the camera is the fastest way to make somebody take a headset off.
+
+And **there is no bank**, so a landed fish is not parked at one. The look is the whole of it:
+he is held up in front of you for `lookSecs`, then goes over the side, swims down out of the
+light, and is back in his lie by the time you come round.
 
 ### Two ways round the menu, and why neither wins
 

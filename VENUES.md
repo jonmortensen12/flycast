@@ -1,6 +1,6 @@
 # Venues
 
-Eight places to fish, selected from the **PLACES** tab. All eight live in one
+Nine places to fish, selected from the **PLACES** tab. All nine live in one
 `SCENES` object near the top of `index.html`, just after the settings table.
 
 ## How a venue is defined
@@ -19,6 +19,8 @@ constants and two functions read out of a descriptor:
 | `canopy[]` | branches above the water — solid to the line, invisible to everything else |
 | `weeds[]` | soft cover, decoration only |
 | `hwMax`, `dzMax`, `dMax` | bounds. `hwMax`/`dzMax` size the solver window, so they must actually bound the geometry |
+| `loop` | period in metres. Set it and the reach repeats over that distance — see *The boat drift* |
+| `boat` | `{free, row, swing, len, beam}`. Set it and you ride the reach instead of wading it |
 | `par{}` | the venue's own water and fish defaults |
 | `glsl` | the GLSL twin of `dz`/`hw`/`dep` |
 
@@ -136,7 +138,35 @@ runs beside `pushOutObstacles()` each substep; `Branch grip` is how much speed
 the line loses where it touches. This is the groundwork for snagging generally —
 once branches can catch a line, so can everything else.
 
-## Adding a ninth venue
+## The boat drift
+
+`SCENES.drift` is the ninth reach and the only one you do not wade. It is built on one
+idea: **`loop` is a period in metres and every function of x repeats over it**, so the
+water at x and the water at x+96 is the same water. When the boat passes the end of the
+lap it is translated back by one period — along with the rig, the rod, the line, a fish
+you are playing, the vortices, both speck fields and the rings — and by one lap's *fall*
+as well, because the reach still runs downhill and the same water upstream sits 4.3 cm
+higher. Ninety-six metres of geometry drifts for as long as you want to fish it.
+
+Three rules make it hold together, and all three are checked in `smoke.mjs`:
+
+1. **Every function of x has period `loop`.** The meander is one cosine at exactly
+   `2π/96`, the width and the pool-riffle rhythm are two, and the GLSL twin interpolates
+   the same constant to eight decimals. Get the wavelength wrong and the join becomes a
+   step in the river.
+2. **Everything solid is periodic.** `applyVenue()` gives each rock, log and branch an
+   image one lap up and one lap down, so the world across the join is the same world.
+3. **Nothing alive stands near the join.** The fish are deliberately *not* copied — six
+   is the whole reach — so no lie sits within eighteen metres of the seam in either
+   direction, and the join itself is at the apex of a bend where the outside bank is in
+   the way of the only long sightline.
+
+The **oars** are the left stick: push it away to row downstream, pull it back to hold
+against the current when you want another drift down a seam. That is the whole of your
+say in where you are, and it is the point of the venue — one pass at each fish, and the
+only way to buy a second one is to row for it.
+
+## Adding a tenth venue
 
 1. Add an entry to `SCENES` with both the JS and the GLSL.
 2. Add its id to `SCENE_IDS`.
