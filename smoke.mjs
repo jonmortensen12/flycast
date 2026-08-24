@@ -671,6 +671,97 @@ if(!(venue.consistent&&venue.shaderRoundTrip&&venue.noStrayTokens&&venue.tackleK
      &&venue.transitionCompletes&&venue.distinctReaches===4))
   console.log('  *** VENUE SWAP FAILURE ***');
 
+/* ── the lap, and the boat that rides it ─────────────────────────────────
+   A looping venue is one reach of river that repeats over `SC.loop` metres, so
+   the boat can be lifted off one end of the lap and set down at the other with
+   nothing changing. Four claims hold that up, and every one of them is the
+   kind that fails silently — a wavelength that does not divide the period, a
+   rock without its images, a fish standing next to the join, a rig that gets
+   carried the wrong way — and shows up as a world that flickers once every
+   two minutes, which is exactly the bug nobody can reproduce on demand. */
+const drift=vm.runInContext(`(()=>{
+  const out={};
+  applyVenue('drift');
+  const L=SC.loop; out.loop=L;
+  /* 1. THE WATER COMES BACK TO ITSELF. Centreline, width and depth over one
+     lap, and the bed a lap apart differing by exactly one lap of fall. */
+  const fall=surfY(-L*0.5)-surfY(L*0.5);
+  let dzE=0,hwE=0,depE=0,bedE=0;
+  for(let x=-L*0.5;x<L*0.5;x+=1.5){
+    dzE=Math.max(dzE,Math.abs(SC.dz(x)-SC.dz(x+L)));
+    hwE=Math.max(hwE,Math.abs(SC.hw(x)-SC.hw(x+L)));
+    for(let zr=-9;zr<=9;zr+=3){
+      depE=Math.max(depE,Math.abs(SC.dep(x,zr)-SC.dep(x+L,zr)));
+      bedE=Math.max(bedE,Math.abs((bedY(x,CZ+zr)-bedY(x+L,CZ+zr))-fall));
+    }
+  }
+  out.periodic={dz:+dzE.toFixed(5),hw:+hwE.toFixed(5),dep:+depE.toFixed(5),
+                bed:+bedE.toFixed(5),fall:+fall.toFixed(4)};
+  out.reachRepeats = dzE<2e-4 && hwE<2e-4 && depE<2e-4 && bedE<2e-4 && fall>0;
+
+  /* 2. EVERY SOLID THING HAS ITS IMAGES, a lap up and a lap down, so the world
+     across the join is the same world. Exactly a third of the list is the
+     middle copy, and that is the third with a neighbour on both sides. */
+  const same=(a,b)=>Math.abs(a.z-b.z)<1e-6&&Math.abs(a.r-b.r)<1e-6&&a.kind===b.kind;
+  let both=0;
+  for(const o of OBST){
+    const up=OBST.some(q=>Math.abs(q.x-(o.x-L))<1e-6&&same(q,o));
+    const dn=OBST.some(q=>Math.abs(q.x-(o.x+L))<1e-6&&same(q,o));
+    if(up&&dn) both++;
+  }
+  out.rocks={total:OBST.length, withBothImages:both};
+  out.everySolidThingRepeats = OBST.length>0 && both*3===OBST.length;
+
+  /* 3. AND NOTHING ALIVE STANDS NEXT TO THE JOIN. The fish are the one thing
+     not copied — six of them is the whole reach — so a lie near the seam is a
+     box and a post appearing out of nothing as you cross. */
+  let nearest=1e9;
+  for(const l of SC.lies) nearest=Math.min(nearest,L*0.5-Math.abs(l.x));
+  out.nearestFishToTheJoin=+nearest.toFixed(1);
+  out.fishKeepClearOfTheJoin = nearest>=12;
+
+  /* 4. THE JOIN CARRIES WHAT YOU ARE HOLDING. Measured against the boat and
+     against the local film, so a lap that moved the rig by the wrong amount —
+     or forgot the fall — shows up as the fly sitting somewhere else. */
+  for(let i=0;i<40;i++) renderer._loop();
+  out.aboard=boatOn;
+  out.ridesTheWater=Math.abs(player.position.y-(surfY(boatP.x)+SC.boat.free))<1e-6;
+  const rel=()=>({fly:+(pos[0]-boatP.x).toFixed(4),
+                  flyUp:+(pos[1]-surfY(pos[0])).toFixed(4),
+                  tip:+(rpos[(RN-1)*3]-boatP.x).toFixed(4),
+                  tipUp:+(rpos[(RN-1)*3+1]-surfY(boatP.x)).toFixed(4),
+                  z:+(pos[2]-boatP.z).toFixed(4)});
+  const D=L*0.5+0.2-boatP.x;
+  boatP.x+=D; player.position.x+=D; loopCarry(D,0);
+  const a=rel();
+  loopWrap();
+  const b=rel();
+  out.before=a; out.after=b; out.laps=M.laps||0;
+  out.carriedAcross = out.laps===1 &&
+    Math.abs(a.fly-b.fly)<1e-3 && Math.abs(a.flyUp-b.flyUp)<1e-3 &&
+    Math.abs(a.tip-b.tip)<1e-3 && Math.abs(a.tipUp-b.tipUp)<1e-3 &&
+    Math.abs(a.z-b.z)<1e-3;
+
+  /* 5. AND THE STICK CANNOT WALK YOU OUT OF THE BOAT. It is the oars here: it
+     moves the hull, and you go with the hull. */
+  const off=()=>[+(player.position.x-boatP.x).toFixed(4),+(player.position.z-boatP.z).toFixed(4)];
+  const o0=off();
+  if(offPad){ offPad.axes[2]=1; offPad.axes[3]=-1; }
+  for(let i=0;i<30;i++) renderer._loop();
+  if(offPad){ offPad.axes[2]=0; offPad.axes[3]=0; }
+  const o1=off();
+  out.rigStaysInTheBoat = Math.abs(o0[0]-o1[0])<1e-3 && Math.abs(o0[1]-o1[1])<1e-3;
+
+  applyVenue('cedar');
+  out.leftAshore = !boatOn;
+  return out;
+})()`,sandbox);
+console.log('the lap, and the boat',drift);
+if(!drift.reachRepeats||!drift.everySolidThingRepeats||!drift.fishKeepClearOfTheJoin||
+   !drift.aboard||!drift.ridesTheWater||!drift.carriedAcross||!drift.rigStaysInTheBoat||
+   !drift.leftAshore)
+  console.log('  *** BOAT DRIFT FAILURE ***');
+
 /* The settings string is what carries your tackle into a shared link and back.
    It never used to be tested here at all, because decodeURIComponent was not in
    the sandbox and the whole restore block threw on its first line. */
@@ -1173,7 +1264,7 @@ const fight=vm.runInContext(`(()=>{
   /* 2 & 3. drive the fight hard and watch what reaches him. The rod hand can
      actually be rotated now, so this is a real sweep rather than a shove. */
   const grip=renderer.xr.getControllerGrip(0);
-  let sawT=0, sawV=0, sawAir=0, carried=0, capBit=false;
+  let sawT=0, sawV=0, sawAir=0, carried=0, capBit=false, capRaw=0, capGot=0;
   for(let f=0;f<220&&hooked;f++){
     grip.quaternion.setFromAxisAngle(new THREE.Vector3(1,0,0),Math.sin(f*0.55)*1.1);
     if(f===40&&hooked){ hooked.beh='jump'; hooked.behT=0.45; hooked.v.y=3.6; }
@@ -1186,18 +1277,31 @@ const fight=vm.runInContext(`(()=>{
     /* what the GAME applied, not what this test would have applied. Recompute
        the cap here and the assertion is true by construction and worth nothing. */
     carried=Math.max(carried,fishCarried);
-    /* did the tippet cap ACTUALLY engage? Asking whether a rounded peak beat
-       the tippet is a coin toss when the peak lands on it — 49, 51 and 40 over
-       three runs of the same build — and it got flakier the moment the rod
-       started bending, because a rod that bends is a rod absorbing the pull
-       that used to go into the line. Ask the question directly instead. */
-    if(fishTension>fishCarried+1e-6) capBit=true;
   }
   grip.quaternion.set(0,0,0,1);
+  /* AND THE CAP, PUT TO HIM DIRECTLY. Whether a fight left to itself happens
+     to pull harder than the tippet is a coin toss — 49, 51, 40 and 36 newtons
+     over four runs of the same build, and it got looser again the moment the
+     rod started bending, because a rod that bends is a rod absorbing the pull
+     that used to go into the line. So the claim is tested rather than waited
+     for: hold him at two metres of stretch, which is a hundred and twenty
+     newtons and three tippets, and see what actually reaches him. */
+  if(!hooked){ runAction('!hookfish'); for(let i=0;i<6;i++) renderer._loop(); }
+  if(hooked){
+    const T=(RN-1)*3, L0=lineOut, d=L0+2.0;
+    for(let i=0;i<3&&hooked;i++){
+      hooked.p.set(rpos[T]-d,rpos[T+1]-0.60,rpos[T+2]);
+      hooked.v.set(0,0,0); lineOut=L0;
+      renderer._loop();
+      capRaw=Math.max(capRaw,fishTension); capGot=Math.max(capGot,fishCarried);
+    }
+  }
+  capBit=capRaw>P.tippet*1.5&&capGot<=P.tippet+1e-6;
   for(const f of fishes) f.reseat();
   player.position.set(wasP.x,0,wasP.z); player.rotation.y=wasP.y;
   resetCast();
   return {dry, on, off, tippet:P.tippet, capBit,
+          cap:{raw:+capRaw.toFixed(1), got:+capGot.toFixed(1)},
           rawSeen:+sawT.toFixed(1), carriedMax:+carried.toFixed(1),
           topSpeed:+sawV.toFixed(1), topAir:+sawAir.toFixed(2)};
 })()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
@@ -1240,16 +1344,22 @@ const rodbend=vm.runInContext(`(()=>{
        correct physics and the reason an angler keeps the rod up and off to the
        side. What is left, after the rod settles, is the bend. */
     const T=(RN-1)*3;
-    const tip=[rpos[T],rpos[T+1],rpos[T+2]];
-    let ax=tip[0]-rpos[0], az=tip[2]-rpos[2];
+    let ax=rpos[T]-rpos[0], az=rpos[T+2]-rpos[2];
     const al=Math.hypot(ax,az)||1; ax/=al; az/=al;
-    const L=lineOut, d=L+0.30;
     let carried=0, sum=0, n=0;
     for(let i=0;i<130&&hooked;i++){
+      /* THE TIP MOVES, so the stretch is measured off where it is NOW. Held
+         against the tip as it stood at the take, a rod that bends half a metre
+         is a rod changing its own load by thirty newtons — which is how the
+         softer setting came to read LESS bend than the stiff one: both were
+         pinned at the tippet, and neither was measuring flex at all. */
       hooked.beh='easy'; hooked.behT=9; hooked.stamina=1;
-      hooked.p.set(tip[0]-az*d, tip[1]-0.60, tip[2]+ax*d);
+      /* and the stretch is taken off the CURRENT lineOut as well, rather than
+         holding that still too: the reel and the guides move it about on their
+         own, and a rig that fights them is a rig measuring the fight. */
+      const d=lineOut+0.30;
+      hooked.p.set(rpos[T]-az*d, rpos[T+1]-0.60, rpos[T+2]+ax*d);
       hooked.v.set(0,0,0);
-      lineOut=L;
       renderer._loop();
       if(!hooked) break;
       carried=Math.max(carried,fishCarried);

@@ -413,6 +413,7 @@ const MENU=[
   ['Undercut Bend','!venue:bend',0,0,0,'A meander pool. Deep and undercut on the outside, shelving gravel on the inside, two sweepers. The only wadeable ground is the inside of the bend. Push right to go there.'],
   ['Beaver Pond','!venue:pond',0,0,0,'Stillwater. The fish cruise instead of holding, the fly sinks and pulls the tippet under, and a take is earned by stripping it at a speed he believes \u2014 not too slow, not faster than he can swim. Push right to go there.'],
   ['Alder Tunnel','!venue:alder',0,0,0,'A brush creek with a roof on it. The branches are solid to the line, so there is no backcast and no lifting the rod. Push right to go there.'],
+  ['Boat Drift','!venue:drift',0,0,0,'You do not wade this one. You stand in a drift boat and the river carries you down two bends and round again \u2014 the reach is one lap of river that repeats, so the boat is picked up at one end and put down at the other with nothing changing but the fish you have already shown a fly to. The left stick is the OARS: push it away to row downstream and pull it back to hold against the current when you want to work a seam for longer. Left and right still turn you. Push right to go there.'],
   ['Branch collision','branchOn',0,1,1,'Whether foliage is solid to the line. Only the Alder Tunnel has any, so this does nothing anywhere else.'],
   ['Branch grip','branchGrip',0.00,0.95,0.05,'How much speed the line loses where it touches a branch. At 0 it slides off; near 1 it stops dead in the leaves.'],
 ];
@@ -849,10 +850,100 @@ float scDep(float x,float zr){
   };
 }
 
+/* ── 09 BOAT DRIFT ────────────────────────────────────────────
+   The one you do not wade. You stand in a drift boat and the river
+   carries you, and the whole reach is ONE PERIOD of river that
+   repeats: every function of x below has period LOOP, so the water
+   at x and the water at x+LOOP are the same water, and the boat can
+   be picked up at one end and put down at the other without anything
+   changing. Two bends per lap, and the seam is put at the APEX of
+   one of them on purpose — at an apex the centreline is momentarily
+   parallel to the axis, so the shape, the heading and the curvature
+   all match across the join, and the outside bank is standing in the
+   way of the only sightline long enough to argue with it. */
+{
+  const K=0.06544985;                 /* 2 PI / 96: exactly one meander per lap */
+  SCENES.drift={
+    name:'Boat Drift', sub:'a boat, two bends, and a river that comes round again',
+    hwMax:8.2, dzMax:3.8, dMax:2.6, slope:0.00045,
+    loop:96,                        /* the period, in metres */
+    /* No drops. A drop is a step in the free surface, and a step that does
+       not repeat every LOOP metres is a step the loop cannot carry. The pinch
+       in the width below is what makes the fast water instead. */
+    drops:[],
+    /* apex at x=0 (channel hard against the near bank), crossover at +/-24,
+       apex again at +/-48, which is where the lap joins */
+    dz:x=>-3.8*Math.cos(K*x),
+    hw:x=>7.2+0.90*Math.sin(2*K*x+1.1),
+    /* Deep on the OUTSIDE of the bend and shelving on the inside, the same
+       lean the Undercut Bend uses, plus a long pool-and-riffle rhythm at twice
+       the meander rate — so the pinch, the shallow and the quick water arrive
+       together, which is what they do in a real river. */
+    dep:(x,zr)=>{
+      const u=(zr+3.8*Math.cos(K*x))/(7.2+0.90*Math.sin(2*K*x+1.1));
+      const b=Math.max(-1,Math.min(1,-Math.cos(K*x)*1.6));
+      return 2.60*SCROSS(u)*(0.80+0.20*Math.sin(2*K*x+1.1))
+             *Math.max(0.16,0.80*(1.0+0.85*STH(u*2.2)*b));},
+    glsl:`
+float scDz(float x){return -3.8*cos(0.06544985*x);}
+float scHw(float x){return 7.2+0.90*sin(2.0*0.06544985*x+1.1);}
+float scDep(float x,float zr){
+  float u=(zr-scDz(x))/scHw(x);
+  float b=clamp(-cos(0.06544985*x)*1.6,-1.0,1.0);
+  return 2.60*scCross(u)*(0.80+0.20*sin(2.0*0.06544985*x+1.1))
+         *max(0.16,0.80*(1.0+0.85*scTh(u*2.2)*b));}`,
+    /* Everything solid stays a good ten metres clear of the join, and
+       applyVenue() gives each one an image a lap upstream and a lap
+       downstream, so the world either side of the seam is the same world. */
+    obst:[{x:-16.0,z: -4.2,r:1.05,h:1.45,kind:'rock',sh:0,sgn:1},
+          {x: -2.0,z:-10.9,r:1.60,h:1.00,kind:'log', sh:0,sgn:-1},
+          {x: 20.0,z:  1.8,r:0.95,h:1.35,kind:'rock',sh:0,sgn:-1},
+          {x: 38.0,z: 10.1,r:1.50,h:0.95,kind:'log', sh:0,sgn:1}],
+    /* Six fish and six different problems, in the order you meet them:
+       the cut bank, the crossover slot, the pocket behind the boulder, the
+       sweeper, the inside seam off the gravel bar, and the tail of the
+       second boulder. Nothing lives within eighteen metres of the join in
+       either direction: a fish is the one thing here that is NOT copied a lap
+       up and a lap down, so his box and his post would be the one thing that
+       could pop into being as you cross it. Eighteen metres is far enough
+       that what appears is a couple of faint amber lines on the water. */
+    lies:[{x:-30.0,z:  6.6,len:0.46},
+          {x:-24.0,z:  0.9,len:0.34},
+          {x:-13.2,z: -4.0,len:0.52},
+          {x:  1.2,z:-10.3,len:0.50},
+          {x: 14.0,z:  0.8,len:0.30},
+          {x: 23.6,z:  1.9,len:0.40}],
+    /* Mid-channel at the apex, not on the bank: the default spawn walks you
+       out to the waterline, and there is no waterline to stand on here. */
+    spawn:{x:0,z:-12.8},
+    /* THE BOAT. free is the floor above the waterline, row is how hard you
+       can pull on the oars, and swing is how quickly the hull comes round to
+       point where it is going. */
+    boat:{free:0.34, row:0.62, swing:1.4, len:4.3, beam:1.55},
+    par:{grade:1, current:0.90, gridCell:0.55, gridSpan:108, vortex:0.5,
+         foam:0.20, treeRange:42, speckRange:34, obstHeight:0.85,
+         takeRadius:0.70, maxSlip:0.34, riseAggro:0.45, spookT:4}
+  };
+}
+
 /* which venue: #v=<id>. Unknown or missing falls back to the reach every
    constant was tuned on. */
-const SCENE_IDS=['cedar','boulder','falls','meadow','bigrun','bend','pond','alder'];
+const SCENE_IDS=['cedar','boulder','falls','meadow','bigrun','bend','pond','alder','drift'];
 let SCENE_ID='cedar';
+/* where the scatter was last laid out — read by the bank placers, which run
+   before the venue does */
+let _scatterX=0,_scatterZ=CZ,_scatterT=0;
+/* A LOOPING REACH REPEATS ITS BANKS TOO. Every scattered thing is folded into
+   one period and then drawn at whichever image of itself is nearest you, so
+   the same trees and the same stones come round with the same water instead of
+   the whole bank changing identity at the join. The range cull already keeps
+   each one drawn at most once, because a lap is longer than twice as far as
+   you can see. Off a looping venue this is the identity. */
+const loopX=(x,ref)=>{
+  const L=SC.loop; if(!L) return x;
+  const f=x-L*Math.floor(x/L+0.5);
+  return f+L*Math.round((ref-f)/L);
+};
 try{
   const m=/[#&]v=([a-z]+)/.exec(location.hash||'');
   if(m&&SCENES[m[1]]) SCENE_ID=m[1];
@@ -1246,7 +1337,14 @@ function gridAlloc(){
   gfoam=new Float32Array(n); gfoam0=new Float32Array(n);
   gdivs=new Float32Array(n); gshear=new Float32Array(n);
   gsolid=new Uint8Array(n); gslope=new Float32Array(GNX); gsurf=new Float32Array(GNX);
-  gridBuildBed();
+  /* SEEDED, NOT STARTED FROM REST. The solver's own equilibrium IS Manning's
+     formula, and it reaches it by accelerating at g*S — which on a steep
+     freestone is a few seconds and on a big slow river is well over a minute.
+     A reach that spends its first minute of play running at a tenth of its
+     speed is a reach nobody sees the real version of, so every column starts
+     at the analytic answer and the solver corrects it from there. That is the
+     same thing a column exposed by the window sliding has always done. */
+  gridBuildBed(0,GNX,true);
   gridReady=true;
 }
 function gridBuildBed(i0,i1,seed){
@@ -3006,11 +3104,12 @@ function placeGrass(){
     const s=GRASS_SEED[i];
     if(i>=n){_gS.setScalar(0.0001);_gP.set(0,-999,0);_gQ.identity();
       _gM.compose(_gP,_gQ,_gS);grassMesh.setMatrixAt(i,_gM);continue;}
-    const z=CZ+SC.dz(s.x)+s.side*(SC.hw(s.x)+s.off);
-    const y=bedY(s.x,z);
+    const sx=loopX(s.x,_scatterX);
+    const z=CZ+SC.dz(sx)+s.side*(SC.hw(sx)+s.off);
+    const y=bedY(sx,z);
     /* keep it out of the water: anything the river would be standing in is bare */
-    const dry=y>surfY(s.x)+0.01;
-    _gP.set(s.x,y-0.02,z);
+    const dry=y>surfY(sx)+0.01;
+    _gP.set(sx,y-0.02,z);
     _gQ.setFromAxisAngle(new THREE.Vector3(0,1,0),s.yaw);
     _gS.setScalar(dry?s.sc:0.0001);
     _gM.compose(_gP,_gQ,_gS);
@@ -3067,7 +3166,7 @@ let coniferMesh=null,broadMesh=null;
   scene.add(coniferMesh);scene.add(broadMesh);
 }
 /* where the scatter is centred — the player, refreshed as they wade */
-let _scatterX=0,_scatterZ=CZ,_scatterT=0;
+
 const TREE_SEED=[];
 for(let i=0;i<TREE_N;i++)
   TREE_SEED.push({x:(Math.random()*2-1)*52,side:Math.random()<0.5?-1:1,
@@ -3085,14 +3184,15 @@ function placeTrees(){
   let ci=0,bi=0;
   for(let i=0;i<TREE_N;i++){
     const s=TREE_SEED[i];
-    const z=CZ+SC.dz(s.x)+s.side*(SC.hw(s.x)+s.off);
-    const y=bedY(s.x,z);
+    const sx=loopX(s.x,_scatterX);
+    const z=CZ+SC.dz(sx)+s.side*(SC.hw(sx)+s.off);
+    const y=bedY(sx,z);
     /* range cull: the reach is far longer than you can see, and a tree behind
        you costs exactly as much as one in front unless it is scaled away */
-    const dx=s.x-_scatterX, dz=z-_scatterZ;
+    const dx=sx-_scatterX, dz=z-_scatterZ;
     const near=(dx*dx+dz*dz)<rng2;
-    const ok=i<n&&near&&y>surfY(s.x)+0.06;
-    _gP.set(s.x,y-0.05,z);
+    const ok=i<n&&near&&y>surfY(sx)+0.06;
+    _gP.set(sx,y-0.05,z);
     _gQ.setFromEuler(_treeE.set(s.lean,s.yaw,s.lean*0.7,'YXZ'));
     _gS.setScalar(ok?s.sc:0.0001);
     _gM.compose(_gP,_gQ,_gS);
@@ -3447,14 +3547,15 @@ function placeRocks(){
   if(!rockMesh) return;
   for(let i=0;i<ROCK_N;i++){
     const s=ROCK_SEED[i];
-    const z=CZ+SC.dz(s.x)+(s.inRiver?s.side*SC.hw(s.x)*s.off:s.side*(SC.hw(s.x)+s.off));
-    const y=bedY(s.x,z);
+    const sx=loopX(s.x,_scatterX);
+    const z=CZ+SC.dz(sx)+(s.inRiver?s.side*SC.hw(sx)*s.off:s.side*(SC.hw(sx)+s.off));
+    const y=bedY(sx,z);
     /* in-river rock only where it will actually break or dimple the surface */
-    const sub=surfY(s.x)-y;
-    const dxr=s.x-_scatterX, dzr=z-_scatterZ;
+    const sub=surfY(sx)-y;
+    const dxr=sx-_scatterX, dzr=z-_scatterZ;
     const nearR=(dxr*dxr+dzr*dzr)<P.treeRange*P.treeRange;
-    const ok=nearR&&(s.inRiver?(sub<s.r*1.9&&sub>-0.05):(y>surfY(s.x)-0.05));
-    _gP.set(s.x,y+s.r*0.34,z);
+    const ok=nearR&&(s.inRiver?(sub<s.r*1.9&&sub>-0.05):(y>surfY(sx)-0.05));
+    _gP.set(sx,y+s.r*0.34,z);
     _gQ.setFromAxisAngle(_gAxis.set(0,1,0),s.yaw);
     _gS.set(s.r,s.r*(0.62+s.tone*0.35),s.r*(0.82+s.tone*0.3));
     if(!ok) _gS.setScalar(0.0001);
@@ -3829,7 +3930,14 @@ const waterMat=new THREE.ShaderMaterial({
       #include <colorspace_fragment>
     }`});
 {
-  const g=new THREE.PlaneGeometry(170,20,220,80);
+  /* THIRTY METRES OF IT, not twenty. The surface plane has to cover the widest
+     channel any venue asks for, and two of them had outgrown it: the Beaver
+     Pond is 28 m across and The Long Run 23, so both had water the bed knew
+     about, the fish swam in and the shader never drew — a band along the far
+     side where you could see the gravel through nothing at all. The z density
+     is held at about 0.3 m by taking the segments up with the span, which is
+     one mesh and no extra draw call. */
+  const g=new THREE.PlaneGeometry(170,30,220,100);
   g.rotateX(-Math.PI/2);g.translate(0,0,CZ);
   const w=new THREE.Mesh(g,waterMat);w.renderOrder=0;w.frustumCulled=false;scene.add(w);
 }
@@ -4147,6 +4255,9 @@ float speckLife(float sd,float spread,float life){
 
 /* ---- the advection pass -------------------------------------------------- */
 let gsOK=false, gsRT=null, gsPing=0, gsReset=2, gsResizeWanted=false;
+/* metres the whole speck field owes the world, banked by a lap join and paid
+   on the next update pass — see loopWrap() */
+let gsSlide=0;
 {
   const ext=renderer.extensions;
   gsOK=!!(ext.has('EXT_color_buffer_float')||ext.has('WEBGL_color_buffer_float'));
@@ -4155,7 +4266,7 @@ const gsUniforms={
   uState:{value:null}, uDt:{value:0}, uTime:{value:0},
   uQ:{value:P.current}, uGrade:{value:P.grade}, uManN:{value:P.manningN},
   uOriginX:{value:0}, uRange:{value:P.speckRange}, uSpread:{value:P.speckSpread},
-  uLife:{value:P.speckTravel}, uReset:{value:1},
+  uLife:{value:P.speckTravel}, uReset:{value:1}, uSlide:{value:0},
   uUseGrid:{value:0}, uFlow:{value:null},
   uGMin:{value:new THREE.Vector2(GX0,GZ0)},
   uGSize:{value:new THREE.Vector2(GX1-GX0,GZ1-GZ0)},
@@ -4169,7 +4280,7 @@ const gsMat=new THREE.ShaderMaterial({
     void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`,
   fragmentShader:`
     uniform sampler2D uState,uFlow;
-    uniform float uDt,uTime,uQ,uGrade,uOriginX,uRange,uSpread,uLife,uReset,uUseGrid,uManN;
+    uniform float uDt,uTime,uQ,uGrade,uOriginX,uRange,uSpread,uLife,uReset,uUseGrid,uManN,uSlide;
     uniform vec2 uGMin,uGSize;
     uniform vec4 uVort[8];
     varying vec2 vUv;
@@ -4181,6 +4292,13 @@ const gsMat=new THREE.ShaderMaterial({
       vec2 p=s.xy; float age=s.z; float sd=s.w;
       if(uReset>0.5){ age=-1.0; sd=hsh(vUv.x*311.7+vUv.y*719.3+0.13); }
       else{
+        /* THE LAP JOIN. A looping reach moves the boat one period upstream,
+           and the field has to go with it or every speck in the river is out
+           of the window on the next line and respawns at once — the one frame
+           where the water visibly restarts. The water at p and at p+uSlide is
+           the same water, so this is a move, not a reset: ages and seeds are
+           untouched. */
+        p.x+=uSlide;
         /* RK2 (midpoint-style Heun) at the real frame dt. Second order, so the
            error no longer grows with the velocity gradient the way Euler's
            did, and the speck arrives where the water would have taken it. */
@@ -4249,6 +4367,8 @@ function gsStep(dt){
   }
   gsUniforms.uReset.value=gsReset>0?1:0;
   if(gsReset>0) gsReset--;
+  /* one pass, then it is spent: the field has been moved and stays moved */
+  gsUniforms.uSlide.value=gsSlide; gsSlide=0;
   const wasXR=renderer.xr.enabled;
   renderer.xr.enabled=false;
   const prev=renderer.getRenderTarget();
@@ -5358,6 +5478,7 @@ class Trout{
     /* where he is held up for you, where he goes afterwards, and the clock
        that runs between the two */
     this.present=new THREE.Vector3();this.presentHead=0;this.showT=0;
+    this.released=false;
     this.bank=new THREE.Vector3();this.bankHead=0;this.trophy=0;this.label=null;
     this.run=new THREE.Vector3(-1,0,0);this.runT=0;
     this.beh='cruise';this.behT=0;this.effort=0.5;this.v=new THREE.Vector3();
@@ -5938,7 +6059,20 @@ class Trout{
       } else {
         if(this.showT>0){
           this.showT-=dt;
-          if(this.showT<=0) say('he\u2019s away to rest at the bank',this);
+          if(this.showT<=0){
+            /* THERE IS NO BANK FROM A BOAT. Nowhere to rest him, and nowhere
+               you could walk to afterwards to look at him again — the boat
+               will be two hundred metres downstream by then. So the look IS
+               the whole of it: he goes over the side, swims down out of the
+               light, and is back in his lie by the time you come round. */
+            if(SC.boat){
+              this.released=true;
+              this.bank.set(this.p.x,
+                surfY(this.p.x)-Math.min(1.10,Math.max(0.35,bedDepth(this.p.x,this.p.z)*0.55)),
+                this.p.z);
+              say('back he goes',this);
+            } else say('he\u2019s away to rest at the bank',this);
+          }
         }
         /* The bob goes in the TARGET, not on top of the position: adding it to
            p every frame is an integral, not an offset, and the fish would
@@ -5955,6 +6089,9 @@ class Trout{
           this.p.x+=dx/d*step;this.p.y+=dy/d*step;this.p.z+=dz/d*step;
           if(Math.hypot(dx,dz)>1e-3) this.bankHead=Math.atan2(dz,-dx);
         }
+        /* and once he is down there, he is gone: back to his own lie, ready
+           for the next lap rather than finning beside a boat that has left */
+        if(this.released&&d<0.14) this.reseat();
       }
     } else {
       this.feedT-=dt;
@@ -6164,6 +6301,7 @@ class Trout{
   }
   reseat(){
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
+    this.released=false;
     this.badT=0;this.trophy=0;this.showT=0;this.zoneReset();
     this.hideLabel();
     if(this.held){this.held=false;if(fishHeld===this)fishHeld=null;}
@@ -7875,6 +8013,17 @@ function applyVenue(id){
   OBST=SC.obst.map(o=>({x:o.x,z:CZ+o.z,r:o.r,h:o.h,kind:o.kind,sh:0,sgn:o.sgn||1}));
   CANOPY=SC.canopy.map(c=>({x:c.x,z:CZ+c.z,y:c.y,r:c.r}));
   LIES=SC.lies.map(l=>({x:l.x,z:CZ+l.z,len:l.len,cr:l.cr}));
+  /* A LOOPING REACH IS PERIODIC IN EVERYTHING THAT IS NOT ALIVE. Every rock,
+     log and branch gets an image one lap upstream and one lap downstream, so
+     the world on the far side of the join is the same world and the boat
+     crosses it without a boulder arriving out of nothing. The FISH are
+     deliberately not copied — they are the reason to come round again, and
+     six of them is the whole population of the reach. */
+  if(SC.loop){
+    const L=SC.loop, shift=(a,d)=>a.map(o=>Object.assign({},o,{x:o.x+d}));
+    OBST=OBST.concat(shift(OBST,-L),shift(OBST,L));
+    CANOPY=CANOPY.concat(shift(CANOPY,-L),shift(CANOPY,L));
+  }
 
   /* stand on the near bank of the new reach before anything is built, so the
      grid window and the scatter cull centre on where you actually are */
@@ -7921,6 +8070,9 @@ function applyVenue(id){
   for(let i=0;i<SPECK;i++) seedSpeck(i,sx,1);
   speckGeo.attributes.position.needsUpdate=true;
   gsReset=2;
+
+  /* and whether you are wading it or riding it */
+  if(SC.boat) boatEnter(); else boatLeave();
 
   afterSettingsChange();
   resetCast();
@@ -8437,6 +8589,296 @@ function guideStep(){
 }
 
 /* ════════════════════════════════════════════════════════════
+   7d. THE BOAT, AND A RIVER THAT COMES ROUND AGAIN
+
+   Every other reach is one you WADE: you pick where to stand, and the water
+   is the thing that stays still. A drift boat inverts that. You cannot walk
+   anywhere, you get one pass at every fish, and the only control you have
+   over how long that pass lasts is the oars. It is a different game played
+   with the same rod, which is why it is worth having.
+
+   The loop is the other half of it. `SC.loop` is a period in metres, and
+   every function of x in a looping venue repeats over it — so the water at
+   x and the water at x+LOOP is the same water, and the boat can be lifted
+   from one end of the lap and set down at the other with nothing changing.
+   That is a river you can drift for an hour out of ninety-six metres of
+   geometry. What has to move with the boat when it happens is everything
+   that is IN YOUR HANDS — the rod, the line, the fly, a fish you are playing
+   — and everything the river is carrying that has no business being reset:
+   the specks, the swirls, the rings. What does not move is the fish in their
+   lies, because they are the reason to come round again.
+   ════════════════════════════════════════════════════════════ */
+let boatGrp=null, boatOars=null, boatOn=false, boatSeated=false;
+let boatYaw=0, boatRow=0, boatSnap=0, boatBob=0;
+const boatP=new THREE.Vector3(), boatV=new THREE.Vector3(), boatOff=new THREE.Vector3();
+
+/* A McKenzie dory, lofted from fourteen stations: flat-bottomed, flared, with
+   the rocker that lifts both ends clear of the water and the high sheer that
+   makes one recognisable at a glance. Local origin is the FLOOR you stand on,
+   so the group sits at the same height the rig does and the two cannot drift
+   apart. The waterline is `free` below that. */
+function buildBoat(){
+  if(boatGrp){ scene.remove(boatGrp); disposeTree(boatGrp); boatGrp=null; }
+  const B=SC.boat||{len:4.3,beam:1.55,free:0.12};
+  const L=B.len, W=B.beam, N=15;
+  const X0=-L*0.55, X1=L*0.45;
+  /* half beam, keel line and sheer line at station t (0 stern, 1 bow) */
+  const prof=t=>{
+    const e=(t-0.45)/0.55, lift=0.30*e*e;
+    return {x:X0+(X1-X0)*t,
+            w:Math.max(0.10,W*0.5*(1-e*e*0.80)),
+            keel:lift*0.85-B.free-0.22,
+            sheer:lift+0.52};
+  };
+  const side=[], floor=[];
+  const push=(arr,a,b,c)=>arr.push(a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2]);
+  let prev=prof(0);
+  for(let i=1;i<N;i++){
+    const cur=prof(i/(N-1));
+    for(const s of [1,-1]){
+      const a=[prev.x,prev.keel,s*prev.w*0.55], b=[prev.x,prev.sheer,s*prev.w];
+      const c=[cur.x, cur.keel, s*cur.w*0.55],  d=[cur.x, cur.sheer, s*cur.w];
+      if(s>0){ push(side,a,c,b); push(side,b,c,d); }
+      else   { push(side,a,b,c); push(side,b,d,c); }
+    }
+    /* the floor, and the underside of it: a boat you can see through is a
+       boat that reads as a cardboard cutout the moment you lean over the side */
+    const a=[prev.x,prev.keel,-prev.w*0.55], b=[prev.x,prev.keel,prev.w*0.55];
+    const c=[cur.x, cur.keel, -cur.w*0.55],  d=[cur.x, cur.keel, cur.w*0.55];
+    push(floor,a,b,c); push(floor,b,d,c);
+    prev=cur;
+  }
+  const mk=arr=>{const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(arr,3));
+    g.computeVertexNormals(); return g;};
+  const HULL=new THREE.Color(0x9aa79b), FLOORC=new THREE.Color(0x6d5a3f),
+        TRIM=new THREE.Color(0x4a3b28), METAL=new THREE.Color(0x8d9298),
+        BLADE=new THREE.Color(0xb5a179);
+  const parts=[{geo:mk(side),mat:null,col:HULL},{geo:mk(floor),mat:null,col:FLOORC}];
+  const at=(g,col,x,y,z,rx,ry,rz)=>{
+    const m=new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx||0,ry||0,rz||0,'XYZ'));
+    m.setPosition(x,y,z); parts.push({geo:g,mat:m,col});
+  };
+  /* the gunwale rail, both sides, as a run of short blocks along the sheer */
+  for(let i=0;i<N-1;i++){
+    const t=(i+0.5)/(N-1), p=prof(t), q=prof(Math.min(1,t+1/(N-1)));
+    const seg=Math.hypot(q.x-p.x,q.sheer-p.sheer)*1.05;
+    for(const s of [1,-1])
+      at(new THREE.BoxGeometry(seg,0.05,0.10),TRIM,p.x,p.sheer,s*p.w,
+         0,0,Math.atan2(q.sheer-p.sheer,q.x-p.x));
+  }
+  /* THE LEANING BAR. The one piece of a drift boat that is there for the
+     angler rather than the rower: a knee-high hoop in the bow you brace
+     against so you can fish standing up in moving water. */
+  const bar=prof(0.86);
+  at(new THREE.CylinderGeometry(0.022,0.022,0.72,8),METAL,bar.x,0.36,-0.34);
+  at(new THREE.CylinderGeometry(0.022,0.022,0.72,8),METAL,bar.x,0.36, 0.34);
+  /* ACROSS the boat, not along it. A cylinder is born along Y, and the hoop
+     has to end up along Z — which is a quarter turn about X, not about Z. */
+  at(new THREE.CylinderGeometry(0.026,0.026,0.70,8),METAL,bar.x,0.72,0,Math.PI/2,0,0);
+  /* the rower's bench and the stern locker, so the boat has somebody's day in
+     it rather than being an empty shell */
+  const bench=prof(0.30);
+  at(new THREE.BoxGeometry(0.34,0.06,bench.w*1.7),TRIM,bench.x,0.34,0);
+  at(new THREE.BoxGeometry(0.30,0.28,bench.w*1.5),TRIM,bench.x,0.19,0);
+  const aft=prof(0.10);
+  at(new THREE.BoxGeometry(0.42,0.30,aft.w*1.5),TRIM,aft.x+0.10,0.14,0);
+  const hull=new THREE.Mesh(mergeGeos(parts),
+    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.72,
+      metalness:0.05,side:THREE.DoubleSide}));
+  const g=new THREE.Group(); g.add(hull);
+  /* THE OARS, in their own group so they can pull when you do. Shipped at
+     rest, angled back and out of the water — which is where a guide keeps
+     them while you are fishing. */
+  boatOars=new THREE.Group();
+  const oarParts=[];
+  const oarAt=(geo,col,x,y,z,rx,ry,rz)=>{
+    const m=new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx||0,ry||0,rz||0,'XYZ'));
+    m.setPosition(x,y,z); oarParts.push({geo,mat:m,col});
+  };
+  for(const s of [1,-1]){
+    const w=prof(0.30).w;
+    /* Out to the side and angled aft, which is where a rower parks them while
+       you fish. The shaft is built along Y, laid over to +X by a quarter turn
+       about Z, and then swung into the plan direction about Y — that order,
+       because Euler XYZ applies Z first and X last, so a turn about Y after a
+       turn about X would do nothing to a cylinder that is still standing up. */
+    const dxo=-0.26, dzo=0.966*s, th=Math.atan2(-dzo,dxo);
+    const ox=bench.x-0.10, oy=0.50, oz=s*w;
+    oarAt(new THREE.CylinderGeometry(0.020,0.026,2.30,8),BLADE,
+          ox+dxo*1.05,oy-0.16,oz+dzo*1.05, 0,th,-Math.PI/2);
+    oarAt(new THREE.BoxGeometry(0.16,0.03,0.44),BLADE,
+          ox+dxo*2.25,oy-0.34,oz+dzo*2.25, 0,th,0);
+    oarAt(new THREE.CylinderGeometry(0.028,0.028,0.16,8),METAL,ox,oy,oz);
+  }
+  boatOars.add(new THREE.Mesh(mergeGeos(oarParts),
+    new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.65})));
+  g.add(boatOars);
+  g.rotation.order='YXZ';
+  boatGrp=g; scene.add(g);
+  return g;
+}
+
+/* Called on arrival. The rig is standing where applyVenue put it; the boat is
+   built around the HEAD rather than around the rig origin, because in room
+   scale those are not the same place and a boat centred on the origin puts
+   you over the gunwale before you have moved. */
+function boatEnter(){
+  boatOn=true; boatSeated=false; boatRow=0; boatSnap=0; boatBob=0;
+  buildBoat();
+  boatGrp.visible=true;
+  /* the hop is not on offer here, and its arc must not be left hanging in the
+     air from the reach you came off */
+  tpArc.visible=false; tpMark.grp.visible=false; tpArmed=false;
+}
+function boatLeave(){
+  boatOn=false; boatSeated=false;
+  if(boatGrp) boatGrp.visible=false;
+}
+
+/* One frame of drifting. `fwd` and `ax` are the left stick, already read. */
+function boatStep(dt,fwd,ax){
+  if(!boatOn||!boatGrp) return;
+  const B=SC.boat;
+  camera.getWorldPosition(_camW);
+  if(!boatSeated){
+    boatOff.set(_camW.x-player.position.x,0,_camW.z-player.position.z);
+    boatP.set(_camW.x,0,_camW.z);
+    computeFlow(boatP.x,boatP.z);
+    boatV.set(flowX,0,flowZ);
+    boatYaw=Math.atan2(-flowZ,flowX);
+    boatSeated=true;
+  }
+  /* SNAP TURN still lives on the cross axis. The stick is the oars now, and a
+     boat you cannot turn around in is a boat with one bank in it. */
+  if(P.snapTurn>0.5&&Math.abs(ax)>0.70&&Math.abs(ax)>Math.abs(fwd)*1.2){
+    if(boatSnap===0){ snapTurn(-Math.sign(ax)*P.snapTurn*Math.PI/180); boatSnap=Math.sign(ax); pulse(0.25); }
+  } else if(Math.abs(ax)<0.45) boatSnap=0;
+
+  /* WHAT THE RIVER DOES WITH YOU. A boat is not a leaf. It has weight, so it
+     answers the water it is sitting in over a second or so rather than
+     instantly, and that lag is most of what makes a drift feel like a drift:
+     it runs on into the slack at the top of a pool and takes a moment to
+     gather itself in the quick water at a pinch. */
+  computeFlow(boatP.x,boatP.z);
+  let tx=flowX, tz=flowZ;
+  /* THE OARS. Push the stick away to row downstream, pull it back to hold
+     against the current — which is exactly what a guide does when you want
+     one more drift down a seam, and the only thing in this venue that buys
+     you time. */
+  boatRow+=((-fwd)-boatRow)*Math.min(1,dt*5);
+  if(Math.abs(boatRow)<0.02) boatRow=0;
+  tx+=Math.cos(boatYaw)*boatRow*B.row;
+  tz+=-Math.sin(boatYaw)*boatRow*B.row;
+  /* AND THE GUIDE KEEPS IT OFF THE BANK. Left to itself a drifting hull goes
+     to the outside of every bend and sits down in the willows. */
+  const cz=CZ+SC.dz(boatP.x), hw=Math.max(0.5,SC.hw(boatP.x));
+  const u=(boatP.z-cz)/hw;
+  /* Soft on purpose: hard enough that the willows never get you, loose enough
+     that she still swings out through the bends the way a boat does. */
+  tz-=u*Math.abs(u)*0.62*hw*0.18;
+  /* around whatever is standing in the river, and only what is AHEAD */
+  for(let i=0;i<OBST.length;i++){
+    const o=OBST[i], dx=o.x-boatP.x, dz=boatP.z-o.z;
+    if(dx<-o.r||dx>o.r+6.0) continue;
+    const off=Math.abs(dz)-o.r-0.9;
+    if(off>0) continue;
+    const near=1-Math.max(0,dx-o.r)/6.0;
+    tz+=(dz>=0?1:-1)*near*near*1.5;
+  }
+  boatV.x+=(tx-boatV.x)*Math.min(1,dt*0.9);
+  boatV.z+=(tz-boatV.z)*Math.min(1,dt*0.9);
+  const dx=boatV.x*dt, dz=boatV.z*dt;
+  boatP.x+=dx; boatP.z+=dz;
+  /* the rig goes with the hull, so where you chose to stand in it is yours */
+  player.position.x+=dx; player.position.z+=dz;
+  /* the bow comes round to where she is going, slowly */
+  const sp=Math.hypot(boatV.x,boatV.z);
+  if(sp>0.05){
+    const want=Math.atan2(-boatV.z,boatV.x);
+    boatYaw+=((want-boatYaw+Math.PI*3)%(Math.PI*2)-Math.PI)*Math.min(1,dt*B.swing);
+  }
+  /* SHE ROCKS, YOU DO NOT. Vertical motion of the camera is the fastest way
+     to make somebody take a headset off, so the hull gets the roll and the
+     pitch and the rig gets a floor that is exactly level, exactly `free`
+     above the water, every frame. You see the boat move against the river
+     and feel nothing, which is the trade this needs to make. */
+  boatBob+=dt;
+  const y=surfY(boatP.x)+B.free;
+  boatGrp.position.set(boatP.x,y,boatP.z);
+  boatGrp.rotation.set(Math.sin(boatBob*0.83)*0.011-boatRow*0.035,
+                       boatYaw,
+                       Math.sin(boatBob*0.61+1.2)*0.020,'YXZ');
+  if(boatOars) boatOars.rotation.y=boatRow*0.42;
+}
+
+/* THE JOIN ITSELF. Called after the boat has moved and before the physics
+   runs, so nothing is halfway through a substep when the world moves under
+   it. The whole trick is that nothing here is a reset: every number is
+   TRANSLATED by one lap, and because the reach repeats over exactly that
+   distance the translation lands each of them in water identical to the
+   water it left. */
+function loopWrap(){
+  const L=SC.loop;
+  if(!L||!boatOn) return;
+  let dx=0;
+  if(boatP.x>L*0.5) dx=-L; else if(boatP.x<-L*0.5) dx=L; else return;
+  /* The reach still falls downhill, so the same water one lap upstream sits
+     HIGHER by one lap's worth of fall, and everything carried across has to
+     be lifted by it or the fly arrives under the film. Measured off surfY
+     rather than derived from the slope, so a venue with a different fall —
+     or with drops that repeat — is right without being told. */
+  const dy=surfY(boatP.x+dx)-surfY(boatP.x);
+  boatP.x+=dx;
+  player.position.x+=dx;
+  _camW.x+=dx;
+  _scatterX+=dx;                       /* or the whole bank re-scatters at once */
+  loopCarry(dx,dy);
+  /* what the river is carrying: the swirls, the specks in both paths, and the
+     rings spreading where the fly landed */
+  for(let i=0;i<NV;i++) vort[i].x+=dx;
+  for(let i=0;i<SPECK;i++){ const p=i*3; spPos[p]+=dx; spPos[p+1]+=dy; }
+  speckGeo.attributes.position.needsUpdate=true;
+  gsSlide+=dx;
+  for(const r of ringPool){ r.m.position.x+=dx; r.m.position.y+=dy; }
+  /* the bank comes with you. placeTrees only runs when you have moved six
+     metres from where it last ran, and _scatterX moved with the boat, so
+     without this the trees and the stones stay a lap downstream until the
+     drift catches up with them and the banks are bare for ten seconds. */
+  placeTrees(); placeRocks(); placeGrass();
+  /* and the solver, if it is set to follow you. The window it has spent the
+     last minute developing is the window it is about to be in — same bed,
+     same width, same everything — so move the frame and rebuild only the bed
+     heights. The velocities, the depths and the foam are all still true, and
+     re-seeding them is exactly what a jump this size normally costs. */
+  if(gridReady&&P.gridFollow>0.5){
+    gridCentre+=dx; GX0+=dx; GX1+=dx;
+    gridBuildBed(0,GNX,false);
+  }
+  M.laps=(M.laps||0)+(dx<0?1:0);
+}
+/* Everything that is in your hands, moved rigidly. Not carryTackle(): that one
+   is for a TELEPORT, where the rod stays put vertically and the free line has
+   to be given the river's local change in height. Here the whole world moved,
+   so the whole rig moves with it and nothing is tapered or corrected. */
+function loopCarry(dx,dy){
+  for(let i=0;i<RN;i++){const p=i*3; rpos[p]+=dx; rpos[p+1]+=dy; rprd[p]+=dx; rprd[p+1]+=dy;}
+  for(let i=0;i<MAXNODE;i++){const p=i*3; pos[p]+=dx; pos[p+1]+=dy; prd[p]+=dx; prd[p+1]+=dy;}
+  _p0.x+=dx;_p0.y+=dy;_p1.x+=dx;_p1.y+=dy;
+  _k0.x+=dx;_k0.y+=dy;_k1.x+=dx;_k1.y+=dy;
+  updateGuidePositions();
+  /* a fish you are playing, holding or looking at is part of the rig. One in
+     his lie is not: he stays where he lives, which is what makes the next lap
+     a second pass at the same six fish rather than a new river. */
+  for(const f of fishes){
+    if(f.state!=='hooked'&&f.state!=='landed'&&!f.held) continue;
+    f.p.x+=dx; f.p.y+=dy;
+    f.present.x+=dx; f.present.y+=dy;
+    f.bank.x+=dx; f.bank.y+=dy;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
    8. LOOP
    ════════════════════════════════════════════════════════════ */
 const nowMs=()=>(typeof performance!=='undefined'&&performance.now)?performance.now():0;
@@ -8542,7 +8984,11 @@ renderer.setAnimationLoop(()=>{
   /* the LEFT stick always moves you, whatever the menu is doing, and the left
      hand keeps full line control while you tune */
   const stickFwd=(P.invertY>0.5?-ay:ay);
-  const onStick=teleportStep(ax,stickFwd);
+  /* IN A BOAT THE STICK IS THE OARS. There is no walking and no hopping here:
+     the river decides where you are, and the only say you have in it is how
+     hard you pull against the current. */
+  if(boatOn){ boatStep(dt,stickFwd,ax); loopWrap(); }
+  const onStick=boatOn||teleportStep(ax,stickFwd);
   if(!onStick&&Math.hypot(ax,ay)>0.15){
     camera.getWorldQuaternion(_camQ);
     const e=new THREE.Euler().setFromQuaternion(_camQ,'YXZ');
@@ -8555,7 +9001,14 @@ renderer.setAnimationLoop(()=>{
     player.position.z+=vz*P.moveSpeed*dt/(1+wade*1.6);
   }
   camera.getWorldPosition(_camW);
-  {
+  if(boatOn){
+    /* The floor is a fixed height above the film, so you ride the river
+       instead of standing in it, and the depth on the stats window is the
+       water UNDER THE HULL — which is the number that tells you whether the
+       bank you are casting at is the shallow one. */
+    player.position.y=surfY(boatP.x)+SC.boat.free;
+    M.depth=Math.max(0,surfY(boatP.x)-bedY(boatP.x,boatP.z));
+  } else {
     const gy=bedY(_camW.x,_camW.z),lim=surfY(_camW.x)-1.15;
     player.position.y=Math.max(lim,gy);
     M.depth=Math.max(0,surfY(_camW.x)-gy);
@@ -9087,6 +9540,10 @@ renderer.setAnimationLoop(()=>{
     _scatterT=0.5;
     if(Math.hypot(_camW.x-_scatterX,_camW.z-_scatterZ)>6.0){
       _scatterX=_camW.x;_scatterZ=_camW.z;placeTrees();placeRocks();
+      /* grass has no range cull of its own, so on a looping reach — where it
+         is drawn at the image nearest you — it has to be re-laid with the
+         rest of the bank or it stays a lap behind */
+      if(SC.loop) placeGrass();
     }
   }
   skyMat.uniforms.uGlint.value=P.skyGlint;
@@ -9810,6 +10267,12 @@ if(location.hash&&location.hash.indexOf('s=')>=0){
     if(/[#&]sw=1/.test(location.hash||'')) applyPreset(Object.assign({},VENUE_BASE,SC.par));
   }catch(e){}
 }
+
+/* A VENUE CAN ARRIVE AT LOAD AS WELL AS AT A SWITCH. Opening the page on
+   #v=drift sets SC at the top of the file and never goes near applyVenue,
+   which is where the boat is normally launched — so the reach would come up
+   with no hull, no drift and a wading rig standing in eight feet of river. */
+if(SC.boat) boatEnter(); else boatLeave();
 
 enterBtn.addEventListener('click',async()=>{
   try{
