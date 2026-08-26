@@ -148,7 +148,7 @@ you are playing, the vortices, both speck fields and the rings — and by one la
 as well, because the reach still runs downhill and the same water upstream sits 4.3 cm
 higher. Ninety-six metres of geometry drifts for as long as you want to fish it.
 
-Three rules make it hold together, and all three are checked in `smoke.mjs`:
+Five rules make it hold together:
 
 1. **Every function of x has period `loop`.** The meander is one cosine at exactly
    `2π/96`, the width and the pool-riffle rhythm are two, and the GLSL twin interpolates
@@ -156,10 +156,28 @@ Three rules make it hold together, and all three are checked in `smoke.mjs`:
    step in the river.
 2. **Everything solid is periodic.** `applyVenue()` gives each rock, log and branch an
    image one lap up and one lap down, so the world across the join is the same world.
-3. **Nothing alive stands near the join.** The fish are deliberately *not* copied — six
-   is the whole reach — so no lie sits within eighteen metres of the seam in either
-   direction, and the join itself is at the apex of a bend where the outside bank is in
-   the way of the only long sightline.
+   Everything scattered — trees, stones, grass — is folded through `loopX()` to whichever
+   image of itself is nearest you, and `loopWrap()` re-lays all three at the join rather
+   than waiting for the six-metre scatter threshold to notice.
+3. **The ground itself comes with you.** The bed and the surface are each one mesh 170 m
+   long pinned to the middle of the reach, so at the end of a lap the world ran out 37 m
+   ahead of the bow and a frame later ran to 130. `loopWrap()` translates both by one
+   period, and the solver window with them.
+4. **The sky does not slide.** A 200 m sphere left at the origin parallaxes against a boat
+   96 m from it; `skyMesh` is re-centred on the camera every frame instead.
+5. **The fish migrate rather than being copied.** Two images of a trout is two trout to
+   rise and to hook, so `loopFish()` moves each one a whole lap when his lie falls half a
+   lap behind you — lie, circuit, strike memory and all, lifted by that lap's fall. The
+   switch happens 48 m fore and aft, where his marker post has already dissolved (posts
+   fade over the ten metres before the migration distance on any looping reach) and his
+   body is a one-pixel smudge under a reflective surface. Without this the six lies sit in
+   a fixed 54 m of a 96 m lap: the last quarter of every lap is dead water with nothing
+   rising ahead of the bow, and at the join the whole population changes ends at once.
+
+Rules 1 and 2 are checked in `smoke.mjs`. Rules 3–5 are geometry you have to look at:
+pin the boat at x=+47.95, cross the join, pin it at x=−47.95 — the same physical station
+one period on — and the two frames should differ by no more than two frames of the same
+water differ from each other.
 
 The **oars** are the left stick: push it away to row downstream, pull it back to hold
 against the current when you want another drift down a seam. That is the whole of your

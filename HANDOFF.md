@@ -185,7 +185,27 @@ compliance up, legacy stiffness down, the same statement in each model's currenc
 in over about a third of a second so the take does not snap the rod into a new shape, and
 eased back out when he is off. The rod you want to throw a tight loop with is not always
 the rod you want to play a fish on, and this is the one number that lets a build have
-both. It ships at 1.6. It moves bend only: the tippet still parts at the same tension.
+both. Above 1 is softer under a fish, below 1 is stiffer; it moves bend only, and the
+tippet still parts at the same tension.
+
+It shipped at 1.6 and now ships at **0.30**, because the first version of it was fighting
+a bug rather than tuning a rod. `tipSoft` was **not wired into the XPBD compliance at all**:
+`rodAlpha[i]` was computed from the raw second moment `rodIabs[i]`, so the whole taper ran
+at full physical stiffness and the one number meant to shape it did nothing. Turning
+`Playing flex` down to 0.01 therefore still gave a floppy rod, which is exactly what the
+report said. It now shapes the taper as an exponent —
+
+```js
+const Ie = Ib * Math.pow(rodIabs[i]/Ib, Math.max(0.05, P.tipSoft));
+rodAlpha[i] = Math.pow(ROD_SEG,3) / (4 * Math.max(1e6, P.rodE*1e9) * Ie);
+```
+
+— so `tipSoft` 1 is the true 484:1 taper over 11 joints and lower values compress it toward
+a uniform blank. With that live, 1.6 was a rod folded in half: the game's loads are far
+past what a 5wt fights (a 40 N tippet against a fish a real 5wt would meet at 5–10 N), so
+the honest setting is *stiffer* under load, not softer. Measured on a pinned-load rig, the
+shipped 0.30 bends 44.6° where 1.0 bends 73.1°, and still holds the fish where the drift
+says it should be.
 
 Rod damping targets the **deformation** velocity — each node against the velocity it would
 have if the rod were rigid with the hand, with ω recovered from the two driven nodes as
@@ -388,11 +408,31 @@ model and asserts the other four stay procedural.
 **Fighting a hooked fish.** Pull scales with length: roughly `12·len·power` newtons steady,
 with a run multiplying that by 2.6 and a jump by 3.2. A 40 cm rainbow therefore pulls ~5 N
 steady and ~12 N in a first run, against a 21 N 5X tippet — so a green fish can break you off
-and can out-pull the reel. **The reel is stronger than the fish.** It gathers line at full rate until tension reaches
-`reelPower` (default 60 N, well above a 21 N tippet), and while you are cranking the spool
-cannot pay line back out. So holding the trigger against a running fish shortens the line
-until something gives — normally the tippet. Setting `reelPower` below tippet strength makes
-the reel stall first and saves the line instead. Five behaviours cycle on a timer weighted
+and can out-pull the reel.
+
+**The reel gate and the drag.** The reel gathers line at full rate and then tapers off as
+tension climbs toward `reelPower`:
+
+```js
+const rp  = Math.max(0.05, P.reelPower);
+const eff = Math.max(0, Math.min(1, (rp - M.tension)/(0.45*rp)));
+```
+
+The taper matters as much as the ceiling. It used to reach zero only at *twice* `reelPower`,
+with `reelPower` itself above tippet strength — so against anything heavy the crank kept
+winning and the tippet, not the reel, was what gave. And the spool drag was disabled
+outright while the trigger was held (`!reeling`), which meant a big fish could not take line
+back from a cranking angler at all. The drag now slips whether or not you are cranking:
+
+```js
+if (hooked && !rodPinch && fishTension > thr && offSpool < TOTAL_LINE) { ... }
+```
+
+Ships at `reelPower` 30, `spoolDrag` 9, `lineStretch` 60, `tippet` 40. Between the three
+— the gate closing at 30 N, the drag slipping at 9, and the rod actually bending — a trout
+at **2× Fish size** now comes to the net instead of sitting out of reach: `smoke.mjs` puts
+an 0.8 m fish on and gains 5.54 m of line at a peak of 10.7 N against a 40 N tippet.
+Setting `reelPower` below tippet strength is still what saves the line: the reel stalls first. Five behaviours cycle on a timer weighted
 by stamina: **run, sound, jump, cruise, easy**. Stamina drains from both tension and the fish's
 own effort, so a fish that fights hard tires fast. **The line pulls the fish as an axial spring, not via a measured node tension.** Reading the
 tension off the segment next to the fly does not work, and the harness proved why: with a
@@ -571,17 +611,53 @@ What the join has to move is everything that is *in your hands* and everything t
 - the shed vortices, both speck fields (the GPU one gets a one-pass `uSlide` rather than being
   reset — every speck would otherwise be outside its window on the next line and respawn on
   the same frame), and the spreading rings;
-- the solved grid, but only if it is set to follow you: move the frame, rebuild the bed
-  heights, and **keep the velocities, the depths and the foam**, because the window it spent
-  the last minute developing is the window it is about to be in. Pinned — the default, and
-  what Boat Drift ships with, its span covering the whole lap — there is nothing to do at all.
+- the solved grid: move the frame, rebuild the bed heights, and **keep the velocities, the
+  depths and the foam**, because the window it spent the last minute developing is the window
+  it is about to be in. On a looping reach this happens whether or not `gridFollow` is set —
+  a window pinned to world coordinates is a window the boat has just left;
+- **the ground itself**, which is the difference between a join you cannot see and one you
+  can. The bed and the surface are each *one* mesh 170 m long pinned to the middle of the
+  reach, so at the end of a lap the world ran out 37 m in front of the bow and one frame
+  later ran to 130 — the river visibly got longer at the join. Translating them by one lap
+  is exact rather than approximate: the bed a lap upstream *is* this bed lifted by one lap's
+  fall, and the surface shader reads world x for everything it draws;
+- **the bank scatter**, re-laid at the join rather than left to the six-metre threshold that
+  normally triggers it. `_scatterX` moves with the boat, so without an explicit `placeTrees()`
+  / `placeRocks()` / `placeGrass()` the threshold is never crossed and the banks stay a lap
+  downstream — bare for ten seconds until the drift catches up with them.
 
-What does **not** move is the fish. Six of them is the whole population, they are the reason
-to come round again, and copying them would mean eighteen trout in the reach. That makes them
-the one thing on the river that is not periodic, so no lie sits within eighteen metres of the
-join in either direction; `smoke.mjs` asserts that, along with the reach repeating to within
-2e-4 m, every rock and log having an image a lap up and a lap down, and the fly and the rod
-tip coming out of a join at exactly the same place relative to the boat and the film.
+And one thing moves the other way. **The sky does not slide**: a 200 m sphere sitting at the
+origin parallaxes badly against a boat 96 m away from it, so `skyMesh` is re-centred on the
+camera in x and z every frame. A sky that jumps is as much of a tell as a river that does.
+
+What is **not copied** is the fish. Six of them is the whole population, they are the reason
+to come round again, and giving each an image a lap up and a lap down would mean eighteen
+trout in the reach — three of every one, any of which could rise and be hooked. So they
+**migrate** instead: `loopFish()` moves a fish a whole lap the moment his lie falls half a
+lap behind you, taking his lie, his cruising circuit, his strike memory and his presentation
+bookkeeping with him, lifted by that lap's fall like everything else. There is still only
+ever one of him.
+
+That was the largest remaining tell at the join, and it was a discontinuity in *what is in
+the river* rather than in the river itself. The six lies span 54 m of a 96 m lap, so with the
+fish pinned in world space the last quarter of every lap was dead water with nothing rising
+ahead of the bow, and at the seam the entire population changed ends in one frame — four
+posts astern gone, five ahead arrived. Measured at a pinned station either side of the join:
+before, four fish astern and none ahead within 70 m; after, five ahead and none astern. Now
+both sides read the same six fish at the same relative stations to within 0.2 m.
+
+The migration itself happens at 48 m fore and aft, which is not far enough for fog to hide
+(FogExp2 at 0.007 is only 11% opaque there). Projecting the two things that could give it
+away settles which one needed work: at 48 m a trout is a **1×1 px** smudge under a surface
+that is almost pure reflection at that grazing angle, while his marker post is **1.3×7.4 px**
+of saturated green *above* the water. So the body is left alone and the posts dissolve over
+the ten metres before the migration distance, on any reach with a `loop` set — which is what
+distance was doing to them anyway.
+
+`smoke.mjs` asserts the reach repeating to within 2e-4 m, every rock and log having an image
+a lap up and a lap down, and the fly and the rod tip coming out of a join at exactly the same
+place relative to the boat and the film. The rest of the seam is geometry you have to look
+at — see *The boat drift* in `VENUES.md` for the pinned-station comparison that finds it.
 
 The join is put at the **apex of a bend** rather than at the crossover, which is where the
 heading, the curvature and the shape all match trivially and where the outside bank is in the
