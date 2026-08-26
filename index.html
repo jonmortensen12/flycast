@@ -172,9 +172,9 @@ import * as THREE from 'three';
 const P = {
   nodeLen:0.08, leadNode:0.03, leaderLen:2.74, tippetLen:0.9,
   rodModel:1, rodE:200, rodMass:0.077,
-  stiffMul:1.434, rodDamp:14, tipSoft:0.6, rodTaper:1, fightFlex:1.6,
+  stiffMul:1.434, rodDamp:14, tipSoft:0.6, rodTaper:1, fightFlex:0.30,
   massMul:1, lineBend:1, lineSmooth:0.15, menuScale:1, hudScale:1, dragMul:0.85, lineWt:5, statFric:0.05,
-  reelSpeed:2.6, reelPower:60, lineStretch:60, spoolDrag:3, spoolDead:0.05, buoyancy:1, stick:1, tippet:40,
+  reelSpeed:2.6, reelPower:30, lineStretch:60, spoolDrag:9, spoolDead:0.05, buoyancy:1, stick:1, tippet:40,
   guideMu:0.15, slipInertia:0.06, dragHeld:1, routeOn:0, handSlide:8, reelSlack:0.1, lineVis:0.8, flySize:1.8, haptics:1,
   moveSpeed:1.6, netRadius:0.3, invertY:0, reelHand:0, handGuide:1,
   teleport:0, tpRange:9, snapTurn:30,
@@ -246,7 +246,7 @@ const MENU=[
   ['Guide friction','guideMu',0.00,0.60,0.01,'Capstan friction through the eyelets. Around 0.15 for fly line on chrome snakes. Every radian of rod bend multiplies the tension needed to make line slide.'],
   ['Static friction','statFric',0.00,0.60,0.01,'Force that must be beaten before line slides at all. Raise it if line creeps out on false casts.'],
   ['Slip inertia','slipInertia',0.01,2.00,0.01,'Mass that has to accelerate before line will slide through the guides, as a fraction of the whole sliding column \u2014 tiptop to spool lip, plus half the line outside the tip. That full column is 1.00, and it is far too heavy: over one 2.3 ms substep a tension wave in 5wt line travels only about 7 cm, so the line that can actually resist a feed is what sits within a wave transit of the guide, not metres of it out to the reel. 0.06 is the measured value and works out to roughly half a metre of line. Above 0.6 the line creeps back down the rod and the pool grows while casting; above 1.0 it falls through the guides under its own weight if you point the rod up. Below about 0.02 the old jitter returns.'],
-  ['Spool drag','spoolDrag',0.05,5.00,0.05,'Reel drag. The tension needed to pull line off the spool, and what a running fish fights.'],
+  ['Spool drag','spoolDrag',0.05,20.0,0.10,'Reel drag: the tension needed to pull line off the spool, and what a running fish fights. It ships at 9 N, a little under a quarter of the 40 N tippet, which is about where a drag is set on real tackle. At the old 3 N a big trout simply swam off with it \u2014 the spool gave at a twelfth of what he could pull, so every run took line and no amount of winding ever got it back. Set it high and you can break yourself off; set it low and you are into your backing.'],
   ['Spool deadband','spoolDead',0.00,0.30,0.01,'How far past taut you must pull before any line leaves the reel. Stops small hand movements bleeding line.'],
   ['Drag when held','dragHeld',0.05,5.00,0.05,'Reel drag used while you have hold of the line, either in the left hand or clamped at the cork. Pulling line off the spool by hand should not be fighting a drag set for a running fish, and at a 3.0 setting the spool simply would not give. Only ever lowers the drag \u2014 if the main Spool drag is already below this, nothing changes. Returns to the main setting the moment you let go.'],
   ['Routing enabled','routeOn',0,1,1,'Whether a light squeeze on the left trigger routes line through your fingers at all. Off, the default, means the left trigger does nothing until it passes 85% and becomes a full pinch, so line is either held or free with nothing in between. Routing still throws the pool around under fast feed and is off until that is solved \u2014 see LINEFLOW.md.'],
@@ -255,11 +255,11 @@ const MENU=[
   ['— ROD & TACKLE —',null,0,0,0,''],
   ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 1.43 puts the first bending mode at 4.0 Hz, which is what a real 9 ft 5wt measures. Calibrating on frequency rather than static sag is what stopped it feeling like a noodle.'],
   ['Rod damping','rodDamp',0.00,60.0,1.00,'Internal damping of the blank, per second. Damps how fast the rod deforms, not how it swings. Around 14 kills tip ring in about half a second, which is what a good graphite rod does. Zero rings for three seconds.'],
-  ['Playing flex','fightFlex',1.00,4.00,0.10,'How much softer the blank goes once a fish is ON, as a multiple of its compliance — 1.00 is the same rod you cast with, 2.00 bends twice as far under the same pull. A stiff enough rod to throw a tight loop is not always the rod you want to play a fish on, and this is the one number that lets you have both: it does nothing at all until you are into one, eases in over about a third of a second so the take does not snap the blank into a new shape, and eases back out when he comes off or comes to the net. It moves bend, not strength — the tippet still breaks at the same tension.'],
+  ['Playing flex','fightFlex',0.15,4.00,0.05,'What the blank does once a fish is ON, as a multiple of its compliance. 1.00 is the same rod you cast with; ABOVE 1 is softer and BELOW 1 is stiffer, and below is where it ships. A 9 ft 5wt is a real 5wt here \u2014 it wants about 3.8 N to pull its tip down a third of its length, which is what a real one measures \u2014 and a real 5wt with four pounds on the tip is folded to the cork. This game lets a fish put four pounds on the tip: the tippet ships at 40 N, which is four 5X tippets, and a big trout pulls most of that. At 1.00 the rod therefore spent every fight bent double, and a rod bent double has stopped transmitting anything \u2014 measured, the tip travels a metre and a half toward him and the tension you were holding collapses to a quarter of itself, which is a fish you cannot turn, lift or reel. 0.30 is a blank with the backbone those loads need: a trout pulling 8 N bends it 24 degrees, 15 N bends it 44, 25 N bends it 70, and at the tippet it is folded and telling you so. Raise it toward 1 for a soft rod and a gentler fight; lower it for more lifting power. It does nothing until you are into one, eases in over about a third of a second, and eases back out. It moves bend, not strength \u2014 the tippet still parts at the same tension.'],
   ['Taper model','rodTaper',0,1,1,'0 uses the earlier hand-drawn stiffness curve. 1 uses the real second moment of area of a tapered tube, shaped by Tip softness below.'],
   ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip, as an exponent on the blank\u2019s real second moment of area. 1.00 is the true tube, whose tip is 500x softer than the butt and goes noodly at this node count. 0.60 keeps the shape without the flop.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
-  ['Reel power N','reelPower',1.00,200.0,1.00,'Tension at which the reel finally stalls. Default 60 N is well above a 21 N tippet, so cranking always beats the fish and you can pull hard enough to break yourself off. Set it below tippet strength if you would rather the reel give out before the line does.'],
+  ['Reel power N','reelPower',1.00,200.0,1.00,'Tension at which the reel stalls \u2014 full rate up to a bit past half of it, then a straight ramp to nothing. It ships at 30, BELOW the 40 N tippet, so the reel gives out before the line does and holding the trigger against a running fish costs you line rather than the fish. Above tippet strength and cranking beats the fish every time: it takes line faster than a fish can be dragged, and the difference goes into the tippet until it parts.'],
   ['Line stretch N/m','lineStretch',5.00,400.0,5.00,'Axial stiffness of the deployed line, which is what a hooked fish actually pulls against. Lower is a stretchy, forgiving connection; higher transmits every head shake and breaks tippets faster.'],
   ['Tippet (N)','tippet',2.00,60.0,0.50,'Breaking strain. 5X is 4.75 lb, about 21 N. 6X is 15.6 N, 4X is 26.7 N.'],
   ['Line float','buoyancy',0.20,3.00,0.05,'How firmly the line is held on the surface film once it is riding on it.'],
@@ -423,11 +423,11 @@ const PHYSICAL={
   rodModel:1, rodE:200.0, rodMass:0.077, massMul:1.00,
   lineBend:1.00, lineSmooth:0.15, leadNode:0.03,
   stiffMul:1.434,   /* first bending mode at 4.0 Hz, which is what a real 5wt does */
-  rodDamp:14.0, tipSoft:0.60, rodTaper:1, fightFlex:1.60,
+  rodDamp:14.0, tipSoft:0.60, rodTaper:1, fightFlex:0.30,
   leaderLen:2.74, tippetLen:0.90,
   dragMul:0.85,     /* felt value. 1.00 is the isolated-cylinder physics */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
-  guideMu:0.15, statFric:0.05, slipInertia:0.06, dragHeld:1.00, reelSlack:0.10, spoolDrag:3.00, spoolDead:0.05,
+  guideMu:0.15, statFric:0.05, slipInertia:0.06, dragHeld:1.00, reelSlack:0.10, spoolDrag:9.00, spoolDead:0.05,
   tippet:40.0,      /* raised while the fight is being tuned; 5X would be 21 */
   buoyancy:1.00, stick:1.00, nodeLen:0.08, lineTaper:1,
 };
@@ -902,11 +902,13 @@ float scDep(float x,float zr){
     /* Six fish and six different problems, in the order you meet them:
        the cut bank, the crossover slot, the pocket behind the boulder, the
        sweeper, the inside seam off the gravel bar, and the tail of the
-       second boulder. Nothing lives within eighteen metres of the join in
-       either direction: a fish is the one thing here that is NOT copied a lap
-       up and a lap down, so his box and his post would be the one thing that
-       could pop into being as you cross it. Eighteen metres is far enough
-       that what appears is a couple of faint amber lines on the water. */
+       second boulder. They sit in fifty-four metres of a ninety-six metre lap
+       and the rest is empty water, which is what a real reach looks like: the
+       fish are on the features, and between the features there is nothing.
+       They are the one thing here that is not COPIED a lap up and a lap down —
+       two images of a trout is two trout to rise and hook — so loopFish
+       migrates them instead, one lap at a time, at half a lap fore and aft
+       where the posts have already faded out. */
     lies:[{x:-30.0,z:  6.6,len:0.46},
           {x:-24.0,z:  0.9,len:0.34},
           {x:-13.2,z: -4.0,len:0.52},
@@ -920,7 +922,7 @@ float scDep(float x,float zr){
        can pull on the oars, and swing is how quickly the hull comes round to
        point where it is going. */
     boat:{free:0.34, row:0.62, swing:1.4, len:4.3, beam:1.55},
-    par:{grade:1, current:0.90, gridCell:0.55, gridSpan:108, vortex:0.5,
+    par:{grade:1, current:0.90, gridCell:0.50, gridSpan:84, vortex:0.5,
          foam:0.20, treeRange:42, speckRange:34, obstHeight:0.85,
          takeRadius:0.70, maxSlip:0.34, riseAggro:0.45, spookT:4}
   };
@@ -1113,8 +1115,31 @@ function rebuildRod(){
       : Math.max(Math.pow(rodI[i],P.tipSoft),0.03);       /* real tube physics */
     /* XPBD compliance from real bending stiffness. Three points spaced L with
        curvature k have sagitta C = k L^2/2, so U = 0.5 EI k^2 L = 2 EI C^2/L^3.
-       XPBD's U = 0.5 C^2/alpha, hence alpha = L^3/(4 EI). Nothing tuned. */
-    rodAlpha[i]=Math.pow(ROD_SEG,3)/(4*Math.max(1e6,P.rodE*1e9)*rodIabs[i]);
+       XPBD's U = 0.5 C^2/alpha, hence alpha = L^3/(4 EI). Nothing tuned.
+
+       AND TIP SOFTNESS SHAPES IT, which it did not, and that is most of the
+       "the rod is a noodle with a fish on". `tipSoft` is described in its own
+       row as an exponent on the blank's REAL SECOND MOMENT OF AREA — and the
+       XPBD rod is the model that is defined by that number — but it was only
+       ever applied to `rbendK`, which the legacy rod uses and this one does
+       not. So the shipped rod ran the raw 484:1 taper over eleven joints, and
+       eleven joints cannot carry a 484:1 taper: the moment at the butt is ten
+       times the moment at the tip while the tip joint is nearly five hundred
+       times more compliant, so the last two joints took forty-four times the
+       curvature of the first and the blank hinged near the tiptop instead of
+       curving. Measured against a steady pull square to the rod: 91 degrees of
+       total bend at FIVE newtons, 130 at ten, and a tip that had already run
+       out of geometry to fold into — at which point the tip has travelled a
+       metre and a half toward the fish and the line tension it was supposed to
+       be carrying has collapsed to a quarter of itself. That is a rod you
+       cannot lift a fish with, and it is why a two-times trout could be reeled
+       at until the tippet popped without ever coming closer.
+
+       Held to the same exponent the taper was always meant to be shaped by,
+       484:1 becomes 40:1 at the shipped 0.60 and the rod bends as an arc. */
+    const Ib=rodIabs[0];
+    const Ie=Ib*Math.pow(rodIabs[i]/Ib,Math.max(0.05,P.tipSoft));
+    rodAlpha[i]=Math.pow(ROD_SEG,3)/(4*Math.max(1e6,P.rodE*1e9)*Ie);
   }
 }
 rebuildRod();
@@ -1451,7 +1476,11 @@ function gridShiftCells(cells){
   else        gridBuildBed(0,-cells,true);
 }
 function gridFollowUpdate(px){
-  if(!gridReady||P.gridFollow<0.5) return;
+  /* A looping reach follows whatever the setting says, because the window has
+     to be centred on the boat at BOTH ends of the lap or the solved water —
+     the boils, the standing waves, the foam — stops six metres in front of the
+     bow at the join and starts again a hundred metres out on the far side. */
+  if(!gridReady||(P.gridFollow<0.5&&!SC.loop)) return;
   const cells=Math.round((px-gridCentre)/gdx);
   if(cells!==0) gridShiftCells(cells);
 }
@@ -1726,7 +1755,7 @@ const rodLam=new Float64Array(RN);
    the last moment in the game that wants a glitch in it. */
 let flexNow=1;
 function flexStep(dt){
-  const want=(hooked&&hooked.state==='hooked')?Math.max(0.05,P.fightFlex):1;
+  const want=(hooked&&hooked.state==='hooked')?Math.max(0.02,P.fightFlex):1;
   flexNow+=(want-flexNow)*Math.min(1,dt*3.2);
 }
 function rodBendXPBD(i,h2){
@@ -2346,8 +2375,20 @@ function physics(dt){
       /* A hooked fish pulls against the drag, not against the belly, so the
          spool has to give directly. Release exactly the length that relieves
          the excess over the drag setting — that is what the drag does, and
-         without it any run snapped the tippet within a fifth of a second. */
-      if(hooked&&!reeling&&!rodPinch&&fishTension>thr&&offSpool<TOTAL_LINE){
+         without it any run snapped the tippet within a fifth of a second.
+
+         AND IT GIVES WHILE YOU ARE CRANKING TOO. This had `!reeling` in it, so
+         a hand on the handle disabled the drag entirely — which no reel does.
+         The drag, the line and the rod are in series and the drag is the
+         weakest link: wind against a fish that is pulling harder than the drag
+         setting and the spool simply slips, which is why you can hold the
+         handle down on a good fish all day and not break him off. Without
+         that, cranking was a race between a reel taking 2.6 m a second and a
+         tippet, and the tippet always lost: measured on a two-times trout, 45 N
+         and gone inside a second, with the fish no closer than it started.
+         The CORK CLAMP still holds everything — that is the deliberate act,
+         and it is still how you break yourself off on purpose. */
+      if(hooked&&!rodPinch&&fishTension>thr&&offSpool<TOTAL_LINE){
         const give=Math.min((fishTension-thr)/Math.max(P.lineStretch,1),0.08);
         if(give>0){
           offSpool=Math.min(TOTAL_LINE,offSpool+give);
@@ -2539,7 +2580,17 @@ const skyMat=new THREE.ShaderMaterial({
       c+=vec3(1.0,0.94,0.80)*(pow(s,220.0)*0.9+pow(s,14.0)*0.10)*uGlint;
       gl_FragColor=vec4(c,1.0);
       #include <colorspace_fragment>}`});
-scene.add(new THREE.Mesh(new THREE.SphereGeometry(200,32,20),skyMat));
+/* THE SKY IS A LONG WAY AWAY AND A 200 m SPHERE PINNED TO THE ORIGIN IS NOT.
+   Stand fifty metres off centre and the ridgeline has swung, because the
+   direction from your eye to a point on that sphere is not the direction from
+   the middle of it. In a reach you wade, that is a slow parallax nobody
+   notices. On a boat that drifts a hundred metres and then joins back to where
+   it started it is the mountains jumping sideways, which is the loudest thing
+   on the seam. Centred on your head every frame, the ridge is where a ridge
+   belongs: at infinity, and identical at both ends of the lap. */
+const skyMesh=new THREE.Mesh(new THREE.SphereGeometry(200,32,20),skyMat);
+skyMesh.frustumCulled=false;
+scene.add(skyMesh);
 
 function buildSurfGLSL(){ return `
 ${GLSL_SCENE}
@@ -2550,7 +2601,7 @@ float surfY(float x){
 }`; }
 let GLSL_SURF=buildSurfGLSL();
 
-let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
+let bedGeo,bedPosAttr,bedMat=null,bedShader=null,bedMesh=null,waterMesh=null;
 {
   bedGeo=new THREE.PlaneGeometry(170,64,180,74);
   bedGeo.rotateX(-Math.PI/2);bedGeo.translate(0,0,CZ);
@@ -2815,8 +2866,8 @@ let bedGeo,bedPosAttr,bedMat=null,bedShader=null;
          diffuseColor*=sampledDiffuseColor;
          #endif`);
   };
-  const bed=new THREE.Mesh(bedGeo,bedMat);
-  bed.renderOrder=-1;scene.add(bed);
+  bedMesh=new THREE.Mesh(bedGeo,bedMat);
+  bedMesh.renderOrder=-1;scene.add(bedMesh);
 }
 const _bedGravel=new THREE.Color(0x8a8071),_bedGrass=new THREE.Color(0x53663f),
       _bedSilt=new THREE.Color(0x46402f),_bedC=new THREE.Color();
@@ -3939,7 +3990,8 @@ const waterMat=new THREE.ShaderMaterial({
      one mesh and no extra draw call. */
   const g=new THREE.PlaneGeometry(170,30,220,100);
   g.rotateX(-Math.PI/2);g.translate(0,0,CZ);
-  const w=new THREE.Mesh(g,waterMat);w.renderOrder=0;w.frustumCulled=false;scene.add(w);
+  waterMesh=new THREE.Mesh(g,waterMat);
+  waterMesh.renderOrder=0;waterMesh.frustumCulled=false;scene.add(waterMesh);
 }
 
 /* ---- water colour ---------------------------------------------------------
@@ -5409,11 +5461,14 @@ const fishGroup=new THREE.Group();
 const ZONE_SCAN=base=>Math.max(2.0,base*1.25);
 function makeMarker(){
   const g=new THREE.Group();
+  /* transparent from the start rather than switched on when they first fade:
+     `transparent` is part of the shader program's cache key, so flipping it in
+     flight recompiles the material the frame a post goes distant. */
   const stem=new THREE.Mesh(new THREE.CylinderGeometry(0.005,0.005,0.85,5),
-    new THREE.MeshBasicMaterial({color:0x4fd18b}));
+    new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true}));
   stem.position.y=0.42;
   const head=new THREE.Mesh(new THREE.OctahedronGeometry(0.075),
-    new THREE.MeshBasicMaterial({color:0x4fd18b}));
+    new THREE.MeshBasicMaterial({color:0x4fd18b,transparent:true}));
   head.position.y=0.92;
   g.add(stem,head);return g;
 }
@@ -6243,8 +6298,20 @@ class Trout{
     /* The post above a HOOKED fish is a tension gauge, so it is worth having
        even when you do not want a post over every fish in the reach. */
     const onRod=this.state==='hooked';
+    /* A POST FORTY-FIVE METRES OFF IS ONE YOU CANNOT READ ANYWAY, AND ON A
+       LOOPING REACH IT IS ALSO A POST ABOUT TO MOVE: loopFish brings a fish
+       round from half a lap astern to half a lap ahead, and the one thing that
+       would give that away is his marker blinking into being at the far end of
+       the water. So on a loop they dissolve over the ten metres before the
+       migration distance and arrive already gone — which is the same thing
+       distance was doing to them regardless. */
+    const mfade=SC.loop
+      ?Math.max(0,Math.min(1,(SC.loop*0.5-4-Math.hypot(this.p.x-_camW.x,this.p.z-_camW.z))/10))
+      :1;
     this.marker.visible=(P.showMarkers>0.5||(onRod&&P.tensionMark>0.5))
-                        &&this.state!=='spooked';
+                        &&this.state!=='spooked'&&mfade>0.01;
+    this.marker.children[0].material.opacity=mfade;
+    this.marker.children[1].material.opacity=mfade;
     this.marker.position.set(this.p.x,Math.max(this.p.y,surfY(this.p.x)+0.02),this.p.z);
     this.marker.children[1].position.y=0.92+Math.sin(t*2.2+this.lie.x)*0.05;
     let col;
@@ -8071,7 +8138,11 @@ function applyVenue(id){
   speckGeo.attributes.position.needsUpdate=true;
   gsReset=2;
 
-  /* and whether you are wading it or riding it */
+  /* and whether you are wading it or riding it. The bed and the surface may
+     have been carried several laps downstream by the last reach; they belong
+     back where they were built before anything is measured off them. */
+  if(bedMesh) bedMesh.position.set(0,0,0);
+  if(waterMesh) waterMesh.position.set(0,0,0);
   if(SC.boat) boatEnter(); else boatLeave();
 
   afterSettingsChange();
@@ -8846,12 +8917,24 @@ function loopWrap(){
      without this the trees and the stones stay a lap downstream until the
      drift catches up with them and the banks are bare for ten seconds. */
   placeTrees(); placeRocks(); placeGrass();
+  /* AND SO DOES THE GROUND ITSELF, which is the difference between a join you
+     cannot see and one you can. The bed and the surface are each ONE mesh a
+     hundred and seventy metres long, pinned to the middle of the reach — so
+     at the end of a lap the world ran out thirty-seven metres in front of the
+     bow, and one frame later it ran to a hundred and thirty. The river got
+     visibly longer at the join, which is exactly the tell.
+     Translating them by one lap is exact rather than approximate: the bed a
+     lap upstream IS this bed lifted by one lap's fall, so the vertices that
+     were right before the move are right after it, and the surface shader
+     reads world x for everything it draws. */
+  if(bedMesh){ bedMesh.position.x+=dx; bedMesh.position.y+=dy; }
+  if(waterMesh) waterMesh.position.x+=dx;
   /* and the solver, if it is set to follow you. The window it has spent the
      last minute developing is the window it is about to be in — same bed,
      same width, same everything — so move the frame and rebuild only the bed
      heights. The velocities, the depths and the foam are all still true, and
      re-seeding them is exactly what a jump this size normally costs. */
-  if(gridReady&&P.gridFollow>0.5){
+  if(gridReady){
     gridCentre+=dx; GX0+=dx; GX1+=dx;
     gridBuildBed(0,GNX,false);
   }
@@ -8875,6 +8958,39 @@ function loopCarry(dx,dy){
     f.p.x+=dx; f.p.y+=dy;
     f.present.x+=dx; f.present.y+=dy;
     f.bank.x+=dx; f.bank.y+=dy;
+  }
+}
+
+/* AND THE FISH COME ROUND WITH IT. Every other thing on the bank is drawn at
+   whichever image of itself is nearest you (loopX), and a fish is the one thing
+   that cannot be: he is a body with a state, and a second image of him is a
+   second trout to rise, to hook and to lose. So he MIGRATES rather than being
+   copied — when his lie falls more than half a lap behind you his whole home
+   moves one lap downstream, lifted by that lap's fall the way loopWrap lifts
+   everything else, and there is still only ever one of him.
+   Without this the lies sit in a fixed twenty-five metre stretch of a
+   ninety-six metre reach, so the last quarter of every lap is dead water with
+   nothing rising ahead of the bow, and at the join the whole population changes
+   ends at once — four posts astern gone, five ahead arrived. Nothing else about
+   the seam is as easy to see as that.
+   One in your hands is not migrated: a hooked, landed or held fish is part of
+   the rig and travels in loopCarry with the rest of it. */
+function loopFish(refX){
+  const L=SC.loop; if(!L) return;
+  for(const f of fishes){
+    if(f.state==='hooked'||f.state==='landed'||f.held) continue;
+    const d=f.lie.x-refX;
+    let dx=0;
+    if(d>L*0.5) dx=-L; else if(d<-L*0.5) dx=L; else continue;
+    const dy=surfY(f.lie.x+dx)-surfY(f.lie.x);
+    f.lie.x+=dx;
+    f.p.x+=dx;           f.p.y+=dy;
+    f.present.x+=dx;     f.present.y+=dy;
+    f.bank.x+=dx;        f.bank.y+=dy;
+    f.strikeFrom.x+=dx;  f.strikeFrom.y+=dy;
+    f.strikePrev.x+=dx;  f.strikePrev.y+=dy;
+    if(f.cr) f.cr[0]+=dx;                  /* a cruiser's circuit, not his lie */
+    f.zoneReset();       /* the drift he was watching is a lap away now */
   }
 }
 
@@ -8988,6 +9104,7 @@ renderer.setAnimationLoop(()=>{
      the river decides where you are, and the only say you have in it is how
      hard you pull against the current. */
   if(boatOn){ boatStep(dt,stickFwd,ax); loopWrap(); }
+  loopFish(player.position.x);
   const onStick=boatOn||teleportStep(ax,stickFwd);
   if(!onStick&&Math.hypot(ax,ay)>0.15){
     camera.getWorldQuaternion(_camQ);
@@ -9001,6 +9118,7 @@ renderer.setAnimationLoop(()=>{
     player.position.z+=vz*P.moveSpeed*dt/(1+wade*1.6);
   }
   camera.getWorldPosition(_camW);
+  skyMesh.position.set(_camW.x,0,_camW.z);
   if(boatOn){
     /* The floor is a fixed height above the film, so you ride the river
        instead of standing in it, and the depth on the stats window is the
@@ -9157,10 +9275,21 @@ renderer.setAnimationLoop(()=>{
   reeling=trigR>0.05&&!onPanel;
   prevTrigR=trigRDown;
   if(trigR>0.05&&!onPanel){
-    /* The reel wins. It gathers line at full rate until tension reaches Reel
-       power, so holding the trigger down against a running fish will shorten
-       the line until something gives — normally the tippet. */
-    const eff=Math.max(0,Math.min(1,1-(M.tension-P.reelPower)/Math.max(P.reelPower,0.05)));
+    /* THE REEL STALLS AT REEL POWER, which is what its row has always said and
+       is not what this did. `1-(T-R)/R` is 1 at R and only reaches 0 at TWICE
+       R, so a reel set to 60 N wound at full speed until 60 and did not stop
+       until 120 — three times a 40 N tippet. Holding the trigger against a
+       fish therefore always ended the same way: the reel took 2.6 m of line a
+       second, the fish could be dragged at about 1.5, and the difference went
+       into the tippet until it parted. Measured on a two-times trout: 45 N and
+       gone inside a second of cranking, every time, with the fish no closer
+       than it started.
+       Full rate up to a bit past half power, then a straight ramp to nothing
+       at power itself. Set below the tippet — where it now ships — the reel
+       gives out before the line does, and a big fish is landed by winding when
+       he lets you rather than by out-pulling him. */
+    const rp=Math.max(0.05,P.reelPower);
+    const eff=Math.max(0,Math.min(1,(rp-M.tension)/(0.45*rp)));
     let take=P.reelSpeed*trigR*dt*eff;
     const slack=offSpool-lineOut-rodArc;
     const fromSlack=Math.min(Math.max(0,slack-MIN_SLACK),take);

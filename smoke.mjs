@@ -671,6 +671,48 @@ if(!(venue.consistent&&venue.shaderRoundTrip&&venue.noStrayTokens&&venue.tackleK
      &&venue.transitionCompletes&&venue.distinctReaches===4))
   console.log('  *** VENUE SWAP FAILURE ***');
 
+/* ── a big fish, and a reel that gives out before the line does ──────────
+   Reported as "I made the trout twice as big and now I cannot reel them in",
+   and it was two things at once. The reel gate read `1-(T-R)/R`, which is 1 at
+   Reel power and only zero at TWICE it, so a reel set to 60 N wound at full
+   speed against a 40 N tippet and never stopped; and it takes 2.6 m of line a
+   second while a fish that size can be dragged at about 1.5, so the difference
+   went into the tippet until it parted — inside a second, every time, with the
+   fish no closer than it started. The claim now is the one a fight is for: you
+   can hold the trigger down on a big one and lose the argument rather than the
+   fish. */
+const bigfish=vm.runInContext(`(()=>{
+  applyVenue('cedar'); applyPreset(SHIPPED);
+  const settle=n=>{ for(let i=0;i<n;i++) renderer._loop(); };
+  const T=(RN-1)*3;
+  const gap=()=>hooked?Math.hypot(hooked.p.x-rpos[T],hooked.p.y-rpos[T+1],hooked.p.z-rpos[T+2]):0;
+  for(const f of fishes) f.reseat();
+  P.fishSize=2; for(const f of fishes) f.sizeSync();
+  lineOut=12; offSpool=lineOut+rodArc+2.2; resetCast(); settle(50);
+  runAction('!hookfish'); settle(8);
+  const out={aboard:!!hooked, len:hooked?+hooked.len.toFixed(2):0,
+             tippet:P.tippet, power:P.reelPower};
+  const d0=gap(), l0=lineOut;
+  /* the trigger, held, for twenty seconds of fighting */
+  rodPad.buttons[0].value=1; rodPad.buttons[0].pressed=true;
+  let peak=0;
+  for(let i=0;i<900&&hooked;i++){ renderer._loop(); peak=Math.max(peak,M.tension); }
+  rodPad.buttons[0].value=0; rodPad.buttons[0].pressed=false;
+  out.stillOn=!!hooked;
+  out.peakTension=+peak.toFixed(1);
+  out.gained=+(l0-lineOut).toFixed(2);
+  out.closed=+(d0-gap()).toFixed(2);
+  /* he must still be there, the line must never have gone near breaking, and
+     twenty seconds of winding has to have BOUGHT something */
+  out.heldOn = out.stillOn && peak<P.tippet*0.92 && out.gained>1.0;
+  for(const f of fishes) f.reseat();
+  P.fishSize=1; for(const f of fishes) f.sizeSync();
+  applyPreset(SHIPPED); resetCast();
+  return out;
+})()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
+console.log('a big one on the reel',bigfish);
+if(!bigfish.aboard||!bigfish.heldOn) console.log('  *** BIG FISH FAILURE ***');
+
 /* ── the lap, and the boat that rides it ─────────────────────────────────
    A looping venue is one reach of river that repeats over `SC.loop` metres, so
    the boat can be lifted off one end of the lap and set down at the other with
@@ -678,7 +720,11 @@ if(!(venue.consistent&&venue.shaderRoundTrip&&venue.noStrayTokens&&venue.tackleK
    kind that fails silently — a wavelength that does not divide the period, a
    rock without its images, a fish standing next to the join, a rig that gets
    carried the wrong way — and shows up as a world that flickers once every
-   two minutes, which is exactly the bug nobody can reproduce on demand. */
+   two minutes, which is exactly the bug nobody can reproduce on demand.
+   Claim 3 used to be the opposite of what it is now: the fish were pinned in
+   world space and the assertion was that no lie sat near the seam. That kept
+   them from popping into being AT the join and did nothing about the real
+   tell, which was the whole population changing ends as you crossed it. */
 const drift=vm.runInContext(`(()=>{
   const out={};
   applyVenue('drift');
@@ -712,13 +758,32 @@ const drift=vm.runInContext(`(()=>{
   out.rocks={total:OBST.length, withBothImages:both};
   out.everySolidThingRepeats = OBST.length>0 && both*3===OBST.length;
 
-  /* 3. AND NOTHING ALIVE STANDS NEXT TO THE JOIN. The fish are the one thing
-     not copied — six of them is the whole reach — so a lie near the seam is a
-     box and a post appearing out of nothing as you cross. */
-  let nearest=1e9;
-  for(const l of SC.lies) nearest=Math.min(nearest,L*0.5-Math.abs(l.x));
-  out.nearestFishToTheJoin=+nearest.toFixed(1);
-  out.fishKeepClearOfTheJoin = nearest>=12;
+  /* 3. AND THE FISH COME ROUND WITH IT. They are the one thing NOT copied — six
+     of them is the whole reach, and an image a lap up and a lap down would be
+     eighteen trout, any of which could rise and be hooked — so they migrate a
+     lap at a time instead. Two things have to hold, and the second is the one
+     that makes copying them the wrong answer: the set of fish relative to you
+     is the same after a lap as before it, and there is still only one of each.
+     Without this the six lies stay pinned in 54 m of a 96 m lap, so the last
+     quarter of every lap is empty water and the whole population changes ends
+     at the seam. */
+  const ref0=0;
+  loopFish(ref0);
+  const relSet=(ref)=>fishes.map(f=>+(f.p.x-ref).toFixed(2)).sort((a,b)=>a-b);
+  const before=relSet(ref0), n0=fishes.length;
+  out.furthestFishAtTheJoin=+Math.max(...before.map(Math.abs)).toFixed(1);
+  out.noneSitPastHalfALap = out.furthestFishAtTheJoin<=L*0.5+0.01;
+  loopFish(ref0+L);                    /* you have now drifted one whole lap */
+  const after=relSet(ref0+L);
+  out.fishRelBefore=before; out.fishRelAfter=after;
+  out.sameSixFishNextLap = n0===fishes.length && before.length===after.length &&
+                           before.every((v,i)=>Math.abs(v-after[i])<0.05);
+  /* and one in your hands is carried by loopCarry, not migrated by this */
+  const keep=fishes[0]; const wasX=keep.p.x;
+  keep.state='hooked';
+  loopFish(ref0+L*3);
+  out.aFishOnTheRodStaysPut = Math.abs(keep.p.x-wasX)<1e-9;
+  keep.state='holding';
 
   /* 4. THE JOIN CARRIES WHAT YOU ARE HOLDING. Measured against the boat and
      against the local film, so a lap that moved the rig by the wrong amount —
@@ -757,7 +822,8 @@ const drift=vm.runInContext(`(()=>{
   return out;
 })()`,sandbox);
 console.log('the lap, and the boat',drift);
-if(!drift.reachRepeats||!drift.everySolidThingRepeats||!drift.fishKeepClearOfTheJoin||
+if(!drift.reachRepeats||!drift.everySolidThingRepeats||!drift.sameSixFishNextLap||
+   !drift.noneSitPastHalfALap||!drift.aFishOnTheRodStaysPut||
    !drift.aboard||!drift.ridesTheWater||!drift.carriedAcross||!drift.rigStaysInTheBoat||
    !drift.leftAshore)
   console.log('  *** BOAT DRIFT FAILURE ***');
@@ -1122,6 +1188,15 @@ if(!tp.standable.bank||tp.standable.middle||tp.standable.onRock||
    threshold means anything. The claim being checked is the right one anyway:
    a hop must not do more to the line than standing still does. */
 const hop=vm.runInContext(`(()=>{
+  /* LET GO OF THE REEL FIRST. The stub connects both hands with the right
+     trigger at 0.6, so every test in this file runs with the reel winding at
+     1.6 m/s — which is fine for most of them and fatal for this one, because
+     the claim here is "a hop does not rip line in or out" and a third of a
+     second of cranking is 0.5 m of exactly that. Measured either side of the
+     same hop with the trigger down: 0.37 m one build, 0.60 the next, against a
+     0.6 m threshold. Nothing to do with hopping. */
+  const wasTrig=rodPad.buttons[0].value, wasPr=rodPad.buttons[0].pressed;
+  rodPad.buttons[0].value=0; rodPad.buttons[0].pressed=false;
   /* Its own world. By this point in the run the venue has been swapped, the
      flow and grade have been driven up for the water sweep and half the
      tackle has been through two presets — measuring a hop against that is
@@ -1197,6 +1272,7 @@ const hop=vm.runInContext(`(()=>{
 
   for(const f of fishes) f.reseat();
   blinkT=0; blinkPending=false;
+  rodPad.buttons[0].value=wasTrig; rodPad.buttons[0].pressed=wasPr;
   resetCast();
   return {open, fish};
 })()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
@@ -1346,7 +1422,7 @@ const rodbend=vm.runInContext(`(()=>{
     const T=(RN-1)*3;
     let ax=rpos[T]-rpos[0], az=rpos[T+2]-rpos[2];
     const al=Math.hypot(ax,az)||1; ax/=al; az/=al;
-    let carried=0, sum=0, n=0;
+    let carried=0, sum=0, n=0, ten=0;
     for(let i=0;i<130&&hooked;i++){
       /* THE TIP MOVES, so the stretch is measured off where it is NOW. Held
          against the tip as it stood at the take, a rod that bends half a metre
@@ -1363,21 +1439,27 @@ const rodbend=vm.runInContext(`(()=>{
       renderer._loop();
       if(!hooked) break;
       carried=Math.max(carried,fishCarried);
-      if(i>=90){ sum+=M.bend; n++; }
+      if(i>=90){ sum+=M.bend; ten+=fishTension; n++; }
     }
     for(const f of fishes) f.reseat();
     resetCast();
     return {idle:+idle.toFixed(1), bend:+(sum/Math.max(1,n)).toFixed(1),
-            carried:+carried.toFixed(1)};
+            carried:+carried.toFixed(1), want:+(P.lineStretch*0.30).toFixed(1),
+            held:+(ten/Math.max(1,n)).toFixed(1)};
   };
-  const stiff=fight(1.0), soft=fight(3.0);
+  const shipped=fight(SHIP.fightFlex), soft=fight(1.0);
   applyPreset(SHIPPED);
-  return {stiff, soft};
-})()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
+  return {shipped, soft, ship:SHIP.fightFlex};
+})()`.replace(/SHIPPED/g,JSON.stringify(shipped)).replace(/SHIP\./g,JSON.stringify(shipped)+'.'),sandbox);
 console.log('the fish bends the rod',rodbend);
-if(rodbend.stiff.carried<5 ||                        /* he has to have pulled */
-   rodbend.stiff.bend<rodbend.stiff.idle+6 ||        /* and it has to arrive */
-   rodbend.soft.bend<rodbend.stiff.bend+2)           /* and the knob has to bite */
+if(rodbend.shipped.carried<5 ||                      /* he has to have pulled */
+   rodbend.shipped.bend<rodbend.shipped.idle+6 ||    /* and it has to arrive */
+   rodbend.soft.bend<rodbend.shipped.bend+4 ||       /* and the knob has to bite */
+   /* AND THE ROD HAS TO STILL BE CARRYING IT. A blank bent double has stopped
+      transmitting: the tip travels toward the fish and the tension you were
+      holding collapses. That is the whole of "I cannot reel him in", and no
+      amount of bend is worth anything without this line. */
+   rodbend.shipped.held<rodbend.shipped.want*0.85)
   console.log('  *** ROD-BEND FAILURE ***');
 
 /* ── the control guide ───────────────────────────────────────────────────
