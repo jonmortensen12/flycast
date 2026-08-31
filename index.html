@@ -172,8 +172,9 @@ import * as THREE from 'three';
 const P = {
   nodeLen:0.08, leadNode:0.03, leaderLen:2.74, tippetLen:0.9,
   rodModel:1, rodE:200, rodMass:0.077,
-  stiffMul:1.434, rodDamp:14, tipSoft:0.6, rodTaper:1, fightFlex:0.30,
+  stiffMul:1.434, rodDamp:14, tipSoft:0.6, rodTaper:1, fightFlex:1.00,
   massMul:1, lineBend:1, lineSmooth:0.15, menuScale:1, hudScale:1, dragMul:0.85, lineWt:5, statFric:0.05,
+  flyDrag:1,
   reelSpeed:2.6, reelPower:30, lineStretch:60, spoolDrag:9, spoolDead:0.05, buoyancy:1, stick:1, tippet:40,
   guideMu:0.15, slipInertia:0.06, dragHeld:1, routeOn:0, handSlide:8, reelSlack:0.1, lineVis:0.8, flySize:1.8, haptics:1,
   moveSpeed:1.6, netRadius:0.3, invertY:0, reelHand:0, handGuide:1,
@@ -241,6 +242,7 @@ const MENU=[
   ['Tippet length','tippetLen',0.20,2.50,0.05,'Level tippet at the fly end, cut from the leader total. Longer tippet drifts more freely but turns over less crisply.'],
   ['Line weight','lineWt',3.00,8.00,0.50,'AFFTA line rating. Sets real mass per metre: a 5wt head is 140 grains over 30 ft, which is 0.99 g/m. Heavier line loads the rod harder and carries further.'],
   ['Line air drag','dragMul',0.10,1.50,0.05,'Multiplier on the physical drag coefficient. 1.00 is a real cylinder in crossflow at this diameter. Drag force is LINEAR in diameter and inverse in mass, so this knob and Line mass mult move the same underlying ratio — change this one if the line moves wrong through the air but the rod loads right.'],
+  ['Fly air drag','flyDrag',0.00,3.00,0.05,'The fly\u2019s own air resistance, as a bluff body rather than as a piece of line. Line air drag treats every node as a smooth cylinder, which is right for the line and wrong for the thing on the end of it: a cylinder moving ALONG its own axis has almost no drag, so a fly dropping straight down beneath a hanging leader used to fall at a few percent of its real drag and hit the water at 6 m/s \u2014 past the Splash limit, so a fly that was only ever lowered onto the surface still slapped and put fish down. At 1.00 it is a size 14 dry: a 10 mm hackle at Cd 1.0, terminal velocity about 2.1 m/s. Raise it for something bushier, lower it toward 0 for a heavy nymph that knifes in. It barely touches the cast, where the fly is travelling across the leader and was already paying full drag; what it changes is how a fly ARRIVES.'],
   ['Line taper','lineTaper',0,1,1,'0 is a level line: uniform mass and diameter for all 27 m. 1 is a real weight-forward profile — front taper, belly, rear taper, running line — normalised so the first 30 ft still weighs the AFFTA head weight. The front taper is what makes a loop unroll, so a level line needs far more air drag to look right.'],
   ['— FRICTION —',null,0,0,0,''],
   ['Guide friction','guideMu',0.00,0.60,0.01,'Capstan friction through the eyelets. Around 0.15 for fly line on chrome snakes. Every radian of rod bend multiplies the tension needed to make line slide.'],
@@ -255,7 +257,7 @@ const MENU=[
   ['— ROD & TACKLE —',null,0,0,0,''],
   ['Rod stiffness','stiffMul',0.05,3.00,0.02,'Overall stiffness of the blank. 1.43 puts the first bending mode at 4.0 Hz, which is what a real 9 ft 5wt measures. Calibrating on frequency rather than static sag is what stopped it feeling like a noodle.'],
   ['Rod damping','rodDamp',0.00,60.0,1.00,'Internal damping of the blank, per second. Damps how fast the rod deforms, not how it swings. Around 14 kills tip ring in about half a second, which is what a good graphite rod does. Zero rings for three seconds.'],
-  ['Playing flex','fightFlex',0.15,4.00,0.05,'What the blank does once a fish is ON, as a multiple of its compliance. 1.00 is the same rod you cast with; ABOVE 1 is softer and BELOW 1 is stiffer, and below is where it ships. A 9 ft 5wt is a real 5wt here \u2014 it wants about 3.8 N to pull its tip down a third of its length, which is what a real one measures \u2014 and a real 5wt with four pounds on the tip is folded to the cork. This game lets a fish put four pounds on the tip: the tippet ships at 40 N, which is four 5X tippets, and a big trout pulls most of that. At 1.00 the rod therefore spent every fight bent double, and a rod bent double has stopped transmitting anything \u2014 measured, the tip travels a metre and a half toward him and the tension you were holding collapses to a quarter of itself, which is a fish you cannot turn, lift or reel. 0.30 is a blank with the backbone those loads need: a trout pulling 8 N bends it 24 degrees, 15 N bends it 44, 25 N bends it 70, and at the tippet it is folded and telling you so. Raise it toward 1 for a soft rod and a gentler fight; lower it for more lifting power. It does nothing until you are into one, eases in over about a third of a second, and eases back out. It moves bend, not strength \u2014 the tippet still parts at the same tension.'],
+  ['Playing flex','fightFlex',0.15,4.00,0.05,'What the blank does once a fish is ON, as a multiple of its compliance. It ships at 1.00 \u2014 the same rod you cast with, no change at the take. ABOVE 1 is softer and BELOW 1 is stiffer. Worth knowing which way to reach: a 9 ft 5wt is a real 5wt here, wanting about 3.8 N to pull its tip down a third of its length, which is what a real one measures. This game lets a fish put far more than that on the tip \u2014 the tippet ships at 40 N, about four 5X tippets, and a big trout pulls most of it \u2014 so at 1.00 a heavy fish bends the blank a long way and the tip travels toward him, which is the rod doing its job right up until it runs out of travel. Measured at 0.30: 8 N bends it 24 degrees, 15 N bends it 44, 25 N bends it 70. Lower it if you want backbone for lifting and turning a big one; raise it for a softer, more forgiving fight. It does nothing until you are into one, eases in over about a third of a second, and eases back out. It moves bend, not strength \u2014 the tippet still parts at the same tension.'],
   ['Taper model','rodTaper',0,1,1,'0 uses the earlier hand-drawn stiffness curve. 1 uses the real second moment of area of a tapered tube, shaped by Tip softness below.'],
   ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip, as an exponent on the blank\u2019s real second moment of area. 1.00 is the true tube, whose tip is 500x softer than the butt and goes noodly at this node count. 0.60 keeps the shape without the flop.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
@@ -423,9 +425,10 @@ const PHYSICAL={
   rodModel:1, rodE:200.0, rodMass:0.077, massMul:1.00,
   lineBend:1.00, lineSmooth:0.15, leadNode:0.03,
   stiffMul:1.434,   /* first bending mode at 4.0 Hz, which is what a real 5wt does */
-  rodDamp:14.0, tipSoft:0.60, rodTaper:1, fightFlex:0.30,
+  rodDamp:14.0, tipSoft:0.60, rodTaper:1, fightFlex:1.00,
   leaderLen:2.74, tippetLen:0.90,
   dragMul:0.85,     /* felt value. 1.00 is the isolated-cylinder physics */
+  flyDrag:1,        /* the hackle, as a bluff body. 1.00 is a size 14 dry */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
   guideMu:0.15, statFric:0.05, slipInertia:0.06, dragHeld:1.00, reelSlack:0.10, spoolDrag:9.00, spoolDead:0.05,
   tippet:40.0,      /* raised while the fight is being tuned; 5X would be 21 */
@@ -918,6 +921,24 @@ float scDep(float x,float zr){
     /* Mid-channel at the apex, not on the bank: the default spawn walks you
        out to the waterline, and there is no waterline to stand on here. */
     spawn:{x:0,z:-12.8},
+    /* THE CANYON. The axis swings twelve metres either way where the water
+       only swings 3.8, so the floor is twenty metres of gravel wide at each
+       crossover and pinched to within a metre of the water at each apex —
+       which is where the wall cuts across the view. `out` is 17: the water's
+       far edge reaches 12.0 at the worst point on the swing (amp 12 + hwMax
+       8.2 - dzAmp 3.8 = 16.4), so 17 leaves the river its banks everywhere
+       and stands the cliff on the gravel rather than in the current (measured,
+       the water's far edge reaches 16.2 at the tightest point, so there is
+       always most of a metre of dry bank under the rock). Thirteen metres of
+       it on average at three to one, which from a boat is sky-blocking, with
+       the rim run between 4.9 and 17.8 by three harmonics of the lap so it is
+       a skyline rather than a table.
+       Measured off the geometry: from an apex the wall closes the sightline at
+       about twenty-eight metres, so the far half of the lap is never in view
+       and the join has nothing to line up with. */
+    wall:{ax:x=>-12.0*Math.cos(K*x), out:17.0, slope:3.0,
+          h:x=>13.0+4.5*Math.sin(2*K*x+0.7)+2.2*Math.sin(3*K*x+2.1)
+                   +1.4*Math.sin(5*K*x+4.3)},
     /* THE BOAT. free is the floor above the waterline, row is how hard you
        can pull on the oars, and swing is how quickly the hull comes round to
        point where it is going. */
@@ -988,11 +1009,53 @@ function surfY(x){
   return y;
 }
 const bedDepth=(x,z)=>Math.max(0,SC.dep(x,z-CZ));
+/* CANYON WALLS. A reach may stand its banks up into something you cannot see
+   over or past, and the whole point of it is what it does to the SIGHTLINE: a
+   looping reach that runs away to a hazy horizon shows you the same rock twice
+   and lets you watch the join coming, and no amount of care at the seam fixes
+   that. A wall across the bend closes the view at about thirty metres, so what
+   is beyond the join is not missing — it was never in sight.
+
+   It is deliberately NOT part of the channel. The wall stands well outside the
+   waterline, so it is dry bed: the solver never sees it (its window is sized
+   off hwMax and dzMax and stops far short), the water shader never draws it,
+   and dz, hw and dep — the three functions the fish, the drift and the loop's
+   periodicity all rest on — are untouched. It is scenery with a bed height,
+   and its axis is a cosine on the same period as everything else, so it comes
+   round with the lap exactly.
+
+   The axis swings HARDER than the water does. A canyon whose walls follow the
+   channel is a corridor you see straight down; one whose floor is wide at the
+   crossovers and pinched hard against the water at each apex is a river that
+   goes round a corner. `out` has to clear the widest the water ever gets on
+   the swing — amp + hwMax - dzAmp — or the wall would stand in the river. */
+function wallY(x,z){
+  const W=SC.wall; if(!W) return -1e9;
+  const d=Math.abs((z-CZ)-W.ax(x))-W.out;
+  if(d<=0) return -1e9;
+  /* the RIM is where a wall gives itself away. A single height cap makes a
+     table: every top edge at exactly the same altitude, dead level against the
+     sky for the length of the reach, which reads as a mesa rather than as
+     rock. The cap is a function of x instead, and on a looping reach it has to
+     be built from harmonics of the lap or the rim is the one thing that does
+     not come round. */
+  const h=W.h(x);
+  return surfY(x)+Math.min(h,d*W.slope);
+}
+/* NOTHING IS SCATTERED UP A CLIFF. A conifer standing out of a rock face at
+   forty-five degrees reads as a bug, and the grass and the loose stones with
+   it — they all place themselves a fixed distance out from the waterline and
+   take whatever height the bed has there, which on a canyon reach is the wall.
+   The foot of it is still fair game; anything past a metre of climb is not. */
+const onWall=(x,z)=>!!SC.wall&&wallY(x,z)>surfY(x)+1.2;
 function bedY(x,z){
   const s=surfY(x), u=(z-CZ-SC.dz(x))/SC.hw(x);
-  if(Math.abs(u)<1) return s-bedDepth(x,z);
-  if(u>=1) return s+Math.min(0.30,(u-1)*0.28);
-  return s+0.05+Math.min(2.6,(Math.abs(u)-1)*3.0);
+  let y;
+  if(Math.abs(u)<1) y=s-bedDepth(x,z);
+  else if(u>=1)     y=s+Math.min(0.30,(u-1)*0.28);
+  else              y=s+0.05+Math.min(2.6,(Math.abs(u)-1)*3.0);
+  if(SC.wall){ const w=wallY(x,z); if(w>y) y=w; }
+  return y;
 }
 
 const ripple=(x,z,t)=>
@@ -1220,6 +1283,8 @@ function lineProfile(s){
   }
   return [0.00040,0.00050];
 }
+const FLY_R=0.005;                 /* hackle radius, metres */
+let flyDragK=0;
 function rebuildMasses(){
   for(let i=0;i<MAXNODE;i++){
     const s=sArc(i), span=nodeSpan(i);
@@ -1232,6 +1297,22 @@ function rebuildMasses(){
        change how the line behaves — only how finely it is resolved.
        0.5*rho*Cd*A/m with air at 1.2 kg/m^3 and Cd 1.1 for a cylinder. */
     dragK[i]=0.5*1.2*1.1*pr[1]*span/m;
+    /* THE FLY IS NOT A PIECE OF TIPPET, and treating it as one is why a fly
+       that is simply dropped arrives like a stone. dragK above is a CYLINDER
+       coefficient, and airDrag splits a node's motion into the part across the
+       line and the part along it — across gets the full coefficient, along gets
+       2.7% of it, which is right for a smooth filament and catastrophically
+       wrong for the thing tied to the end of it. A fly falling straight down
+       under a leader that is hanging straight down is moving almost entirely
+       ALONG the line, so it was falling at 2.7% drag: two metres of drop
+       reached 6 m/s, over the 4.5 m/s splash limit, and every delivery slapped.
+       A hackled dry is a bluff body about a centimetre across and it does not
+       care which way it is pointing, so it gets an ISOTROPIC term of its own
+       on top. 0.5*rho*Cd*A/m with Cd 1.0 over a 10 mm disc: terminal velocity
+       works out at 2.1 m/s, which is about what you see watching one land, and
+       comfortably under the splash limit. It costs nothing on the cast, where
+       the fly is being dragged sideways and was already paying full drag. */
+    if(i===0) flyDragK=0.5*1.2*1.0*(Math.PI*FLY_R*FLY_R)/m;
     lineEI[i]=(s<P.leaderLen?3.0e9:2.0e7)*Math.PI*Math.pow(pr[1],4)/64;
   }
   if(hooked&&hooked.state==='hooked') invM[0]=0;   /* fish drives the fly node */
@@ -1982,6 +2063,16 @@ function airDrag(i,h){
   nx*=fN;ny*=fN;nz*=fN;
   const vt2=vt*fT;
   vel[p]=nx+vt2*tx;vel[p+1]=ny+vt2*ty;vel[p+2]=nz+vt2*tz;
+  /* and the fly's own bluff-body drag, which has no preferred direction — see
+     the note in rebuildMasses. Applied after the cylinder split rather than
+     folded into it, because the two are different shapes on the same node. */
+  if(i===0&&flyDragK>0&&P.flyDrag>0.001){
+    const sp=Math.sqrt(vel[p]*vel[p]+vel[p+1]*vel[p+1]+vel[p+2]*vel[p+2]);
+    if(sp>1e-6){
+      const f=1/(1+flyDragK*P.flyDrag*sp*h);
+      vel[p]*=f;vel[p+1]*=f;vel[p+2]*=f;
+    }
+  }
 }
 const RIDE=0.010, BREAK=2.6;
 /* ── HOW A SINKING FLY TAKES THE LINE DOWN ─────────────────────────────
@@ -2601,9 +2692,23 @@ float surfY(float x){
 }`; }
 let GLSL_SURF=buildSurfGLSL();
 
+const BED_LEN=300;
+/* wide enough to hold the widest canyon any venue asks for: the drift's wall
+   axis swings 12 m, its foot is 17 m out from that, and its rim reaches 17.8 m
+   — which at three to one is 5.9 m of run, so the far edge of the rock is 35 m
+   off the river axis. 80 gives 40 either side. */
+const BED_WID=80;
 let bedGeo,bedPosAttr,bedMat=null,bedShader=null,bedMesh=null,waterMesh=null;
 {
-  bedGeo=new THREE.PlaneGeometry(170,64,180,74);
+  /* LONG ENOUGH TO COVER A LAP PLUS WHAT YOU CAN SEE FROM EITHER END OF IT.
+     A looping reach confines you to [-loop/2,+loop/2] — 96 m for the drift —
+     and the ground has to reach the sightline beyond that in both directions
+     or it ends in mid-air at one end of the lap. 300 m gives 150 m either side
+     of the origin: 102 m of ground ahead at the very worst place to stand,
+     which the canyon walls and the fog have long since closed off. The cost is
+     one longer mesh in one draw call, and it buys a join with nothing moving
+     across it at all. */
+  bedGeo=new THREE.PlaneGeometry(BED_LEN,BED_WID,Math.round(BED_LEN/0.944),Math.round(BED_WID/0.865));
   bedGeo.rotateX(-Math.PI/2);bedGeo.translate(0,0,CZ);
   const pa=bedGeo.attributes.position,col=[];
   for(let i=0;i<pa.count;i++) col.push(1,1,1);
@@ -3159,7 +3264,7 @@ function placeGrass(){
     const z=CZ+SC.dz(sx)+s.side*(SC.hw(sx)+s.off);
     const y=bedY(sx,z);
     /* keep it out of the water: anything the river would be standing in is bare */
-    const dry=y>surfY(sx)+0.01;
+    const dry=y>surfY(sx)+0.01&&!onWall(sx,z);
     _gP.set(sx,y-0.02,z);
     _gQ.setFromAxisAngle(new THREE.Vector3(0,1,0),s.yaw);
     _gS.setScalar(dry?s.sc:0.0001);
@@ -3242,7 +3347,7 @@ function placeTrees(){
        you costs exactly as much as one in front unless it is scaled away */
     const dx=sx-_scatterX, dz=z-_scatterZ;
     const near=(dx*dx+dz*dz)<rng2;
-    const ok=i<n&&near&&y>surfY(sx)+0.06;
+    const ok=i<n&&near&&y>surfY(sx)+0.06&&!onWall(sx,z);
     _gP.set(sx,y-0.05,z);
     _gQ.setFromEuler(_treeE.set(s.lean,s.yaw,s.lean*0.7,'YXZ'));
     _gS.setScalar(ok?s.sc:0.0001);
@@ -3605,7 +3710,7 @@ function placeRocks(){
     const sub=surfY(sx)-y;
     const dxr=sx-_scatterX, dzr=z-_scatterZ;
     const nearR=(dxr*dxr+dzr*dzr)<P.treeRange*P.treeRange;
-    const ok=nearR&&(s.inRiver?(sub<s.r*1.9&&sub>-0.05):(y>surfY(sx)-0.05));
+    const ok=nearR&&(s.inRiver?(sub<s.r*1.9&&sub>-0.05):(y>surfY(sx)-0.05))&&!onWall(sx,z);
     _gP.set(sx,y+s.r*0.34,z);
     _gQ.setFromAxisAngle(_gAxis.set(0,1,0),s.yaw);
     _gS.set(s.r,s.r*(0.62+s.tone*0.35),s.r*(0.82+s.tone*0.3));
@@ -3988,7 +4093,11 @@ const waterMat=new THREE.ShaderMaterial({
      side where you could see the gravel through nothing at all. The z density
      is held at about 0.3 m by taking the segments up with the span, which is
      one mesh and no extra draw call. */
-  const g=new THREE.PlaneGeometry(170,30,220,100);
+  /* the surface runs the same length as the bed, for the same reason: on a
+     looping reach it has to reach the sightline from either end of the lap.
+     The x density is held at about 0.77 m by taking the segments up with the
+     span, so a longer reach is not a coarser one. */
+  const g=new THREE.PlaneGeometry(BED_LEN,30,Math.round(BED_LEN/0.773),100);
   g.rotateX(-Math.PI/2);g.translate(0,0,CZ);
   waterMesh=new THREE.Mesh(g,waterMat);
   waterMesh.renderOrder=0;waterMesh.frustumCulled=false;scene.add(waterMesh);
@@ -8138,9 +8247,10 @@ function applyVenue(id){
   speckGeo.attributes.position.needsUpdate=true;
   gsReset=2;
 
-  /* and whether you are wading it or riding it. The bed and the surface may
-     have been carried several laps downstream by the last reach; they belong
-     back where they were built before anything is measured off them. */
+  /* and whether you are wading it or riding it. The bed and the surface are
+     pinned at the origin and nothing is allowed to move them (see loopWrap),
+     but a venue swap is exactly where a stale offset would hide, so they are
+     put back before anything is measured off them. */
   if(bedMesh) bedMesh.position.set(0,0,0);
   if(waterMesh) waterMesh.position.set(0,0,0);
   if(SC.boat) boatEnter(); else boatLeave();
@@ -8917,18 +9027,20 @@ function loopWrap(){
      without this the trees and the stones stay a lap downstream until the
      drift catches up with them and the banks are bare for ten seconds. */
   placeTrees(); placeRocks(); placeGrass();
-  /* AND SO DOES THE GROUND ITSELF, which is the difference between a join you
-     cannot see and one you can. The bed and the surface are each ONE mesh a
-     hundred and seventy metres long, pinned to the middle of the reach — so
-     at the end of a lap the world ran out thirty-seven metres in front of the
-     bow, and one frame later it ran to a hundred and thirty. The river got
-     visibly longer at the join, which is exactly the tell.
-     Translating them by one lap is exact rather than approximate: the bed a
-     lap upstream IS this bed lifted by one lap's fall, so the vertices that
-     were right before the move are right after it, and the surface shader
-     reads world x for everything it draws. */
-  if(bedMesh){ bedMesh.position.x+=dx; bedMesh.position.y+=dy; }
-  if(waterMesh) waterMesh.position.x+=dx;
+  /* THE GROUND ITSELF DOES NOT MOVE, and that is deliberate — it is the one
+     thing here that gets to be seamless by construction rather than by being
+     carried carefully.
+     It used to be translated by one lap along with everything else, on the
+     reasoning that the bed a lap upstream IS this bed lifted by one lap's
+     fall. True, and useless: the bed is a FINITE mesh. Move a 170 m mesh a
+     lap upstream every lap and after one circuit it covers [-181,-11] while
+     the boat still runs [-48,+48], so from the second lap on the river and
+     the ground simply end in front of the bow and the reach drifts out into
+     nothing. That shipped, and it is the bug this comment replaces.
+     loopWrap keeps the boat inside [-L/2,+L/2] for ever, so a mesh pinned at
+     the origin and long enough to cover that span plus the sightline at each
+     end covers every lap, for ever, without moving at all — see BED_LEN. A
+     thing that never moves cannot be seen to jump. */
   /* and the solver, if it is set to follow you. The window it has spent the
      last minute developing is the window it is about to be in — same bed,
      same width, same everything — so move the frame and rebuild only the bed
@@ -9335,7 +9447,12 @@ renderer.setAnimationLoop(()=>{
       if(flyAir){
         flyAir=false;driftAcc=0;driftT=0;
         const speed=Math.hypot(vel[0],vel[1],vel[2]);
-        spawnRing(fx,fz,0.6);
+        /* The ring used to be the same ring whether the fly was lowered on or
+           thrown at the water. The sound already scaled with the arrival — the
+           picture is what said "splash" every time. A fly settling at a metre a
+           second leaves a dimple; one arriving at the splash limit throws a
+           proper ring, and above it a bigger one still. */
+        spawnRing(fx,fz,0.22+0.55*Math.min(2.0,speed/Math.max(0.5,P.splashV)));
         if(SND.ok) sndSplash(speed);
         const lastFree=Math.floor(idxAt(lineOut));
         for(const f of fishes){

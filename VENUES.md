@@ -21,6 +21,7 @@ constants and two functions read out of a descriptor:
 | `hwMax`, `dzMax`, `dMax` | bounds. `hwMax`/`dzMax` size the solver window, so they must actually bound the geometry |
 | `loop` | period in metres. Set it and the reach repeats over that distance — see *The boat drift* |
 | `boat` | `{free, row, swing, len, beam}`. Set it and you ride the reach instead of wading it |
+| `wall` | `{ax(x), out, h(x), slope}`. Canyon walls: dry bed only, so no GLSL twin and no solver cost. `out` must clear `amp + hwMax − dzAmp` or the cliff stands in the river |
 | `par{}` | the venue's own water and fish defaults |
 | `glsl` | the GLSL twin of `dz`/`hw`/`dep` |
 
@@ -148,7 +149,7 @@ you are playing, the vortices, both speck fields and the rings — and by one la
 as well, because the reach still runs downhill and the same water upstream sits 4.3 cm
 higher. Ninety-six metres of geometry drifts for as long as you want to fish it.
 
-Five rules make it hold together:
+Six rules make it hold together:
 
 1. **Every function of x has period `loop`.** The meander is one cosine at exactly
    `2π/96`, the width and the pool-riffle rhythm are two, and the GLSL twin interpolates
@@ -159,13 +160,27 @@ Five rules make it hold together:
    Everything scattered — trees, stones, grass — is folded through `loopX()` to whichever
    image of itself is nearest you, and `loopWrap()` re-lays all three at the join rather
    than waiting for the six-metre scatter threshold to notice.
-3. **The ground itself comes with you.** The bed and the surface are each one mesh 170 m
-   long pinned to the middle of the reach, so at the end of a lap the world ran out 37 m
-   ahead of the bow and a frame later ran to 130. `loopWrap()` translates both by one
-   period, and the solver window with them.
-4. **The sky does not slide.** A 200 m sphere left at the origin parallaxes against a boat
+3. **The ground itself never moves.** The bed and the surface are each one mesh pinned at
+   the origin, and it is tempting to translate them a lap along with everything else — the
+   bed a lap upstream really is this bed lifted by one lap's fall. Do that and you learn
+   what "finite mesh" means: a 170 m bed moved one lap per lap covers [−181, −11] after a
+   single circuit while the boat still runs [−48, +48], so from the second lap on the river
+   ends in front of the bow. That shipped once. Because `loopWrap()` confines the boat to
+   [−loop/2, +loop/2] for ever, the answer is length, not motion — `BED_LEN` is 300 m,
+   a 96 m lap plus 102 m of sightline at the worst place you can stand. The solver window
+   *does* move with you, and keeps its velocities, depths and foam when it does.
+4. **You cannot see far enough to check.** An open reach that runs to a hazy horizon shows
+   you the same rock twice and lets you watch the join coming, and no amount of care at the
+   seam fixes that. `SC.wall` stands the banks up into a canyon: an axis swinging 12 m where
+   the water swings 3.8, its foot 17 m out from that, 13 m of rock at three to one, and a rim
+   run up and down by three harmonics of the lap so it is a skyline and not a table. It
+   closes the view about 28 m from each apex. It is dry bed and nothing else — outside the
+   waterline, so the solver never sees it, the water shader never draws it, and `dz`, `hw`
+   and `dep` are untouched. `out` must clear `amp + hwMax − dzAmp` or the cliff stands in
+   the river; `onWall()` keeps trees, stones and grass off anything past a metre of climb.
+5. **The sky does not slide.** A 200 m sphere left at the origin parallaxes against a boat
    96 m from it; `skyMesh` is re-centred on the camera every frame instead.
-5. **The fish migrate rather than being copied.** Two images of a trout is two trout to
+6. **The fish migrate rather than being copied.** Two images of a trout is two trout to
    rise and to hook, so `loopFish()` moves each one a whole lap when his lie falls half a
    lap behind you — lie, circuit, strike memory and all, lifted by that lap's fall. The
    switch happens 48 m fore and aft, where his marker post has already dissolved (posts
@@ -174,7 +189,7 @@ Five rules make it hold together:
    a fixed 54 m of a 96 m lap: the last quarter of every lap is dead water with nothing
    rising ahead of the bow, and at the join the whole population changes ends at once.
 
-Rules 1 and 2 are checked in `smoke.mjs`. Rules 3–5 are geometry you have to look at:
+Rules 1 and 2 are checked in `smoke.mjs`. Rules 3–6 are geometry you have to look at:
 pin the boat at x=+47.95, cross the join, pin it at x=−47.95 — the same physical station
 one period on — and the two frames should differ by no more than two frames of the same
 water differ from each other.

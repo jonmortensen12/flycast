@@ -188,8 +188,9 @@ the rod you want to play a fish on, and this is the one number that lets a build
 both. Above 1 is softer under a fish, below 1 is stiffer; it moves bend only, and the
 tippet still parts at the same tension.
 
-It shipped at 1.6 and now ships at **0.30**, because the first version of it was fighting
-a bug rather than tuning a rod. `tipSoft` was **not wired into the XPBD compliance at all**:
+It shipped at 1.6, then at 0.30, and now ships at **1.00** by preference — the same rod you
+cast with, no change at the take. The history is worth keeping because the middle value was
+fighting a bug rather than tuning a rod. `tipSoft` was **not wired into the XPBD compliance at all**:
 `rodAlpha[i]` was computed from the raw second moment `rodIabs[i]`, so the whole taper ran
 at full physical stiffness and the one number meant to shape it did nothing. Turning
 `Playing flex` down to 0.01 therefore still gave a floppy rod, which is exactly what the
@@ -202,10 +203,16 @@ rodAlpha[i] = Math.pow(ROD_SEG,3) / (4 * Math.max(1e6, P.rodE*1e9) * Ie);
 
 — so `tipSoft` 1 is the true 484:1 taper over 11 joints and lower values compress it toward
 a uniform blank. With that live, 1.6 was a rod folded in half: the game's loads are far
-past what a 5wt fights (a 40 N tippet against a fish a real 5wt would meet at 5–10 N), so
-the honest setting is *stiffer* under load, not softer. Measured on a pinned-load rig, the
-shipped 0.30 bends 44.6° where 1.0 bends 73.1°, and still holds the fish where the drift
-says it should be.
+past what a 5wt fights (a 40 N tippet against a fish a real 5wt would meet at 5–10 N).
+Measured on a pinned-load rig, 0.30 bends 44.6° where 1.00 bends 72–74°, and carries 18.5 N
+of an 18 N pull where 1.00 carries 14–16 N — so about a fifth of what you are holding goes
+into bending the blank rather than into moving the fish.
+
+That cost is real, and it is the reason to reach for this knob. It is not, however, why a big
+fish was unlandable — the reel gate and the drag below were. With those fixed, a trout at
+**2× Fish size** comes in at 1.00 as readily as at 0.30 (`smoke.mjs` gains 5.6 m of line at a
+peak of 10.4 N against a 40 N tippet). So 1.00 ships, and lowering it is how you buy lifting
+power when you want it.
 
 Rod damping targets the **deformation** velocity — each node against the velocity it would
 have if the rod were rigid with the hand, with ω recovered from the two driven nodes as
@@ -428,6 +435,21 @@ back from a cranking angler at all. The drag now slips whether or not you are cr
 if (hooked && !rodPinch && fishTension > thr && offSpool < TOTAL_LINE) { ... }
 ```
 
+**The fly is not a piece of tippet.** `airDrag()` splits a node's motion into the part across
+the line and the part along it, and gives the along part 2.7% of the coefficient — right for a
+smooth filament, and badly wrong for the thing tied to the end of it. A fly falling straight
+down under a leader that is hanging straight down is moving almost entirely *along* the line,
+so it was falling at 2.7% drag: measured on that geometry it reached 52 m/s given the room,
+and a couple of metres of drop already put it past the 4.5 m/s `splashV` — which is why a fly
+that was only ever lowered onto the water still slapped down and put fish off. A hackled dry
+is a bluff body a centimetre across and does not care which way it is pointing, so node 0 gets
+an **isotropic** term of its own on top of the cylinder one: `0.5·ρ·Cd·A/m` over a 10 mm disc
+at Cd 1.0, which measures out at a 2.09 m/s terminal velocity. `flyDrag` scales it. It costs
+almost nothing on the cast, where the fly is travelling across the leader and was already
+paying full drag; what it changes is how a fly *arrives*. The landing ring is scaled by
+arrival speed for the same reason — the sound always was, and the picture was the half that
+said "splash" every time.
+
 Ships at `reelPower` 30, `spoolDrag` 9, `lineStretch` 60, `tippet` 40. Between the three
 — the gate closing at 30 N, the drag slipping at 9, and the rod actually bending — a trout
 at **2× Fish size** now comes to the net instead of sitting out of reach: `smoke.mjs` puts
@@ -615,20 +637,46 @@ What the join has to move is everything that is *in your hands* and everything t
   depths and the foam**, because the window it spent the last minute developing is the window
   it is about to be in. On a looping reach this happens whether or not `gridFollow` is set —
   a window pinned to world coordinates is a window the boat has just left;
-- **the ground itself**, which is the difference between a join you cannot see and one you
-  can. The bed and the surface are each *one* mesh 170 m long pinned to the middle of the
-  reach, so at the end of a lap the world ran out 37 m in front of the bow and one frame
-  later ran to 130 — the river visibly got longer at the join. Translating them by one lap
-  is exact rather than approximate: the bed a lap upstream *is* this bed lifted by one lap's
-  fall, and the surface shader reads world x for everything it draws;
 - **the bank scatter**, re-laid at the join rather than left to the six-metre threshold that
   normally triggers it. `_scatterX` moves with the boat, so without an explicit `placeTrees()`
   / `placeRocks()` / `placeGrass()` the threshold is never crossed and the banks stay a lap
   downstream — bare for ten seconds until the drift catches up with them.
 
-And one thing moves the other way. **The sky does not slide**: a 200 m sphere sitting at the
-origin parallaxes badly against a boat 96 m away from it, so `skyMesh` is re-centred on the
-camera in x and z every frame. A sky that jumps is as much of a tell as a river that does.
+**And the ground itself does NOT move — that is the point of it.** This one was got wrong
+once in exactly the way that looks right. The bed and the surface are each a *single* mesh
+pinned at the origin, and the reasoning that they should be translated a lap along with
+everything else is sound as far as it goes: the bed a lap upstream really is this bed lifted
+by one lap's fall. What it forgets is that the mesh is **finite**. Move a 170 m mesh one lap
+upstream every lap and after a single circuit it covers [−181, −11] while the boat still runs
+[−48, +48] — so from the second lap on, the river and the ground simply end in front of the
+bow and the reach drifts out into nothing. That shipped, and it is what "the ground detail
+disappears after the first loop" was.
+
+`loopWrap()` keeps the boat inside [−loop/2, +loop/2] for ever, so the fix is not to move the
+ground more cleverly but to make it long enough never to need moving: `BED_LEN` is 300 m,
+which covers the 96 m lap plus 102 m of sightline at the worst place you can stand. A thing
+that never moves cannot be seen to jump, and the join gets the one guarantee no amount of
+careful carrying can give it.
+
+And one thing does move, the other way. **The sky does not slide**: a 200 m sphere sitting at
+the origin parallaxes badly against a boat 96 m away from it, so `skyMesh` is re-centred on
+the camera in x and z every frame. A sky that jumps is as much of a tell as a river that does.
+
+**The canyon.** The last thing wrong with the join was not at the join: it was that you could
+see 200 m down an open reach, which shows you the same rock twice and lets you watch the seam
+coming. `SC.wall` stands the banks up into something you cannot see past — an axis that swings
+12 m where the water only swings 3.8, a foot 17 m out from that, and 13 m of rock at three to
+one with the rim run up and down by three harmonics of the lap so it reads as a skyline rather
+than a table. Measured off the geometry, it closes the view at about 28 m from each apex.
+
+It is deliberately **not** part of the channel. The wall stands outside the waterline, so it
+is dry bed: the solver never sees it (its window is sized off `hwMax`/`dzMax` and stops far
+short), the water shader never draws it, and `dz`, `hw` and `dep` — which the fish, the drift
+and the loop's periodicity all rest on — are untouched. `out` has to clear the widest the
+water ever gets on the swing (`amp + hwMax − dzAmp` = 16.4 m, hence 17) or the cliff would
+stand in the current. Nothing scatters up it: `onWall()` keeps trees, stones and grass off
+anything past a metre of climb, because a conifer growing out of a rock face at 45° reads as
+a bug.
 
 What is **not copied** is the fish. Six of them is the whole population, they are the reason
 to come round again, and giving each an image a lap up and a lap down would mean eighteen

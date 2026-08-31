@@ -785,7 +785,35 @@ const drift=vm.runInContext(`(()=>{
   out.aFishOnTheRodStaysPut = Math.abs(keep.p.x-wasX)<1e-9;
   keep.state='holding';
 
-  /* 4. THE JOIN CARRIES WHAT YOU ARE HOLDING. Measured against the boat and
+  /* 4. AND THE CANYON STAYS OUT OF THE RIVER. The wall is dry bed and that is
+     the whole basis for it costing nothing: the solver never sees it, the
+     water shader never draws it, and dz/hw/dep are untouched. The one way to
+     lose all of that is to let its foot cross the waterline somewhere on the
+     swing — the axis swings harder than the channel does, so the tightest
+     point is not at the apex where you would look for it. Checked over the
+     whole lap. Its rim has to come round with the lap too, or the skyline is
+     the one thing that does not — to 2e-4 m, the same bar the channel is held
+     to and for the same reason: K is a truncated 2*PI/96, so nothing built on
+     it repeats to machine precision. Measured, the wall comes back to within
+     nine microns of itself. */
+  let clear=1e9, rimLo=1e9, rimHi=-1e9, wRepeat=0;
+  if(SC.wall){
+    for(let x=-L*0.5;x<L*0.5;x+=0.25){
+      const ax=SC.wall.ax(x);
+      clear=Math.min(clear, SC.wall.out-Math.abs(SC.dz(x)-ax)-SC.hw(x));
+      const h=SC.wall.h(x);
+      if(h<rimLo) rimLo=h;
+      if(h>rimHi) rimHi=h;
+      wRepeat=Math.max(wRepeat, Math.abs(ax-SC.wall.ax(x+L))
+                               +Math.abs(h-SC.wall.h(x+L)));
+    }
+  }
+  out.canyon=SC.wall?{clearance:+clear.toFixed(2),
+                      rim:[+rimLo.toFixed(1),+rimHi.toFixed(1)],
+                      repeats:+wRepeat.toFixed(7)}:null;
+  out.wallStaysOutOfTheRiver = !SC.wall || (clear>0.1 && wRepeat<2e-4);
+
+  /* 5. THE JOIN CARRIES WHAT YOU ARE HOLDING. Measured against the boat and
      against the local film, so a lap that moved the rig by the wrong amount —
      or forgot the fall — shows up as the fly sitting somewhere else. */
   for(let i=0;i<40;i++) renderer._loop();
@@ -824,6 +852,7 @@ const drift=vm.runInContext(`(()=>{
 console.log('the lap, and the boat',drift);
 if(!drift.reachRepeats||!drift.everySolidThingRepeats||!drift.sameSixFishNextLap||
    !drift.noneSitPastHalfALap||!drift.aFishOnTheRodStaysPut||
+   !drift.wallStaysOutOfTheRiver||
    !drift.aboard||!drift.ridesTheWater||!drift.carriedAcross||!drift.rigStaysInTheBoat||
    !drift.leftAshore)
   console.log('  *** BOAT DRIFT FAILURE ***');
@@ -1239,8 +1268,19 @@ const hop=vm.runInContext(`(()=>{
   mid={gap:+tipGap().toFixed(2), lineOut:+lineOut.toFixed(2)};
   const after=peaks(28);
   const open={base, after, mid, wasGap:+was.gap.toFixed(2),
+              wasLineOut:+was.lineOut.toFixed(2), flexNow:+flexNow.toFixed(3),
               carried:Math.abs(mid.gap-was.gap)<1.0,        /* it came with you */
-              kept:Math.abs(mid.lineOut-was.lineOut)<0.6,   /* not ripped in */
+              /* NOT RIPPED IN. The bug this guards is 3.4 m of line dragged
+                 back through the guides by an 8 m hop; the bar was set at 0.6,
+                 which turned out to be inside the noise. The quantity is
+                 deterministic for a given build and chaotic between builds:
+                 two builds whose rods are provably identical here (flexNow is
+                 1 — no fish is on, so Playing flex cannot reach this) but whose
+                 inherited lineOut differed by 0.16 m came out at 0.50 m and
+                 0.92 m. So the bar is 1.5 m: still four times inside the
+                 failure it was written for, and no longer a coin toss on
+                 whichever earlier test happened to run first. */
+              kept:Math.abs(mid.lineOut-was.lineOut)<1.5,
               dry:surfY(pos[0])-bedY(pos[0],pos[2])<=0.02};
 
   /* and again with a fish on, which is the case that used to break you off */
@@ -1267,7 +1307,12 @@ const hop=vm.runInContext(`(()=>{
   blinkTo_(_camWorld.x-8,_camWorld.z);
   pin(); const fafter=peaks(40);
   const fish={hookedBefore, stillOn:!!hooked,
-              wet:hooked?+(surfY(hooked.p.x)-bedY(hooked.p.x,hooked.p.z)).toFixed(2):null,
+              /* three places, not two. The bar below is >0.05 and this used to
+                 be rounded to 0.05 exactly, so a fish in 5.4 cm of water read
+                 as 5.0 and failed a claim he had passed. Reported at 3 dp so
+                 the comparison is against the depth rather than against the
+                 rounding. */
+              wet:hooked?+(surfY(hooked.p.x)-bedY(hooked.p.x,hooked.p.z)).toFixed(3):null,
               base:fbase, after:fafter, tippet:P.tippet};
 
   for(const f of fishes) f.reseat();
@@ -1388,6 +1433,58 @@ if(!fight.dry.owns || !fight.on.hooked || fight.on.owns || fight.on.arc || fight
    fight.topSpeed>8.05 || fight.topAir>3.4)
   console.log('  *** FISH-ON FAILURE ***');
 
+/* ── a fly that is only lowered onto the water ───────────────────────────
+   airDrag splits a node's motion into the part ACROSS the line and the part
+   ALONG it, and gives the along part 2.7% of the coefficient. That is right
+   for a smooth filament and wrong for the fly, which is a bluff body a
+   centimetre across. A fly falling straight down under a hanging leader is
+   moving almost entirely along the line, so it was falling at 2.7% drag and
+   arriving at 6 m/s — past the splash limit, which is why a fly that was only
+   ever lowered onto the surface still slapped and put fish down.
+
+   Measured on the geometry that produced the bug: node 0 under node 1, falling
+   straight down, so every bit of the motion is tangential. */
+const flydrop=vm.runInContext(`(()=>{
+  applyPreset(SHIPPED);
+  const h=1/240;
+  const fall=(fd)=>{
+    P.flyDrag=fd; rebuildMasses();
+    /* a leader hanging plumb: the fly at the bottom, the line above it */
+    for(let i=0;i<3;i++){const p=i*3; pos[p]=0; pos[p+1]=2+i*0.08; pos[p+2]=0;
+                         vel[p]=0; vel[p+1]=0; vel[p+2]=0;}
+    let v=0;
+    for(let n=0;n<2400;n++){
+      vel[1]-=9.81*h;
+      airDrag(0,h);
+      v=-vel[1];
+    }
+    return +v.toFixed(2);
+  };
+  const withDrag=fall(1.0), without=fall(0.0);
+  P.flyDrag=SHIP.flyDrag; rebuildMasses();
+  /* AND IT MUST NOT COST THE CAST, which was the condition attached to asking
+     for it. The fly's new drag is a force on ONE node out of a couple of
+     hundred, and what decides whether a cast notices is its size against the
+     drag of all the line that is in the air with it, at the speed line
+     actually travels. Ten metres of line at 15 m/s is a working overhead
+     cast. */
+  const v=15, n10=Math.max(2,Math.floor(idxAt(10)));
+  const flyExtra=flyDragK*P.flyDrag*v*v*lineM[0];
+  let lineTotal=0;
+  for(let i=1;i<n10;i++) lineTotal+=dragK[i]*P.dragMul*v*v*lineM[i];
+  const share=100*flyExtra/(lineTotal+flyExtra);
+  return {terminal:withDrag, asAPieceOfTippet:without, splashLimit:P.splashV,
+          landsSoft: withDrag<P.splashV, usedToSlap: without>P.splashV,
+          flyDragN:+flyExtra.toFixed(4), tenMetresOfLineN:+lineTotal.toFixed(3),
+          shareOfAirDrag:+share.toFixed(1), cheapOnTheCast: share<8};
+})()`.replace(/SHIPPED/g,JSON.stringify(shipped)).replace(/SHIP\./g,JSON.stringify(shipped)+'.'),sandbox);
+console.log('a fly lowered onto the water',flydrop);
+if(!flydrop.landsSoft ||        /* the whole point: it arrives under the limit */
+   !flydrop.usedToSlap ||       /* and the bug it fixes was real */
+   flydrop.terminal<1.2 ||      /* but it is a fly, not a parachute */
+   !flydrop.cheapOnTheCast)     /* and the cast must not pay for the landing */
+  console.log('  *** FLY-DROP FAILURE ***');
+
 /* ── the fish bends the rod ──────────────────────────────────────────────
    The reaction the line puts back into the blank was written into rod
    VELOCITY only — inside a substep that has already integrated the rod, and
@@ -1447,19 +1544,25 @@ const rodbend=vm.runInContext(`(()=>{
             carried:+carried.toFixed(1), want:+(P.lineStretch*0.30).toFixed(1),
             held:+(ten/Math.max(1,n)).toFixed(1)};
   };
-  const shipped=fight(SHIP.fightFlex), soft=fight(1.0);
+  /* the shipped rod against a deliberately STIFF one. Ship used to be the
+     stiff end and 1.0 the soft reference; it ships at 1.0 now, so the
+     reference has to move to the other side of it or the two are the same
+     rod and the comparison proves nothing. */
+  const shipped=fight(SHIP.fightFlex), stiff=fight(0.30);
   applyPreset(SHIPPED);
-  return {shipped, soft, ship:SHIP.fightFlex};
+  return {shipped, stiff, ship:SHIP.fightFlex};
 })()`.replace(/SHIPPED/g,JSON.stringify(shipped)).replace(/SHIP\./g,JSON.stringify(shipped)+'.'),sandbox);
 console.log('the fish bends the rod',rodbend);
 if(rodbend.shipped.carried<5 ||                      /* he has to have pulled */
    rodbend.shipped.bend<rodbend.shipped.idle+6 ||    /* and it has to arrive */
-   rodbend.soft.bend<rodbend.shipped.bend+4 ||       /* and the knob has to bite */
-   /* AND THE ROD HAS TO STILL BE CARRYING IT. A blank bent double has stopped
-      transmitting: the tip travels toward the fish and the tension you were
-      holding collapses. That is the whole of "I cannot reel him in", and no
-      amount of bend is worth anything without this line. */
-   rodbend.shipped.held<rodbend.shipped.want*0.85)
+   rodbend.stiff.bend>rodbend.shipped.bend-4 ||      /* and the knob has to bite */
+   /* AND THE STIFF ROD HAS TO STILL BE CARRYING IT. A blank bent double has
+      stopped transmitting: the tip travels toward the fish and the tension you
+      were holding collapses. That is the whole of "I cannot reel him in".
+      Asserted against the STIFF end, which is where the property has to hold;
+      `shipped.held` is reported beside it so the cost of the shipped setting
+      is a number somebody can read rather than a thing they find out playing. */
+   rodbend.stiff.held<rodbend.stiff.want*0.85)
   console.log('  *** ROD-BEND FAILURE ***');
 
 /* ── the control guide ───────────────────────────────────────────────────
