@@ -73,6 +73,34 @@ The table is declared above `SCENES` for this reason, and a venue names a look r
 carrying a copy of five colour channels that would drift from it the first time anybody
 tuned one. A `par` entry of its own still wins, and the **Water looks** row still cycles.
 
+### How much of the bed you can see
+
+The named looks each carry their own `clarity` AND `waterOpaque`, so spreading one into a
+venue's `par` silently replaced whatever that reach had — every venue went soupy at once
+and the Beaver Pond became opaque. Reported from the water, and this round's own doing.
+
+Both keys are now set per venue **after** the spread, which is the half that matters: an
+object literal resolves later keys last, and the first attempt put them BEFORE the spread
+where the look simply overwrote them again. If you add a venue, put its water values after
+its `...LOOK[...]`, or they will not take.
+
+| venue | opacity | clarity |
+|---|---|---|
+| Cedar Run | 0.35 | 1.0 |
+| Boulder Garden | 0.30 | 2.0 |
+| Stairstep Falls | 0.20 | 2.6 |
+| Meadow Glide | 0.40 | 1.5 |
+| The Long Run | 0.20 | 4.2 |
+| Undercut Bend | 0.30 | 1.5 |
+| Beaver Pond | 0.10 | 1.25 |
+| Alder Tunnel | 0.30 | 1.8 |
+| Boat Drift | 0.25 | 2.4 |
+
+**Clarity** is the physical control — how fast light dies with depth, which is why it
+drives colour saturation as well as opacity, and it stays the look's business because it
+is what gives a reach its character. **Water opacity** is a plain multiplier on top, and
+it is the one that decides how much gravel you get to count.
+
 ### Two reaches that were wrong in the water
 
 **The Beaver Pond had five boulders in it and now has none.** They were meant to be drowned

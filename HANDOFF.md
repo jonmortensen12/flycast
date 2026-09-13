@@ -1327,6 +1327,53 @@ Recorded because each one was mis-diagnosed at least once.
    Twice over, here: once for the 59 N break it had been reporting all along, and once for
    the hole in the fix, which announced itself the same way.
 
+28. **A rock was solid to the line and to nothing else.** Reported as a hooked fish
+   swimming straight through a boulder, and it was never there: every path that moves a
+   fish — holding, cruising, rising, striking, chasing, and running with the hook in —
+   wrote to `p` with no obstacle test at all. The only OBST checks a fish ever did were
+   `fitZone`, which decides the shape of his window, and `pickBank`, which is where a
+   landed one rests. `clearRock()` pushes him out of the same ellipsoid the line is
+   pushed out of, and is called once at the end of `update()` and once in `step()` after
+   the hooked integration — one place each, rather than inside the six movers, so a
+   seventh mover cannot be written that forgets. Nothing pushes him UP over a crown: a
+   trout goes round a boulder, not over it.
+
+29. **The line hinged at the surface, twice reported and one cause.** Fighting a fish
+   holding deep, the line ran flat along the surface and then turned a corner to reach
+   him; stripping a sinking line back on the pond did the same. The film clamp released
+   only the last `tippetLen*1.3` of line and pinned everything beyond it to the surface,
+   so the whole change of direction had to happen at one node. A line under load is not
+   floating on the water, it is being pulled through it, so the hold is now released by
+   how hard it is being pulled — at about six newtons the film has let go entirely and
+   the geometry between tiptop and fish is whatever the solver says, which is straight.
+   Slack line still lies on the surface, which is what the clamp is for.
+
+30. **A plunge pool that did not slow the water down.** Reported as Stairstep Falls
+   reading like a rapid: the tongue comes off the lip fast and keeps that speed straight
+   through the pool, so a fly is gone before it can be presented. Two causes.
+
+   `analyticFlow` is Manning's, where `d^(2/3)` makes deeper water FASTER. That is right
+   for uniform flow, where depth is set by the slope, and exactly wrong for a scour hole,
+   which is extra cross-section with no extra water going through it — there continuity
+   decides, and `Q = v x A` means a hole twice as deep as the run feeding it runs about
+   half as fast. The formula is now asked what the depth around this station is and
+   scaled by how much deeper the station is than its own neighbourhood, so an even reach
+   is untouched and only a genuine hole slows.
+
+   And the reason the analytic field was answering at all: `gridFollow` ships 0, pinning
+   the solved window to the middle of the reach, and Stairstep Falls has six lips across
+   ninety metres against a 56 m window. The outer four plunge pools were never solved.
+   That venue now follows the angler, so the real shallow-water solve is under whichever
+   pool is being fished.
+
+31. **Two settings that were doing nothing, and one that lied.** `Reel colour` tinted the
+   2 cm rim standing BEHIND the two painted face discs that are the whole visible reel;
+   `Grip colour` tinted the metal reel seat rather than the cork, at 0.72 metalness where
+   a hue barely registers and mostly under your hand. Both worked and neither could be
+   seen. And `Line colour`'s help claimed a dull line is "easier on a fish in clear
+   water", which is false — nothing in the take or spook logic reads line colour, and the
+   help now says so and names what does (line landing near him, and species wariness).
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock

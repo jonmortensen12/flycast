@@ -272,7 +272,7 @@ const MENU=[
   ['Fly size','flySize',0.50,4.00,0.10,'Visual only. Scales the fly and its hi-vis post.'],
   ['Rod colour','rodHue',0,7,1,'The blank: 0 graphite, 1 olive, 2 claret, 3 blue, 4 sand, 5 forest, 6 slate, 7 orange.'],
   ['Reel colour','reelHue',0,7,1,'The reel frame and spool, same eight.'],
-  ['Line colour','lineHue',0,7,1,'The fly line. Bright is easier to track in the air; dull is easier on a fish in clear water.'],
+  ['Line colour','lineHue',0,7,1,'The fly line, and nothing but the look of it \u2014 no fish in this game can see what colour your line is, and none of them care. Bright is easier for YOU to track in the air. 0 leaves it the shipped orange. What actually puts a fish down is line landing near him (Line radius) and how wary his species is.'],
   ['Grip colour','gripHue',0,7,1,'The winding check and reel seat below the cork.'],
   ['Haptics','haptics',0.00,2.00,0.10,'Vibration strength for rod load, fish tension, and spool clicks.'],
   ['— SOUND —',null,0,0,0,''],
@@ -597,7 +597,15 @@ float scDep(float x,float zr){return 1.5*scCross(zr/7.0)*(0.55+0.45*sin(x*0.13+1
   lies:[{x:-2.0,z:1.8,len:0.40},{x:-6.2,z:2.4,len:0.32},
         {x:4.8,z:-2.0,len:0.46},{x:7.4,z:1.0,len:0.35}],
   spawn:{x:0,z:0},
-  par:{}
+  par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
+       that is this round's own doing — a named water look carries its own
+       clarity AND waterOpaque, so spreading one into par overwrote whatever
+       the venue had. Clarity is the honest control and stays the look's
+       business, because it is what gives each reach its colour; opacity is
+       the override that decides how much bed you get to see, and it is now
+       set per venue rather than inherited. Low across the board, on purpose. */
+       waterOpaque:0.35, 
+       }
 };
 
 /* ── 02 BOULDER GARDEN ────────────────────────────────────────
@@ -644,7 +652,16 @@ float scDep(float x,float zr){
   return d;}`,
     obst:rocks,
     lies:bLies,
-    par:{...LOOK['overcast steel'],
+    par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
+       that is this round's own doing — a named water look carries its own
+       clarity AND waterOpaque, so spreading one into par overwrote whatever
+       the venue had. Clarity is the honest control and stays the look's
+       business, because it is what gives each reach its colour; opacity is
+       the override that decides how much bed you get to see, and it is now
+       set per venue rather than inherited. Low across the board, on purpose. */
+       
+       ...LOOK['overcast steel'],
+       waterOpaque:0.30, clarity:2.00,
        grade:1, current:0.85, gridCell:0.30, gridSpan:52, obstHeight:0.95,
          vortex:0.9, foam:0.35, takeRadius:0.45, maxSlip:0.42, riseAggro:0.55,
          speckRange:26,
@@ -703,10 +720,29 @@ float scDep(float x,float zr){
           {x:-4,z:-3.6,r:1.00,h:1.55,kind:'rock',sh:0,sgn:-1},
           {x:14,z:3.0,r:0.80,h:1.30,kind:'rock',sh:0,sgn:1},
           {x:32,z:-3.2,r:0.95,h:1.45,kind:'rock',sh:0,sgn:-1}],
+    /* Two of these sit in the RECIRCULATION behind a boulder — the pocket of
+       water that turns back upstream, which analyticFlow produces on its own
+       (see the obstacle term: behind a rock vx is cut and can go negative).
+       Asked for from the water: "the big pool that swirls around behind the
+       rock is a really interesting place, we should have fish in there". They
+       are placed a little over a radius downstream and off to the flank,
+       which is where the eddy actually is rather than in the dead spot on the
+       centreline directly behind the stone. */
     lies:[{x:-40.0,z:0.6,len:0.38},{x:-22.5,z:-1.8,len:0.34},
+          {x:-19.6,z:4.1,len:0.44},          /* eddy behind the -22 boulder */
           {x:-3.0,z:1.2,len:0.50},{x:14.5,z:-1.0,len:0.42},
+          {x:16.6,z:3.6,len:0.40},           /* eddy behind the +14 boulder */
           {x:31.0,z:0.8,len:0.36}],
-    par:{...LOOK['deep blue'],
+    par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
+       that is this round's own doing — a named water look carries its own
+       clarity AND waterOpaque, so spreading one into par overwrote whatever
+       the venue had. Clarity is the honest control and stays the look's
+       business, because it is what gives each reach its colour; opacity is
+       the override that decides how much bed you get to see, and it is now
+       set per venue rather than inherited. Low across the board, on purpose. */
+       
+       ...LOOK['deep blue'],
+       waterOpaque:0.20, clarity:2.60,
        grade:1, current:0.62, gridCell:0.32, gridSpan:56, foam:0.55,
          foamLife:3.0, vortex:1.1, surfWave:0.9, waveShade:0.9,
          riseAggro:0.65, takeRadius:0.8,
@@ -737,7 +773,16 @@ float scDep(float x,float zr){return 1.05*pow(max(scCross((zr-scDz(x))/scHw(x)),
         {x:4,z:-1.2,len:0.52},{x:19,z:2.0,len:0.40},{x:34,z:-2.4,len:0.38}],
   weeds:[{x:-32,z:-2.2,r:2.4},{x:-18,z:2.6,r:2.0},{x:-2,z:-1.4,r:2.8},
          {x:12,z:2.2,r:2.2},{x:27,z:-2.6,r:2.5},{x:40,z:1.8,r:2.3}],
-  par:{...LOOK['chalk stream'],
+  par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
+       that is this round's own doing — a named water look carries its own
+       clarity AND waterOpaque, so spreading one into par overwrote whatever
+       the venue had. Clarity is the honest control and stays the look's
+       business, because it is what gives each reach its colour; opacity is
+       the override that decides how much bed you get to see, and it is now
+       set per venue rather than inherited. Low across the board, on purpose. */
+       
+       ...LOOK['chalk stream'],
+       waterOpaque:0.40,
        grade:1, current:0.55, gridCell:0.45, gridSpan:70, vortex:0.15,
        foam:0.02, clarity:1.5, sediment:0.03, specks:0.10, speckSize:0.038,
        maxSlip:0.16, takeRadius:0.55, lineRad:0.95, splashV:1.6,
@@ -765,7 +810,16 @@ float scDep(float x,float zr){
         {x:18,z:5.2,r:1.20,h:1.00,kind:'rock',sh:0,sgn:-1}],
   lies:[{x:-20,z:-4.4,len:0.44},{x:-2,z:0.4,len:0.50},
         {x:16,z:-4.8,len:0.46},{x:36,z:1.8,len:0.38},{x:50,z:-2.2,len:0.42}],
-  par:{...LOOK['chalk stream'],
+  par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
+       that is this round's own doing — a named water look carries its own
+       clarity AND waterOpaque, so spreading one into par overwrote whatever
+       the venue had. Clarity is the honest control and stays the look's
+       business, because it is what gives each reach its colour; opacity is
+       the override that decides how much bed you get to see, and it is now
+       set per venue rather than inherited. Low across the board, on purpose. */
+       
+       ...LOOK['chalk stream'],
+       waterOpaque:0.20,
        grade:1, current:1.0, gridCell:0.42, gridSpan:64, treeRange:44,
        takeRadius:0.85, maxSlip:0.28, speckRange:52, spookT:4}
 };
@@ -806,7 +860,16 @@ float scDep(float x,float zr){
      always meant to ask for. */
   lies:[{x:-27,z:-9.0,len:0.48},{x:-20.4,z:-8.0,len:0.54},
         {x:0,z:0.4,len:0.40},{x:23,z:8.8,len:0.46},{x:28,z:1.0,len:0.28}],
-  par:{...LOOK['tannic'],
+  par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
+       that is this round's own doing — a named water look carries its own
+       clarity AND waterOpaque, so spreading one into par overwrote whatever
+       the venue had. Clarity is the honest control and stays the look's
+       business, because it is what gives each reach its colour; opacity is
+       the override that decides how much bed you get to see, and it is now
+       set per venue rather than inherited. Low across the board, on purpose. */
+       
+       ...LOOK['tannic'],
+       waterOpaque:0.30, clarity:1.50,
        grade:1, current:0.95, gridCell:0.38, gridSpan:58, vortex:0.7,
        takeRadius:0.6, lineRad:0.6, riseAggro:0.45}
 };
@@ -846,7 +909,16 @@ float scDep(float x,float zr){
         {x:12,z:-2.0,len:0.38,cr:[4.5,3.0,0.20]},
         {x:-15,z:1.0,len:0.46,cr:[4.0,2.6,0.14]}],
   cruise:true, chase:true, holdDeep:2.0,
-  par:{...LOOK['tannic'],
+  par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
+       that is this round's own doing — a named water look carries its own
+       clarity AND waterOpaque, so spreading one into par overwrote whatever
+       the venue had. Clarity is the honest control and stays the look's
+       business, because it is what gives each reach its colour; opacity is
+       the override that decides how much bed you get to see, and it is now
+       set per venue rather than inherited. Low across the board, on purpose. */
+       
+       ...LOOK['tannic'],
+       waterOpaque:0.10, clarity:1.50,
        grade:1, current:0.35, gridCell:0.50, gridSpan:56, vortex:0.05,
        foam:0.0, specks:0.08, speckSize:0.040, speckRange:22, drift:1,
        clarity:1.25, sediment:0.10, surfWave:0.25, waveShade:0.35,
@@ -890,7 +962,16 @@ float scDep(float x,float zr){
             {x:-6,z:-2.4,y:1.9,r:2.0},{x:2,z:2.2,y:2.0,r:1.9},
             {x:10,z:-2.6,y:2.1,r:2.1},{x:18,z:2.4,y:1.9,r:2.0},
             {x:26,z:-2.2,y:2.0,r:1.9},{x:34,z:2.6,y:2.1,r:2.1}],
-    par:{...LOOK['overcast steel'],
+    par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
+       that is this round's own doing — a named water look carries its own
+       clarity AND waterOpaque, so spreading one into par overwrote whatever
+       the venue had. Clarity is the honest control and stays the look's
+       business, because it is what gives each reach its colour; opacity is
+       the override that decides how much bed you get to see, and it is now
+       set per venue rather than inherited. Low across the board, on purpose. */
+       
+       ...LOOK['overcast steel'],
+       waterOpaque:0.30, clarity:1.80,
        grade:1, current:0.80, gridCell:0.22, gridSpan:40, obstHeight:0.90,
          vortex:0.8, foam:0.30, treeRange:24, speckRange:16,
          takeRadius:0.40, maxSlip:0.45, riseAggro:0.60, branchOn:1}
@@ -987,7 +1068,16 @@ float scDep(float x,float zr){
        can pull on the oars, and swing is how quickly the hull comes round to
        point where it is going. */
     boat:{free:0.34, row:0.62, swing:1.4, len:4.3, beam:1.55},
-    par:{...LOOK['deep blue'],
+    par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
+       that is this round's own doing — a named water look carries its own
+       clarity AND waterOpaque, so spreading one into par overwrote whatever
+       the venue had. Clarity is the honest control and stays the look's
+       business, because it is what gives each reach its colour; opacity is
+       the override that decides how much bed you get to see, and it is now
+       set per venue rather than inherited. Low across the board, on purpose. */
+       
+       ...LOOK['deep blue'],
+       waterOpaque:0.25,
        grade:1, current:0.90, gridCell:0.50, gridSpan:84, vortex:0.5,
          foam:0.20, treeRange:42, speckRange:34, obstHeight:0.85,
          takeRadius:0.70, maxSlip:0.34, riseAggro:0.45, spookT:4}
@@ -1162,7 +1252,26 @@ function analyticFlow(x,z){
      that happening. Averaged over five metres it answers for the reach, which
      is the only thing this fallback was ever entitled to answer for. */
   const S=Math.max(1e-5,((surfY(x-2.5)-surfY(x+2.5))/5.0)*P.current*2.0);
-  const s=Math.min(8,(1/Math.max(P.manningN,0.005))*Math.pow(d,2/3)*Math.sqrt(S))*Math.pow(cross,0.35);
+  let s=Math.min(8,(1/Math.max(P.manningN,0.005))*Math.pow(d,2/3)*Math.sqrt(S))*Math.pow(cross,0.35);
+  /* A PLUNGE POOL IS SLOW, AND MANNING'S SAYS THE OPPOSITE. Reported from
+     Stairstep Falls: the water comes off the lip fast and keeps that speed
+     straight through the pool below, so the fly is gone before it can be
+     presented and the fall reads as a rapid.
+     Manning's `d^(2/3)` — deeper is faster — is a statement about UNIFORM
+     flow, where depth is set BY the slope. A scour hole is the opposite of
+     that: it is extra cross-section with no extra water going through it, so
+     continuity, not friction, decides the speed there, and Q = v x A means a
+     hole twice as deep as the run feeding it runs about half as fast.
+     So the formula above is asked what the depth AROUND here is, and the
+     answer is scaled by how much deeper this station is than its own
+     neighbourhood. A reach of even depth is untouched — every venue but this
+     one is within a few percent — and only a genuine hole slows down. */
+  {
+    let around=0;
+    for(const o of [-4.0,-2.0,2.0,4.0]) around+=Math.max(bedDepth(x+o,z),0.08);
+    around/=4;
+    if(d>around*1.15) s*=Math.pow(around/d,0.85);
+  }
   let vx=s,vz=0;
   for(let i=0;i<OBST.length;i++){
     const o=OBST[i],dx=x-o.x,dz=z-o.z,dd=Math.hypot(dx,dz)||1e-4;
@@ -2236,7 +2345,20 @@ function waterAndGround(i,h,t){
        through the feather, gone where the fly has pulled it under. At rel 0
        this is bit-for-bit the old hard clamp, so every dry-fly venue — where
        flySink is 0 and rel is 0 for every node — is untouched. */
-    const hold=Math.max(0,Math.min(1,1-rel));
+    /* A TIGHT LINE TO A FISH IS A STRAIGHT LINE. The film used to let go of
+       the last 1.2 m of tippet and clamp everything beyond it flat, so a fish
+       holding deep gave you a line that ran along the surface and then turned
+       a corner to reach him — reported twice, once fighting a deep fish and
+       once stripping a sinking line back on the pond, and it is the same
+       clamp both times.
+       A line under load is not floating, it is being pulled through the
+       surface, so the hold is released by how hard it is being pulled: at a
+       few newtons the film has stopped owning it entirely and the geometry
+       between the tiptop and the fish is whatever the solver says, which is
+       straight. Slack line still lies on the water, which is the whole point
+       of the clamp and is left alone. */
+    const tight=hooked?Math.max(0,Math.min(1,fishTension/6)):0;
+    const hold=Math.max(0,Math.min(1,1-rel))*(1-tight);
     if(sinking&&i===0){
       vel[p+1]+=(-P.flySink-vel[p+1])*Math.min(1,h*5);
     } else {
@@ -6329,6 +6451,9 @@ class Trout{
     this.p.x+=this.v.x*h; this.p.y+=this.v.y*h; this.p.z+=this.v.z*h;
     const gy=bedY(this.p.x,this.p.z)+0.06;
     if(this.p.y<gy){this.p.y=gy;if(this.v.y<0)this.v.y=0;}
+    /* before the fly is pinned to him, so the fly does not get dragged into
+       the rock he was just pushed out of */
+    this.clearRock();
     /* the fly goes wherever the fish goes */
     pos[0]=this.p.x;pos[1]=this.p.y;pos[2]=this.p.z;
     vel[0]=this.v.x;vel[1]=this.v.y;vel[2]=this.v.z;
@@ -6344,6 +6469,44 @@ class Trout{
     this.mesh.scale.setScalar(want);
     /* the card cannot be allowed to disagree with the fish it sits under */
     if(this.state==='landed'&&this.label) this.showLabel();
+  }
+  /* A ROCK IS SOLID TO A FISH TOO. It was solid to the LINE and to nothing
+     else: every path that moves a fish — holding, cruising, rising, striking,
+     chasing, and running with the hook in — wrote straight to `p` with no
+     obstacle test anywhere, so trout swam through boulders. Reported from the
+     water, and it had never been there.
+     Same ellipsoid the line is pushed out of in pushOutObstacles: radius `r`
+     across, `0.55r` (log) or `0.72r` (rock) high, centred where the solver
+     puts the crown. Called once at the end of update() rather than inside
+     each of the six movers, so there is one place a fish is made to respect
+     the river and no way to add a seventh mover that forgets. A fish half
+     his own body inside the rock is a fish shoved out to the flank by the
+     shortest route; nothing pushes him UP over a crown, because a trout goes
+     round a boulder rather than over it. */
+  clearRock(){
+    if(this.state==='landed'||this.held) return;    /* in your hands, not in the river */
+    const R=Math.max(0.10,this.len*0.28);           /* his own girth, roughly */
+    for(let o=0;o<OBST.length;o++){
+      const ob=OBST[o];
+      const cy=bedY(ob.x,ob.z)+ob.h*P.obstHeight;
+      const hy=ob.r*(ob.kind==='log'?0.55:0.72);
+      if(this.p.y>cy+hy||this.p.y<cy-hy) continue;
+      const u=(this.p.y-cy)/hy;
+      const rr=ob.r*Math.sqrt(Math.max(0,1-u*u))+R;
+      if(rr<1e-3) continue;
+      const dx=this.p.x-ob.x, dz=this.p.z-ob.z;
+      const d2=dx*dx+dz*dz;
+      if(d2>=rr*rr) continue;
+      const d=Math.sqrt(d2)||1e-4;
+      const push=rr-d;
+      this.p.x+=dx/d*push; this.p.z+=dz/d*push;
+      /* and a hooked fish loses the speed he was carrying INTO the rock, or
+         he grinds along it for as long as he holds that heading */
+      if(this.v){
+        const nx=dx/d, nz=dz/d, vn=this.v.x*nx+this.v.z*nz;
+        if(vn<0){ this.v.x-=nx*vn; this.v.z-=nz*vn; }
+      }
+    }
   }
   update(dt,t){
     this.sizeSync();
@@ -6636,6 +6799,9 @@ class Trout{
               this.feeding?0x4fd18b:0x8a8f86;
     this.marker.children[0].material.color.setHex(col);
     this.marker.children[1].material.color.setHex(col);
+    /* one place, at the end of every frame a fish had, so no mover can be
+       added later that forgets the river is solid */
+    this.clearRock();
   }
   spook(msg,mult){
     /* a brown sulks half again as long as a rainbow; a brookie is back in
@@ -7133,6 +7299,23 @@ const POST_=()=>{
       emissiveIntensity:0.6,roughness:0.6}));
   m.position.y=0.020; return m;
 };
+/* LEGS, NOT A RING. Every pattern here used a TorusGeometry for palmered
+   hackle, and at 15 mm a torus does not read as hackle — it reads as a hoop
+   somebody has threaded the fly through. Reported for the ant, the bugger,
+   the stimulator, the caddis and the Adams, which is all of them.
+   Real legs come off the thorax in pairs, angle back and down, and taper. */
+const LEGS_=(n,len,col,rake,drop)=>{
+  const g=new THREE.Group();
+  for(let i=0;i<n;i++){
+    const side=i%2?1:-1, k=Math.floor(i/2)/Math.max(1,n/2-1)-0.5;
+    const a=side*(0.75+k*0.55), y=-(drop||0.004);
+    const leg=new THREE.Mesh(new THREE.ConeGeometry(0.0009,len,4),col);
+    leg.rotation.z=Math.PI/2; leg.rotation.y=a+(rake||0);
+    leg.position.set(-k*0.006-len*0.30*Math.cos(a), y, len*0.42*Math.sin(a));
+    g.add(leg);
+  }
+  return g;
+};
 /* a hair wing: a few tapered tufts laid back over the body */
 const WING_=(n,len,rise,col,spread)=>{
   const g=new THREE.Group();
@@ -7147,10 +7330,14 @@ const WING_=(n,len,rise,col,spread)=>{
 };
 const FLIES=[
   ['Parachute Adams', {r:0.005, drag:0.10, size:1.8, sink:0}, ()=>{
+    /* the ring round the post was the worst of them: a hoop at eye level on
+       the one fly you look at most. Hackle fibres, splayed flat, instead. */
     const g=new THREE.Group();
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.011,8,6),M_(0x53514b)));
-    const h=new THREE.Mesh(new THREE.TorusGeometry(0.015,0.0032,4,12),M_(0x8d8a80,0.85));
-    h.rotation.x=Math.PI/2; h.position.y=0.006; g.add(h);
+    const b=new THREE.Mesh(new THREE.SphereGeometry(0.0095,8,6),M_(0x53514b));
+    b.scale.set(1.5,0.85,0.85); g.add(b);
+    g.add(LEGS_(8,0.017,M_(0x9a978c,0.95),0,0.0));
+    const tail=new THREE.Mesh(new THREE.ConeGeometry(0.0016,0.011,4),M_(0x8d8a80,0.95));
+    tail.rotation.z=-Math.PI/2; tail.position.x=-0.012; g.add(tail);
     g.add(POST_());
     return g;
   }],
@@ -7163,8 +7350,7 @@ const FLIES=[
     b.position.x=0.009;
     const w=new THREE.Mesh(new THREE.CylinderGeometry(0.0028,0.0028,0.010,6),M_(0x1d1c20,0.8));
     w.rotation.z=Math.PI/2;
-    const leg=new THREE.Mesh(new THREE.TorusGeometry(0.010,0.0012,3,8),M_(0x2a2620,0.95));
-    leg.rotation.x=Math.PI/2;
+    const leg=LEGS_(6,0.015,M_(0x2a2620,0.95),0,0.003);
     const dot=new THREE.Mesh(new THREE.SphereGeometry(0.0034,6,5),
       new THREE.MeshStandardMaterial({color:0xffd24a,emissive:0xff9900,
         emissiveIntensity:0.45,roughness:0.7}));
@@ -7173,25 +7359,25 @@ const FLIES=[
   }],
   ['Stimulator',      {r:0.0088, drag:0.26, size:2.1, sink:0}, ()=>{
     /* big, bushy, palmered the whole way: the one that floats over anything */
+    /* Reported: the orange body is too big and the four hoops round it are
+       the wrong thing entirely. Body down from 24 mm to 15 and thinner, the
+       hoops gone, and the elk wing — which was the part that worked — kept
+       and made the bulk of the fly. */
     const g=new THREE.Group();
-    const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0062,0.0042,0.024,7),M_(0xd4741f,0.9));
+    const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0042,0.0028,0.015,7),M_(0xd4741f,0.9));
     bod.rotation.z=Math.PI/2; g.add(bod);
-    for(let i=0;i<4;i++){
-      const h=new THREE.Mesh(new THREE.TorusGeometry(0.0092-i*0.0006,0.0022,4,10),M_(0xa9713a,0.95));
-      h.rotation.x=Math.PI/2; h.position.x=-0.010+i*0.0068; g.add(h);
-    }
-    const tail=new THREE.Mesh(new THREE.ConeGeometry(0.003,0.012,5),M_(0xb8611c,0.95));
-    tail.rotation.z=Math.PI/2; tail.position.x=-0.018; g.add(tail);
-    g.add(WING_(5,0.020,0.30,0xc8b189,1.0));
+    g.add(LEGS_(6,0.016,M_(0xa9713a,0.95),0.2,0.003));
+    const tail=new THREE.Mesh(new THREE.ConeGeometry(0.0022,0.010,5),M_(0xb8611c,0.95));
+    tail.rotation.z=-Math.PI/2; tail.position.x=-0.011; g.add(tail);
+    g.add(WING_(6,0.022,0.26,0xc8b189,0.7));
     return g;
   }],
   ['Elk hair caddis', {r:0.0065, drag:0.17, size:1.9, sink:0}, ()=>{
     const g=new THREE.Group();
-    const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0050,0.0034,0.019,7),M_(0x8a6a3c));
+    const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0038,0.0026,0.013,7),M_(0x8a6a3c));
     bod.rotation.z=Math.PI/2; g.add(bod);
-    const h=new THREE.Mesh(new THREE.TorusGeometry(0.0075,0.0020,4,10),M_(0x9c7c4c,0.95));
-    h.rotation.x=Math.PI/2; h.position.x=0.006; g.add(h);
-    g.add(WING_(6,0.023,0.16,0xcbb083,0.55));      /* the tent wing */
+    g.add(LEGS_(4,0.012,M_(0x9c7c4c,0.95),0.25,0.003));
+    g.add(WING_(7,0.024,0.16,0xcbb083,0.55));      /* the tent wing, the whole point */
     return g;
   }],
   ['Pheasant tail',   {r:0.0028, drag:0.05, size:1.5, sink:0.16}, ()=>{
@@ -7212,10 +7398,7 @@ const FLIES=[
     const g=new THREE.Group();
     const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0055,0.0040,0.022,7),M_(0x2c3a24));
     bod.rotation.z=Math.PI/2; g.add(bod);
-    for(let i=0;i<3;i++){
-      const h=new THREE.Mesh(new THREE.TorusGeometry(0.0080,0.0016,3,9),M_(0x384a2c,0.95));
-      h.rotation.x=Math.PI/2; h.position.x=-0.008+i*0.008; g.add(h);
-    }
+    g.add(LEGS_(6,0.016,M_(0x384a2c,0.95),0.15,0.004));
     const mar=new THREE.Mesh(new THREE.ConeGeometry(0.0042,0.026,6),M_(0x222d1c,0.98));
     mar.rotation.z=-Math.PI/2; mar.position.x=-0.024; g.add(mar);
     const bead=new THREE.Mesh(new THREE.SphereGeometry(0.0045,8,6),
@@ -7255,7 +7438,7 @@ const gripAnchor=new THREE.Group();
 handRig.add(reelAnchor,gripAnchor);
 let reelHandParts=null;
 /* the pieces a colour row is allowed to touch, filled in as they are built */
-let reelFrameMat=null, seatMat=null;
+let reelFrameMat=null, seatMat=null, reelFaceMat=null, corkMat=null;
 /* WHAT COLOUR EVERYTHING IS. Four rows, one function, called on a change and
    once at startup — so a preset, a URL and the phone all land here too rather
    than each knowing which mesh is which. Metal stays metal: the reel frame
@@ -7264,9 +7447,17 @@ let reelFrameMat=null, seatMat=null;
 function applyTackleColours(){
   {const [,h,sa]=hueOf('rodHue'); if(typeof rodTube!=='undefined'&&rodTube) rodTube.recolour(h,sa);}
   {const [,h,sa]=hueOf('reelHue');
-   if(reelFrameMat) reelFrameMat.color.setHSL(h,sa*0.45,0.72);}
+   /* the painted faces first, because they are the reel as far as the eye is
+      concerned; the rim and the seat come along so the whole thing matches.
+      Graphite (0) leaves the anodised aluminium as it was. */
+   const g=Math.round(P.reelHue||0)===0;
+   if(reelFaceMat) reelFaceMat.color.setHSL(h,g?0:sa*0.75,g?1:0.62);
+   if(reelFrameMat) reelFrameMat.color.setHSL(h,g?0.04:sa*0.45,0.72);
+   if(seatMat) seatMat.color.setHSL(h,g?0:sa*0.30,g?1:0.55);}
   {const [,h,sa]=hueOf('gripHue');
-   if(seatMat) seatMat.color.setHSL(h,sa*0.50,0.42);}
+   /* and 0 is undyed cork, which is a colour somebody chooses too */
+   const g=Math.round(P.gripHue||0)===0;
+   if(corkMat) corkMat.color.setHSL(h,g?0:sa*0.65,g?1:0.62);}
   {const [,h,sa]=hueOf('lineHue');
    /* 0 is graphite, which for a FLY LINE means "leave it as it shipped" —
       a desaturated grey line is a thing you choose, not a default */
@@ -7350,6 +7541,10 @@ const reelFaceTex=(()=>{
   corkGeo.rotateX(Math.PI/2);
   const grip=new THREE.Mesh(corkGeo,
     new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.93}));
+  /* THE GRIP IS THE CORK. This was wired to the reel seat below it — a small
+     metal barrel at 0.72 metalness, where a hue barely registers and most of
+     it is hidden by your hand anyway. */
+  corkMat=grip.material;
 
   /* reel seat: anodised barrel, two knurled lock rings, a butt cap */
   const seatParts=[];
@@ -7375,6 +7570,12 @@ const reelFaceTex=(()=>{
   cage.rotation.z=Math.PI/2;cage.position.set(RX,RY,RZ);
   const faceMat=new THREE.MeshStandardMaterial({map:reelFaceTex,roughness:0.30,
     metalness:0.60,transparent:true});
+  /* WHAT YOU ACTUALLY SEE OF A REEL. Reel colour used to tint `cage` alone —
+     a 2 cm rim standing behind two face discs that cover it — so the setting
+     worked and was invisible. Reported as doing nothing, and right. The faces
+     are a painted canvas, and a material colour MULTIPLIES a map, so tinting
+     this carries the whole painted face with it. */
+  reelFaceMat=faceMat;
   const faceA=new THREE.Mesh(new THREE.CircleGeometry(0.0435,26),faceMat);
   faceA.rotation.y=Math.PI/2;faceA.position.set(RX+0.0104,RY,RZ);
   const faceB=new THREE.Mesh(new THREE.CircleGeometry(0.0435,26),faceMat);
