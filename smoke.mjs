@@ -1323,7 +1323,14 @@ const hop=vm.runInContext(`(()=>{
   camera.getWorldPosition(_camWorld);
   blinkTo_(_camWorld.x-8,_camWorld.z);
   pin(); const fafter=peaks(40);
-  const fish={hookedBefore, stillOn:!!hooked,
+  /* WHY he is gone, not just that he is. "stillOn:false" covers a tippet that
+     parted, a hook thrown on slack, and a fish LANDED — and those want three
+     different fixes. The hop draws a fish back along the line to the length
+     the line actually is, which moves him TOWARDS you, so landing him by
+     accident is a real possibility and has to be distinguishable. */
+  const gone=hooked?null:(fishes.some(f=>f.state==='landed'||f.showT>0)?'landed'
+                         :fishes.some(f=>f.state==='holding')?'off':'?');
+  const fish={hookedBefore, stillOn:!!hooked, gone,
               /* three places, not two. The bar below is >0.05 and this used to
                  be rounded to 0.05 exactly, so a fish in 5.4 cm of water read
                  as 5.0 and failed a claim he had passed. Reported at 3 dp so

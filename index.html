@@ -8856,42 +8856,50 @@ function carryTackle(dx,dz){
        has bent away under the hop, put him back in the channel at the station
        he now finds himself at rather than beaching him or breaking him off. */
     hooked.p.x+=dx; hooked.p.z+=dz;
-    if(surfY(hooked.p.x)-bedY(hooked.p.x,hooked.p.z)<=0.10){
-      hooked.p.z=CZ+SC.dz(hooked.p.x);
-      hooked.p.y=hooked.restY();
-    }
     /* AND HE IS STILL ON THE END OF THE LINE HE WAS ON. `fishTension` is
        `lineStretch x (tip-to-fish - lineOut)`, so any geometry the hop leaves
-       behind is read as stretch and charged to the tippet — and a hop is a
+       over is read as stretch and charged to the tippet — and a hop is a
        discontinuity in where you are standing, not a pull on a fish. Carrying
        him rigidly covers the common case; what is left is the reach bending
-       under the hop, and the branch just above putting him back in the
-       channel when the hop would have beached him, which can move him several
-       metres sideways in a single frame.
-       Measured before this: 59 N through a 40 N tippet — a hop while playing
-       a fish broke him off. `smoke.mjs` has asserted against exactly that
-       since the hop was written, and caught it about one run in four; raising
-       Feeding chance to 0.90 made it every run, because a feeding fish holds
-       shallower and `restY` above therefore moves him further. The bug was
-       always real, and more feeding fish only stopped it hiding.
-       He is drawn back along the line to the length that line actually is.
-       Paying the difference off the SPOOL instead also clears the tension —
-       measured, 59 N to 10 N — but it lengthens the material without
-       redistributing it, and peak stretch went 2.1 to 8.6 doing it. Moving
-       the fish touches no line at all. Slack is left alone: slack is a real
-       thing to have. */
-    {
-      const T=(RN-1)*3;
-      const lx=hooked.p.x-rpos[T], ly=hooked.p.y-rpos[T+1], lz=hooked.p.z-rpos[T+2];
-      const d=Math.hypot(lx,ly,lz);
-      if(d>lineOut&&d>1e-6){
-        const k=lineOut/d;
-        hooked.p.x=rpos[T]+lx*k; hooked.p.y=rpos[T+1]+ly*k; hooked.p.z=rpos[T+2]+lz*k;
-        /* and not onto the gravel doing it */
-        if(surfY(hooked.p.x)-bedY(hooked.p.x,hooked.p.z)<=0.10){
-          hooked.p.z=CZ+SC.dz(hooked.p.x); hooked.p.y=hooked.restY();
-        }
+       under the hop, and `unbeach` below putting him back in the channel
+       rather than on the gravel, which can move him metres sideways in one
+       frame. Measured before any of this: 59 N through a 40 N tippet, i.e.
+       the hop broke him off.
+
+       THE TWO STEPS FIGHT EACH OTHER, WHICH IS WHY THIS ALTERNATES. The first
+       version clamped once and then unbeached, so the unbeach moved him back
+       out past the line it had just fitted him to and the spike came back —
+       intermittently, because it only bites when the hop lands him near dry
+       ground. Fitting and unbeaching are run alternately until they agree,
+       and any residual is paid off the spool: a couple of centimetres of line
+       costs nothing, where the same couple of centimetres of STRETCH is tens
+       of newtons through the tippet. */
+    const T=(RN-1)*3;
+    const unbeach=()=>{
+      if(surfY(hooked.p.x)-bedY(hooked.p.x,hooked.p.z)<=0.10){
+        hooked.p.z=CZ+SC.dz(hooked.p.x);
+        hooked.p.y=hooked.restY();
+        return true;
       }
+      return false;
+    };
+    const reach=()=>Math.hypot(rpos[T]-hooked.p.x,rpos[T+1]-hooked.p.y,
+                               rpos[T+2]-hooked.p.z);
+    unbeach();
+    for(let pass=0;pass<3;pass++){
+      const d=reach();
+      if(d<=lineOut||d<1e-6) break;
+      const k=lineOut/d;
+      hooked.p.x=rpos[T]+(hooked.p.x-rpos[T])*k;
+      hooked.p.y=rpos[T+1]+(hooked.p.y-rpos[T+1])*k;
+      hooked.p.z=rpos[T+2]+(hooked.p.z-rpos[T+2])*k;
+      if(!unbeach()) break;              /* settled: he is in water and on the line */
+    }
+    /* whatever the two of them could not agree on, the spool pays for */
+    const left=reach()-lineOut;
+    if(left>0){
+      const give=Math.min(left,Math.max(0,TOTAL_LINE-offSpool));
+      lineOut+=give; offSpool+=give;
     }
   }
   /* A fish that had committed to the fly did not commit to it over there. */

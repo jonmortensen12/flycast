@@ -1295,33 +1295,37 @@ Recorded because each one was mis-diagnosed at least once.
    hop reliably broke the fish off. Feeding matters because `restY` holds a feeding fish
    shallower, so that branch moves him further.
 
-   He is now drawn back along the line to the length the line actually is. The first
-   attempt paid the difference off the SPOOL instead, which does clear the tension —
-   59 N to 10 N — but lengthens the material without redistributing it, and peak stretch
-   went 2.1 to 8.6. Moving the fish touches no line at all: stretch 1.45 → 2.20, tension
-   12.3 → 12.2, fish still on.
+   He is now drawn back along the line to the length the line actually is. Paying the
+   difference off the SPOOL instead also clears the tension — 59 N to 10 N — but lengthens
+   the material without redistributing it, and peak stretch went 2.1 to 8.6. Moving the
+   fish touches no line at all.
+
+   **And then the fix had a hole in it, which is the part worth reading.** Fitting him to
+   the line and keeping him off the gravel are two steps that move the same fish, and the
+   first version ran them once each in that order — so the unbeach moved him back out past
+   the line the clamp had just fitted him to, and the spike returned. Intermittently, and
+   only when the hop lands him near dry ground, which is exactly the shape of a fault that
+   reads as a flake. Measured: the failure rate went from 1 in 4 before this round to
+   **5 in 7 with the half-fix**, and the signature changed from a 59 N break to the fish
+   simply being gone. Running the two alternately until they agree, and paying any last
+   centimetres off the spool, puts it back to **1 in 4** — the original baseline — with the
+   fish still attached in every failing run.
+
+   `smoke.mjs` grew a `gone` field (landed / off / unknown) for this, because "stillOn:
+   false" covers a parted tippet, a thrown hook and a LANDED fish, and those want three
+   different fixes. It disproved the first hypothesis — he was coming off, not being landed
+   by accident — in one run.
+
+   **What is left is the original flake, unchanged and undiagnosed:** 1 run in 4, fish
+   still on, so it is one of the stretch, tension-margin or `wet` clauses rather than a
+   lost fish. It predates everything here and is the next thing to chase.
 
    **The lesson is the one this section keeps relearning from the other end.** Every other
    entry here is a harness that reported health it did not have. This is the opposite: a
    harness reporting a fault nobody believed, because it only did so sometimes. An
    assertion that fires one run in four is not a flake — it is a bug with a probability.
-
-   **NOT FINISHED — and this is the first thing to pick up.** The 59 N break-off is gone
-   and does not come back. `TACKLE-THROUGH-A-HOP` still goes red on roughly two runs in
-   five, and the failing signature has CHANGED: instead of a tension spike it is
-   `stillOn:false, wet:null` — the fish is simply gone by the time the check reads it,
-   with no 59 N anywhere. That is a different fault wearing the same test, and it has not
-   been diagnosed. Candidates, in the order worth trying: he was LANDED rather than lost
-   (the test reads `hooked`, and a landed fish clears it, which would make this a wrong
-   assertion rather than a bug); he threw the hook on slack after the fish is drawn back
-   along the line above; or something in the reel rework reaches him. Measured rates, all
-   on the same machine: **1 in 4 before any of this round's changes**, 2 in 2 with
-   `feedChance` at 0.90 and no hop fix, 0 in 2 with `feedChance` back at 0.60, and about
-   2 in 5 with 0.90 plus the fix.
-
-   `feedChance` has deliberately been left at 0.90. Turning it down would put the rate back
-   near the old baseline and would be hiding the remainder, which is exactly the mistake
-   this entry is about.
+   Twice over, here: once for the 59 N break it had been reporting all along, and once for
+   the hole in the fix, which announced itself the same way.
 
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
@@ -1415,11 +1419,11 @@ reports undeclared identifier reads. `node --check` catches none of this.
    stub is several features behind (`setFromAxisAngle`, `setScalar` added; it now fails on
    `window.addEventListener`). The fight diagnostics in section 5 were written with it, so
    repairing it is worth an hour before the next fight change.
-6d. **A hop while playing a fish is still not right — see bug 27, the residual.**
-   The 59 N break-off is fixed; `TACKLE-THROUGH-A-HOP` still fails about two runs in five
-   with a different signature (the fish is gone, no tension spike) and that has not been
-   diagnosed. Highest-value thing in this list to pick up, because it is a live fault in
-   the fight rather than an unknown.
+6d. **`TACKLE-THROUGH-A-HOP` still fails about 1 run in 4, as it did before this round.**
+   The 59 N break-off behind it is fixed (bug 27) and the fish now stays attached in every
+   failing run, so what remains is one of the stretch, tension-margin or `wet` clauses.
+   Undiagnosed, and the same rate as the previous commit — this is the original flake, not
+   a new one.
 
 6e. **Two `smoke.mjs` flakes are gone, and one of them was a real bug.** Recorded here
    because the second is the clearest example in this project of a test that was right and
