@@ -72,6 +72,32 @@ water, so it reads ~4 m regardless of whether a tight loop formed.
 gravity no matter what the stroke did. Both need rewriting before they can
 discriminate between rods — see below.
 
+## Running the tests
+
+```
+node smoke.mjs                 everything — the only run that can pass
+node smoke.mjs fight zone      just those sections
+node smoke.mjs --list          the section names
+```
+
+A full run is ~10 minutes (583 s measured, down from 692 s); a single section
+is 30-90 s, because the fixed cost of loading the game and settling the water
+is about 30 s and the rest is the section itself. Where the time goes:
+
+| section | cost | why |
+|---|---|---|
+| `fight` | 350 s | four twenty-second fights, hooked and played |
+| `water`, `specks` | ~18 s each | 200-250 frames to settle the grid before measuring it |
+| everything else | seconds | |
+
+**A filtered run is not a green build, and it does not print OK.** These tests
+deliberately share one world — they hook fish, spook them, press buttons, move
+the rig and draw from the same random stream — so a section run alone sees a
+different world from the same section run in sequence. It can pass alone and
+fail in place, or the reverse: `ROD-BEND` fails on its own because it needs
+state earlier sections leave behind. Use it for a fast answer while you work,
+and confirm with a full run before shipping.
+
 ## The harness had rotted, and is only partly repaired
 
 It could not be imported at all on a clean checkout, some commits before anyone noticed.
