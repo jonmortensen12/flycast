@@ -489,6 +489,87 @@ down. **Where** the fly has to have drifted, and how the drift is scored, is the
 presentation zone — section 2.7c. Fights: tension against tippet; the net lands
 anything inside the hoop.
 
+### 2.8 What is on the end, and what a landing costs
+
+**Six patterns, and they are not skins.** `FLIES` carries, for each one, the bluff radius
+that feeds `flyDragK`, the air-drag coefficient it ships at, its visual scale, and its own
+sink rate. Selected with `Fly pattern`, which rebuilds the mesh and calls `rebuildMasses`.
+Measured terminal fall, which is the number everything else keys off:
+
+| pattern | falls at | what it is |
+|---|---|---|
+| Stimulator | 2.36 m/s | big and bushy; parachutes down and lands softest of anything here |
+| Elk hair caddis | 3.95 m/s | |
+| Woolly bugger | 5.88 m/s | weighted, sinks, still lands softly |
+| Parachute Adams | 6.69 m/s | the default |
+| Foam ant | 6.99 m/s | |
+| Pheasant tail | 16.9 m/s | bead head: knifes in, and is the one fly that can slap |
+
+**`Splash limit` is a multiple, not a speed, and it has a ceiling.** This is the second time
+this number has had to be rethought and the reason is worth keeping. Commit #10 added the
+fly's bluff-body drag because a fly *lowered* onto the water was arriving at 6 m/s and
+spooking everything; the limit was an absolute 4.5 m/s, safely above the 2.09 m/s a size 14
+dry falls at. That coupling was invisible until `Fly air drag` shipped at 0.10 — a fly that
+falls three times faster — at which point every ordinary delivery on every venue silently
+became a slap again.
+
+Driving the scripted caster through a full delivery says why: **a fly lands at about 0.9x
+the speed it falls at, whatever that speed is** (1.82 m/s at drag 1.00, 5.77 at 0.10, 8.40
+at 0.075). Arrival speed is not an absolute quantity, so the threshold cannot be one either.
+It is now `min(terminal x splashV, 9.0)`:
+
+- the **multiple** (2.6 on a river, 1.6 on the pond) means a floating fly that was only ever
+  lowered is under the limit no matter what it is tied on;
+- the **9 m/s ceiling** means water does not care what you tied on — a bead head arriving at
+  15 m/s still puts fish down. Without it the pheasant tail's threshold was 44 m/s.
+
+`smoke.mjs` asserts both halves against the shipped fly box, so neither can rot the way the
+absolute number did.
+
+**And the landing itself is forgiving.** The sound used to be `sndSplash(speed)` on every
+arrival, so the softest delivery still popped; below 0.45 of the limit it is a dimple scaled
+by speed, and above it the splash is scaled by the EXCESS, so it comes in from silence.
+The spook test used to *divide* the threshold by the species' wariness, which put a wary
+fish's limit **below** the splash limit — a delivery the game did not think was a slap still
+put him down, over a radius of 2.5x wariness. Nothing under the limit disturbs anybody now,
+the radius is 1.6x, and the cost scales with how far over you actually were.
+
+### 2.9 The reel, and what winding costs
+
+The rule the fight is now built on: **no fish out-swims somebody winding a handle, so the
+reel always takes line at its full rate, and what a fish who will not come buys you is
+tension.** That second half needs no code — `fishTension` is `lineStretch x (tip-to-fish
+distance - lineOut)`, so shortening `lineOut` against a fish that will not move already IS
+a rising pull in the tippet, and the break-off test is already watching it.
+
+Two things were suppressing it:
+
+1. **The reel stalled at `Reel power`**, tapering to nothing, and shipped below the tippet —
+   so the reel gave out before the line did and a big fish could not be wound in at all.
+   Removed.
+2. **The drag gave line while you were cranking**, capping tension at about 9 N. Correct for
+   a real reel, in which the drag is the weakest link in series — and between them the two
+   made the fight unwinnable and unloseable at once.
+
+**The trigger is now the drag.** The spool is held shut by `drag + Reel power x squeeze`, so
+how hard you pull the trigger is the drag setting. Measured on a 2x trout over twenty
+seconds:
+
+| squeeze | peak tension | outcome |
+|---|---|---|
+| 0.35 | 22 N | holds him all day, never near the tippet, does not gain |
+| 0.65 | 33 N | gains 1.8 m and keeps him — the playable middle |
+| 1.00 | 40 N | gains 5 m, drags him 2.4 m closer, and **breaks him off** |
+
+An ordinary fish wound flat out peaks at 27–40 N and comes 7–8 m. Let the trigger go and it
+is a 9 N drag again and he can run.
+
+The first attempt at this held the spool by the FULL `Reel power` whenever the trigger was
+down at all, which left no relief path anywhere below the tippet: tension climbed
+monotonically and *every* fish broke off, with a feathered trigger only making it slower
+(41.8 N, 0.58 m gained, at a third of the rate). Scaling the hold by the squeeze is what
+turns that from a difficulty setting into a skill.
+
 ### Sound
 
 Everything is synthesised at runtime — one shared noise buffer, no assets. The context is
@@ -1130,6 +1211,118 @@ Recorded because each one was mis-diagnosed at least once.
    `smoke.mjs` asserts the crude version of this: a pinned fish pulling across the blank
    bends it further than its own weight does, and `Playing flex` moves that number.
 
+21. **The presentation zone was a box with its sides parallel to the x axis.** Reported
+   from the Boat Drift as a fly that floated the whole length of a fish's window, over his
+   head, and was refused with *it landed on his head — no drift*. The lateral half of the
+   test was `|fly.z - fish.z|` in WORLD z, which is right on a straight reach and wrong on
+   every other one. That reach's centreline swings 3.8 m either way over a 96 m lap, so it
+   moves **1.45 m sideways across a 6 m drift at four of its six lies**, against a 0.81 m
+   lane: a perfectly drifted fly spent most of its run outside the box and only entered
+   near his nose, so `zoneRun` stayed tiny and cover read 0.07 where it should read ~1.
+   Both offsets are now taken from the centreline at their own station, so what is compared
+   is where each sits ACROSS the channel. Driven on that reach's own geometry, cover goes
+   0.52 → 0.98; the test fails on the old geometry, which is the only thing it is for.
+
+   The same report carried a second, unrelated false verdict — *drag off the rock* on a
+   drift that had nothing to do with any rock. Two causes. `zoneWhy` was set by whichever
+   obstacle came LAST in `OBST` order, which is an array index and not a fact about the
+   river, so with two rocks in a fish's window the refusal could name the one nine metres
+   up rather than the one he is sitting behind; the nearest now names it. And the refusal
+   blamed that feature for *every* drag failure, including a fly that skated on his nose
+   three metres below the rock. `zoneStep` now records WHERE in the box the slip was
+   worst, and the seam only gets the blame if the drag actually happened up at it.
+
+   Both of these were invisible from inside the headset, because the only thing the game
+   said out loud was the sentence. Cover, the slip the box averaged, and which feature is
+   shaping it are now on the stats window and on the phone.
+
+22. **A landed fish rested on dry ground.** Reported from Boulder Garden as a fish that
+   swam off into the land. `pickBank` walks in from the waterline looking for water deep
+   enough to hold a fish upright — and stopped at `u=0.45` whether or not it had found
+   any, then put him wherever it had got to. On a reach whose margin is dry gravel or
+   standing rock for that whole band, that is the bank. It now walks the whole
+   half-section, refuses anything inside an obstacle, tries the far side, and failing both
+   puts him back in his own lie, which is by construction water a fish can be in.
+
+   Note what was NOT changed: he still hangs at chest height, above the film. That is
+   deliberate (see the comment there) and `smoke.mjs` asserts it — an attempt to also cap
+   him at the surface went red immediately, which was the test doing its job on a decision
+   the report had not asked to revisit.
+
+23. **A log floated six-tenths of a metre above the bed.** `placeObstacles` puts an
+   obstacle's centre at `bedY + h*obstHeight`, which is where the SOLVER wants the centre
+   of its collision ellipsoid. For a rock that is fine because the mesh is the same size
+   as the ellipsoid — and `rockSkirt` exists precisely to stretch it down to the bed. A
+   log's mesh is a 0.24 m trunk standing in for an ellipsoid `0.55r` high, and nothing
+   skirted it: on the Boat Drift its centre sat 0.85 m up with its underside 0.61 m clear
+   of the river. Logs now rest on the highest ground under their own length. The mesh is
+   still much smaller than the collision volume — see open problem 6b.
+
+24. **A fish landed from the boat stopped dead in mid-air.** `loopCarry` already knew that
+   a hooked, landed or held fish is part of the rig — but it only runs at the join, once a
+   lap, so between joins the hull slid out from under him. Carried every frame now, on the
+   same three states. And he no longer goes over the side the instant you have looked at
+   him: he goes aft onto the stern locker, stored boat-local because a world point aft of a
+   moving hull is true for exactly one frame.
+
+25. **The river ran through the inside of the boat.** The hull bottom is 0.22 m below the
+   waterline, which is correct for a boat and means the water mesh sits between the keel
+   and your eye — so from the deck you watched ripples crossing the floor. The group's
+   origin is documented as "the FLOOR you stand on" and nothing was ever drawn there. A
+   solid sole at that height is both the missing piece of the boat and the thing that
+   occludes the river.
+
+26. **Both sticks were the oars, and one of them was a snap turn.** Left and right span the
+   RIG in 45 degree steps while the boat carried on exactly as before. It is now a ferry —
+   a sideways push across the channel at that station, with the bow coming round into the
+   angle through the existing heading rule, which is the ferry angle you would see from the
+   bank. And the blades were `BoxGeometry(0.16,0.03,0.44)`: three centimetres thin in Y, so
+   lying flat like a shelf, with the long side across the shaft instead of along it.
+
+27. **A hop while playing a fish broke him off, and the test that said so was being read
+   as a flake.** `TACKLE-THROUGH-A-HOP` went red about one run in four on a clean checkout
+   and had been living as background noise. Raising `Feeding chance` from 0.60 to 0.90 made
+   it fire on every run, which is what forced it to be looked at — and the honest reading
+   is not that more feeding fish broke the test, it is that fewer feeding fish had been
+   hiding a real fault three runs in four.
+
+   `carryTackle` already moves a hooked fish with the rig. What it did not do is check the
+   result against the line: `fishTension` is `lineStretch x (tip-to-fish - lineOut)`, so
+   whatever geometry the hop leaves over is read as stretch and charged to the tippet.
+   Two things leave some over — the reach bending under the hop, and the existing branch
+   that puts a fish back in the channel rather than beaching him, which can move him
+   several metres sideways in one frame. Measured: **59 N through a 40 N tippet**, i.e. the
+   hop reliably broke the fish off. Feeding matters because `restY` holds a feeding fish
+   shallower, so that branch moves him further.
+
+   He is now drawn back along the line to the length the line actually is. The first
+   attempt paid the difference off the SPOOL instead, which does clear the tension —
+   59 N to 10 N — but lengthens the material without redistributing it, and peak stretch
+   went 2.1 to 8.6. Moving the fish touches no line at all: stretch 1.45 → 2.20, tension
+   12.3 → 12.2, fish still on.
+
+   **The lesson is the one this section keeps relearning from the other end.** Every other
+   entry here is a harness that reported health it did not have. This is the opposite: a
+   harness reporting a fault nobody believed, because it only did so sometimes. An
+   assertion that fires one run in four is not a flake — it is a bug with a probability.
+
+   **NOT FINISHED — and this is the first thing to pick up.** The 59 N break-off is gone
+   and does not come back. `TACKLE-THROUGH-A-HOP` still goes red on roughly two runs in
+   five, and the failing signature has CHANGED: instead of a tension spike it is
+   `stillOn:false, wet:null` — the fish is simply gone by the time the check reads it,
+   with no 59 N anywhere. That is a different fault wearing the same test, and it has not
+   been diagnosed. Candidates, in the order worth trying: he was LANDED rather than lost
+   (the test reads `hooked`, and a landed fish clears it, which would make this a wrong
+   assertion rather than a bug); he threw the hook on slack after the fish is drawn back
+   along the line above; or something in the reel rework reaches him. Measured rates, all
+   on the same machine: **1 in 4 before any of this round's changes**, 2 in 2 with
+   `feedChance` at 0.90 and no hop fix, 0 in 2 with `feedChance` back at 0.60, and about
+   2 in 5 with 0.90 plus the fix.
+
+   `feedChance` has deliberately been left at 0.90. Turning it down would put the rate back
+   near the old baseline and would be hiding the remainder, which is exactly the mistake
+   this entry is about.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
@@ -1205,9 +1398,37 @@ reports undeclared identifier reads. `node --check` catches none of this.
 3. **Re-discretising mid-cast pops.** Acceptable for a tuning knob, not for gameplay.
 4. **The slack belly is simulated but cannot tangle** on boots, rocks or the reel.
 5. **No haul mechanic.** Single and double hauls are the obvious next casting feature.
-6. **One reach of river, four fish, one fly pattern.** No fly selection, no hatch, no
-   fish memory of being pricked.
+6. **Nine reaches, six fly patterns, no hatch.** Fly selection is in (section 2.8); what is
+   still missing is a hatch — a time-driven table of what is on the water and what the fish
+   are keyed to — and any fish memory of having been pricked.
    (The lane and the drift window were both on this list and are now section 2.7c.)
+6b. **A log's mesh is not its collision volume.** `placeObstacles` now rests a log on the bed
+   so it stops floating, but the solver still treats it as an ellipsoid `r` across and
+   `0.55r` high — for the Boat Drift's sweeper that is 3.2 m by 1.8 m around a trunk 0.48 m
+   thick. The line therefore stops short of a log in mid-water. Either the mesh should grow
+   into a root wad that fills the ellipsoid, or the ellipsoid should shrink to the trunk.
+6c. **The headless harness had rotted and is only partly repaired.** `sim.mjs` could not be
+   imported at all — section 3 grew to reference `camera`, `scene` and `player`, and
+   `three-stub.mjs` had no geometry classes; `build-sim.py` also referenced an undeclared
+   `_grabFrom` and did not carry `pushOutCanopy`, which `physics()` calls. All four are
+   fixed and `exp-verify.mjs` runs again. **`diag2.mjs` is still broken** — its own THREE
+   stub is several features behind (`setFromAxisAngle`, `setScalar` added; it now fails on
+   `window.addEventListener`). The fight diagnostics in section 5 were written with it, so
+   repairing it is worth an hour before the next fight change.
+6d. **A hop while playing a fish is still not right — see bug 27, the residual.**
+   The 59 N break-off is fixed; `TACKLE-THROUGH-A-HOP` still fails about two runs in five
+   with a different signature (the fish is gone, no tension spike) and that has not been
+   diagnosed. Highest-value thing in this list to pick up, because it is a live fault in
+   the fight rather than an unknown.
+
+6e. **Two `smoke.mjs` flakes are gone, and one of them was a real bug.** Recorded here
+   because the second is the clearest example in this project of a test that was right and
+   was being read as noise. Both are fixed; see bug 27.
+
+   The first was an undeclared `SHIPPED` read that silently turned `applyPreset(SHIPPED)`
+   into `applyPreset(undefined)`, so a test never reset to shipped defaults and inherited
+   whatever the previous one left. `.replace('SHIPPED', …)` replaces only the FIRST
+   occurrence, and three call sites had two each.
 7. **Performance.** ~116 active nodes at default spacing, ~265 at both minimums. On the CPU
    speck path, specks cost a flow evaluation each and dominate at high density; the GPU path
    removes that entirely. See `STRATEGY.md` for the full headroom analysis.

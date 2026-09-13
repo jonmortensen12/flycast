@@ -597,6 +597,13 @@ function drawStats(d){
   push('line out', d.lineOut + ' m');
   push('slack', d.slack + ' m');
   if(d.drift !== null && d.drift !== undefined) push('drift', d.drift + ' %');
+  /* The three numbers the take rule actually decides on, so that whoever is
+     holding the phone can tell a wrong verdict from a wrong sentence — which
+     is the thing that could not be done from inside the headset when two
+     refusals were reported as untrue. */
+  if(d.zone) push('zone', d.zone.cover + '% of ' + d.zone.up + ' m \u00b7 slip '
+       + d.zone.slip + '/' + d.zone.max + ' \u00b7 ' + d.zone.why,
+       d.zone.slip > d.zone.max);
   push('left hand', d.hand);
   push('nodes', d.nodes);
   if(d.venue) setVenue(d.venue);

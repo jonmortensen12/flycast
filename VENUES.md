@@ -55,6 +55,43 @@ drifts* — runs 2.6, and Stairstep Falls runs 4.2, because the pool below a lip
 the whole of the presentation. The zone rule itself also now **stops** at anything
 the fly cannot come over; see HANDOFF 2.7c.
 
+### What each reach's water looks like
+
+`WATER_LOOKS` used to be reachable only by cycling the **Water looks** row by hand, which
+meant nine venues that all shipped as the same mountain freestone. Each descriptor's `par`
+now spreads a named look, so a venue arrives looking like itself:
+
+| venue | water |
+|---|---|
+| Cedar Run | mountain freestone — the calibration reach, left as it was |
+| Boulder Garden, Alder Tunnel | overcast steel |
+| Stairstep Falls, Boat Drift | deep blue |
+| Meadow Glide, The Long Run | chalk stream |
+| Undercut Bend, Beaver Pond | tannic |
+
+The table is declared above `SCENES` for this reason, and a venue names a look rather than
+carrying a copy of five colour channels that would drift from it the first time anybody
+tuned one. A `par` entry of its own still wins, and the **Water looks** row still cycles.
+
+### Two reaches that were wrong in the water
+
+**The Beaver Pond had five boulders in it and now has none.** They were meant to be drowned
+timber — small radius, tall, nothing to the solver and everything to a line stripped past
+one. Drawn with the rock mesh, which is a squashed *sphere*, a 0.26 m radius stood at 2.2 m
+above the bed is not a snag: it is a smooth post standing out of a still pond with nothing
+holding it up. A pond does not need obstacles to be interesting — the fish cruise and the
+whole difficulty is the strip. If drowned timber comes back it needs a mesh that reaches
+the bed.
+
+**Stairstep Falls was a rapid, not a fall into a pool.** The tongue off each lip carried
+straight down over the fish and the fly was gone before it could be presented. Three
+changes together: the plunge pools are deeper (2.25 m, and a deeper pool passes the same
+water more slowly), the channel now *opens out* into each pool instead of staying pinched
+from the lip, and `current` drops from 1.05 to 0.62. `hwMax` and `dMax` rose to match,
+because the pool now runs wider than the width the lip pinches from — and `smoke.mjs` grew
+a check that every venue's geometry actually stays inside its own declared bounds, which
+is a rule this file has stated from the beginning and nothing had ever tested.
+
 ## Switching venues
 
 Venues hot-swap. `runAction('!venue:<id>')` calls `requestVenue()`, which queues

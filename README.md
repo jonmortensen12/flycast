@@ -72,6 +72,28 @@ water, so it reads ~4 m regardless of whether a tight loop formed.
 gravity no matter what the stroke did. Both need rewriting before they can
 discriminate between rods — see below.
 
+## The harness had rotted, and is only partly repaired
+
+It could not be imported at all on a clean checkout, some commits before anyone noticed.
+Four separate causes, all now fixed:
+
+- `three-stub.mjs` had Vector3 and Quaternion and nothing else, while section 3 had grown
+  to build a net, a boat, obstacles and a speck cloud at module scope. It now has inert
+  scene-graph and geometry stubs — which, following this file's own rule, **raise rather
+  than invent** if anything tries to read rendering data back out of them.
+- The same growth left the slice referencing `camera`, `scene` and `player`. `build-sim.py`
+  supplies them as bare scene-graph nodes.
+- `build-sim.py`'s own driver referenced an undeclared `_grabFrom`, so every run died the
+  moment it reached the grab path.
+- `physics()` calls `pushOutCanopy`, which lives in section 4 and was not being carried.
+  `pull_function` lifts it by name; it is genuinely physical code that happens to sit next
+  to the meshes it relates to.
+
+`exp-verify.mjs` runs again. **`diag2.mjs` still does not** — its own separate THREE stub is
+several features behind (`setFromAxisAngle` and `setScalar` added; it now falls over on
+`window.addEventListener`). Every fight bug in HANDOFF section 5 was found with it, so it is
+worth an hour before the next change to the fight.
+
 ## What to fix next in the harness
 
 1. **A real loop metric.** Find the loop apex — the point of maximum curvature

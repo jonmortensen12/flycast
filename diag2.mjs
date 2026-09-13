@@ -68,9 +68,13 @@ class V3{constructor(x=0,y=0,z=0){this.x=x;this.y=y;this.z=z;}
  normalize(){const l=this.length()||1;return this.multiplyScalar(1/l);}
  distanceTo(v){return Math.hypot(this.x-v.x,this.y-v.y,this.z-v.z);}
  dot(v){return this.x*v.x+this.y*v.y+this.z*v.z;}
- applyQuaternion(){return this;} setFromMatrixPosition(){return this;} applyMatrix4(){return this;}}
+ applyQuaternion(){return this;} setFromMatrixPosition(){return this;} applyMatrix4(){return this;}
+ setScalar(v){this.x=this.y=this.z=v;return this;}}
 class Q{constructor(){this.x=0;this.y=0;this.z=0;this.w=1;}copy(){return this;}set(){return this;}
- invert(){return this;}multiply(){return this;}setFromEuler(){return this;}setFromRotationMatrix(){return this;}}
+ invert(){return this;}multiply(){return this;}setFromEuler(){return this;}setFromRotationMatrix(){return this;}
+ /* the bank scatter turns its grass with one of these; it arrived after this
+    stub was written and took the whole diagnostic down with it */
+ setFromAxisAngle(){return this;}slerp(){return this;}normalize(){return this;}}
 class E{constructor(){this.x=0;this.y=0;this.z=0;}setFromQuaternion(){return this;}set(){return this;}}
 class Clock{getDelta(){return 1/72;} get elapsedTime(){return 0;}}
 let loopCb=null; const listeners=[];

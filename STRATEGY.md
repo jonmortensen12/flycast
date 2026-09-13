@@ -112,7 +112,9 @@ retained for comparison.
   click as line leaves the spool, line whistle on a fast stroke, the plop of a rise. Probably
   the largest immersion gain per hour of work in the whole project.
 - **Losing fish.** Hook pulls on slack, tippet fails at a nick. Failure makes success mean
-  something.
+  something. *(Partly here: over-reeling now breaks a fish off, and how hard you hold the
+  trigger is the drag setting — see HANDOFF 2.9. What is still missing is losing one to
+  SLACK, which is the other half and needs the strike window below.)*
 
 ---
 
@@ -122,9 +124,32 @@ retained for comparison.
 2. GPU specks. *(done — verify it reads as well as the CPU version before deleting anything.)*
 3. Wind, strike window, audio. Cheapest large gains available.
 4. Flies and hatch. The first feature that turns a simulator into a game.
+   *(Fly selection is done — six patterns, each with its own bluff radius, air drag and
+   sink rate, so the choice is physical and not cosmetic. The hatch is still open, and it
+   is the half that turns selection into a decision: without a table of what is on the
+   water and what the fish are keyed to, one fly is as good as another.)*
 5. Only then decide on WASM or native, informed by what is actually slow.
 
 ---
+
+### Game modes, which is the next thing worth designing
+
+Raised from the water as *we should start thinking about different game modes or
+challenges rather than just free fishing* — and deliberately **not** built, because it was
+put as a thing to think about and because it is the one item here whose value depends
+entirely on getting the shape right first. Three notes for when it is picked up:
+
+- The metrics already exist. The presentation zone computes drift coverage, average slip
+  and a clean/dragged verdict on every cast; the fight now has a tension curve against a
+  tippet. A scoring mode needs almost no new simulation — it needs a frame around numbers
+  the game is already producing every frame.
+- **Section 5's casting-trainer framing is the same feature with a different buyer.**
+  Distance, accuracy, drag-free drift scoring and instrumented feedback are both the most
+  natural challenge set AND the version somebody would pay for. Building challenges as a
+  trainer costs no more than building them as a game and reaches a market with no funded
+  competitor.
+- The cheapest first cut is a target ring and a drift score, because both are already
+  measured. The expensive one is progression, because that is content.
 
 ## 5. Money
 

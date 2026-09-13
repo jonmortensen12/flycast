@@ -702,14 +702,31 @@ const bigfish=vm.runInContext(`(()=>{
   out.peakTension=+peak.toFixed(1);
   out.gained=+(l0-lineOut).toFixed(2);
   out.closed=+(d0-gap()).toFixed(2);
-  /* he must still be there, the line must never have gone near breaking, and
-     twenty seconds of winding has to have BOUGHT something */
-  out.heldOn = out.stillOn && peak<P.tippet*0.92 && out.gained>1.0;
+  out.dragThr=+(P.spoolDrag*1.15+P.statFric).toFixed(1);
+  /* WHAT THE FIGHT IS SUPPOSED TO DO NOW. This block used to assert the
+     opposite of all three of these — "the line must never have gone near
+     breaking" while the trigger was held flat out for twenty seconds — which
+     was true, and was the complaint: tension could not climb past the drag,
+     so a big fish could neither be wound in nor lost, and holding the handle
+     down was free. The rule asked for instead is that winding ALWAYS gains
+     line and that a fish who will not come puts the difference into the
+     tippet, so over-reeling is how you break one off. */
+  out.windingBuysLine = out.gained>1.0;
+  out.cameCloser = out.closed>0.5;
+  out.resistanceBecomesTension = peak>=P.tippet*0.95;
+  /* let go, and it is a drag again: he can run and the line comes back down */
+  let after=0;
+  for(let i=0;i<120;i++){ renderer._loop(); after=M.tension; }
+  out.afterRelease=+after.toFixed(1);
+  out.relaxesOnRelease = after<Math.max(peak*0.6,out.dragThr*1.5);
+
+  out.heldOn = out.windingBuysLine&&out.cameCloser&&out.resistanceBecomesTension
+               &&out.relaxesOnRelease;
   for(const f of fishes) f.reseat();
   P.fishSize=1; for(const f of fishes) f.sizeSync();
   applyPreset(SHIPPED); resetCast();
   return out;
-})()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
+})()`.replace(/SHIPPED/g,JSON.stringify(shipped)),sandbox);
 console.log('a big one on the reel',bigfish);
 if(!bigfish.aboard||!bigfish.heldOn) console.log('  *** BIG FISH FAILURE ***');
 
@@ -1320,7 +1337,7 @@ const hop=vm.runInContext(`(()=>{
   rodPad.buttons[0].value=wasTrig; rodPad.buttons[0].pressed=wasPr;
   resetCast();
   return {open, fish};
-})()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
+})()`.replace(/SHIPPED/g,JSON.stringify(shipped)),sandbox);
 console.log('tackle through a hop',hop);
 {
   const o=hop.open, f=hop.fish;
@@ -1425,7 +1442,7 @@ const fight=vm.runInContext(`(()=>{
           cap:{raw:+capRaw.toFixed(1), got:+capGot.toFixed(1)},
           rawSeen:+sawT.toFixed(1), carriedMax:+carried.toFixed(1),
           topSpeed:+sawV.toFixed(1), topAir:+sawAir.toFixed(2)};
-})()`.replace('SHIPPED',JSON.stringify(shipped)),sandbox);
+})()`.replace(/SHIPPED/g,JSON.stringify(shipped)),sandbox);
 console.log('a fish on',fight);
 if(!fight.dry.owns || !fight.on.hooked || fight.on.owns || fight.on.arc || fight.on.ring ||
    fight.off.owns || fight.carriedMax>fight.tippet ||
@@ -2354,6 +2371,58 @@ const zone=vm.runInContext(`(()=>{
   for(let i=0;i<g.length;i+=3) if(Math.abs(g[i+1]-(surfY(g[i])+0.03))>1e-6) offWater++;
   out.everyVertexOnTheWater = offWater===0;
 
+  /* ── THE LANE BENDS WITH THE RIVER ──────────────────────────────────
+     The lateral half of the zone test used to be |fly.z - fish.z| in WORLD
+     z, so the box had its sides parallel to the x axis on a reach whose
+     channel does not. Reported from the water on the Boat Drift: a fly
+     floated the length of the box, straight over a fish, and was refused
+     with "it landed on his head — no drift".
+     Measured there afterwards, the centreline swings 1.45 m sideways across
+     a 6 m drift at four of that reach's six lies, against a 0.81 m lane, so
+     a PERFECTLY drifted fly spent most of its run outside the box and only
+     entered near his nose — cover 0.07 where it should read ~1.
+     This drives a fly down the channel on a curved reach and asks that the
+     fish sees the whole drift. It fails on world-z geometry and passes on
+     channel-relative geometry, which is the only thing it is for. */
+  {
+    /* The default reach is straight, so the bug cannot show on it. Borrow the
+       Boat Drift's OWN centreline — one meander per 96 m lap, 3.8 m either
+       way — which is the geometry the fault was reported on. Only zoneStep
+       reads SC.dz here (zoneAuto is off, so fitZone returns before its
+       obstacle scan), so swapping the one function is the whole reach as far
+       as this rule is concerned. */
+    const wasDz=SC.dz, K=0.06544985;
+    SC.dz=x=>-3.8*Math.cos(K*x);
+    P.zoneAuto=0; P.upMax=6; P.latTol=0.8; P.maxSlip=1.0;
+    /* at a CROSSOVER, not an apex. At the apex of a meander the centreline is
+       momentarily parallel to the axis and the old world-z box was very
+       nearly right there (0.29 m of swing across a drift); a quarter of a lap
+       away it swings 1.45 m, which is where the fault actually bit. Putting
+       the test fish at x=0 measured the one station that could not fail. */
+    const fx0=-24, fz0=CZ+SC.dz(fx0);               /* him, mid-channel */
+    out.bendOverADrift=+Math.abs(SC.dz(fx0)-SC.dz(fx0-6)).toFixed(2);
+    out.reachBends = out.bendOverADrift>0.8;        /* wider than his lane */
+    f.p.set(fx0,surfY(fx0)-0.42,fz0); f.fitZone(); f.zoneReset();
+    /* the fly comes down the CENTRELINE from the top of his box to his nose —
+       upstream is -x — which is exactly what a clean drift is */
+    for(let i=40;i>=0;i--){
+      const x=fx0-6*(i/40), z=CZ+SC.dz(x);
+      f.zoneStep(0.05,x,z,0.02,true);
+    }
+    out.centrelineCover=+f.zoneCover().toFixed(2);
+    out.aDriftDownTheChannelIsSeen = f.zoneCover()>0.9;
+    /* and the rule still discriminates: a fly held one lane over, parallel to
+       the channel the whole way, is NOT his drift and must not be credited */
+    f.zoneReset();
+    for(let i=40;i>=0;i--){
+      const x=fx0-6*(i/40), z=CZ+SC.dz(x)+2.5;
+      f.zoneStep(0.05,x,z,0.02,true);
+    }
+    out.offLaneCover=+f.zoneCover().toFixed(2);
+    out.aDriftInTheNextLaneIsNot = f.zoneCover()<0.1;
+    f.zoneReset(); SC.dz=wasDz;
+  }
+
   for(const k in was) {}
   P.zoneAuto=was.auto; P.zoneClear=was.clear; P.upMax=was.up;
   P.latTol=was.lat; P.zoneMin=was.min; P.maxSlip=was.slip;
@@ -2365,6 +2434,185 @@ console.log('the presentation zone',zone);
 {
   const bad=Object.entries(zone).filter(([k,v])=>v===false).map(([k])=>k);
   if(bad.length) console.log('  *** PRESENTATION ZONE FAILURE:',bad.join(', '),'***');
+}
+
+/* ── A FLY THAT ONLY FELL MUST NOT SLAP ────────────────────────────────
+   The bluff-body term was added because a fly lowered onto the water was
+   arriving at 6 m/s and spooking everything. `Splash limit` then had to be an
+   absolute speed above that, which coupled it to `Fly air drag`: lower the
+   drag so the fly stops parachuting and every ordinary delivery on every
+   venue silently became a slap again. Carrying the limit as a multiple of the
+   fly's OWN terminal fall breaks that coupling, and this is the assertion
+   that keeps it broken. Measured through the caster, a delivery arrives at
+   about 0.9x terminal and at worst 1.1x, so a shipped multiple has to clear
+   that with something in hand on every venue and at any drag setting. */
+const splash=vm.runInContext(`(()=>{
+  const out={}, wasDrag=P.flyDrag, wasV=P.splashV;
+  /* What has to hold is not that the ratio is constant — the ceiling caps it
+     on purpose, so that a fly which falls fast can still slap — but that a
+     FLOATING fly which merely fell is under the limit at every drag setting
+     the fly box ships. That is the property the whole arrangement exists for,
+     and it is the one the old absolute 4.5 m/s lost the moment Fly air drag
+     moved. 1.10x terminal is the worst arrival measured through the caster. */
+  const ARRIVES=1.10, rows=[];
+  for(const [name,spec] of FLIES){
+    if(spec.sink>0) continue;                 /* a nymph is meant to arrive hard */
+    P.flyDrag=spec.drag; FLY_R=spec.r; rebuildMasses();
+    rows.push({fly:name, falls:+flyTerminal().toFixed(2),
+               slapAt:+splashLimit().toFixed(2),
+               safe:splashLimit()>flyTerminal()*ARRIVES});
+  }
+  out.floating=rows;
+  out.limitTracksTheFly = rows.every(r=>r.safe);
+  /* and a fly falling at terminal is under the limit on every venue */
+  P.flyDrag=wasDrag; P.splashV=wasV; applyFly(); rebuildMasses();
+  const thin=[];
+  for(const id of SCENE_IDS){
+    const v=(SCENES[id].par&&SCENES[id].par.splashV)!==undefined
+            ?SCENES[id].par.splashV:VENUE_BASE.splashV;
+    if(!(v>ARRIVES*1.10)) thin.push(id+'='+v);
+  }
+  out.thinMargin=thin;
+  out.everyVenueForgivesADelivery = thin.length===0;
+  P.flyDrag=wasDrag; P.splashV=wasV; rebuildMasses();
+  return out;
+})()`,sandbox);
+console.log('the splash limit',splash);
+{
+  const bad=Object.entries(splash).filter(([k,v])=>v===false).map(([k])=>k);
+  if(bad.length) console.log('  *** SPLASH FAILURE:',bad.join(', '),'***');
+}
+
+/* ── AND THE FLY BOX IS NOT A SKIN ─────────────────────────────────────
+   Six patterns, each carrying its own bluff radius and air drag, so the
+   choice is a physical one: the stimulator is a bushy dry that parachutes
+   down and lands softest of anything in the box, the pheasant tail is a
+   weighted nymph that knifes in. If these ever collapse to the same falling
+   speed, the fly box has quietly become a set of colours. */
+const flybox=vm.runInContext(`(()=>{
+  const out={rows:[], was:Math.round(P.flyPat)};
+  for(let i=0;i<FLIES.length;i++){
+    P.flyPat=i; applyFly();
+    out.rows.push({fly:FLIES[i][0], r:+FLY_R.toFixed(4), drag:+P.flyDrag.toFixed(3),
+                   falls:+flyTerminal().toFixed(2), slapAt:+splashLimit().toFixed(2)});
+  }
+  const t=out.rows.map(r=>r.falls);
+  const stim=out.rows.find(r=>r.fly==='Stimulator');
+  const nymph=out.rows.find(r=>r.fly==='Pheasant tail');
+  out.everyFlyBuilds = out.rows.length===6 && out.rows.every(r=>r.r>0&&r.falls>0);
+  out.theyFallDifferently = Math.max(...t)/Math.min(...t) > 1.5;
+  /* the bushy one is the gentle one, and the weighted one is not */
+  out.theBushyOneLandsSoftest = stim.falls===Math.min(...t);
+  out.theNymphKnifesIn = nymph.falls===Math.max(...t);
+  /* and what each one's arrival is worth. A DRY that was only lowered must
+     never slap however far it fell; a WEIGHTED one driven in must be able to.
+     Both come out of the same pair of rules — the multiple and the ceiling —
+     and neither is asserted as a number, only as the behaviour. */
+  const ARRIVES=1.10;
+  const dries=out.rows.filter((r,i)=>FLIES[i][1].sink===0);
+  const sunk =out.rows.filter((r,i)=>FLIES[i][1].sink>0);
+  out.noDryFlySlapsFromFallingAlone = dries.every(r=>r.slapAt>r.falls*ARRIVES);
+  /* SOME, not EVERY (backticks would close the template): a woolly bugger is
+     weighted but not heavy, and it
+     lands softly. What must exist is at least one pattern in the box that
+     arrives hard enough to put a fish down — the bead head. */
+  out.aWeightedFlyStillCan          = sunk.some(r=>r.slapAt<r.falls*ARRIVES);
+  P.flyPat=out.was; applyFly();
+  return out;
+})()`,sandbox);
+console.log('the fly box',flybox);
+{
+  const bad=Object.entries(flybox).filter(([k,v])=>v===false).map(([k])=>k);
+  if(bad.length) console.log('  *** FLY BOX FAILURE:',bad.join(', '),'***');
+}
+{
+  const bad=Object.entries(splash).filter(([k,v])=>v===false).map(([k])=>k);
+  if(bad.length) console.log('  *** SPLASH FAILURE:',bad.join(', '),'***');
+}
+
+/* ── A VENUE'S BOUNDS HAVE TO BOUND IT ─────────────────────────────────
+   hwMax and dzMax size the solver window and dMax the depth range, so a
+   venue whose geometry runs outside its own declared bounds is a venue whose
+   solver window does not cover its own river. VENUES.md has said so from the
+   beginning and nothing checked it — which mattered the moment Stairstep
+   Falls was given a plunge pool that opens the channel out PAST the width it
+   pinches from. Every reach, walked end to end, in the language the solver
+   uses. */
+const bounds=vm.runInContext(`(()=>{
+  const bad=[];
+  for(const id of SCENE_IDS){
+    const V=SCENES[id];
+    let hw=0, dz=0, dep=0;
+    for(let x=-60;x<=60;x+=0.25){
+      hw=Math.max(hw,V.hw(x));
+      dz=Math.max(dz,Math.abs(V.dz(x)));
+      for(let u=-1;u<=1;u+=0.05) dep=Math.max(dep,V.dep(x,V.dz(x)+u*V.hw(x)));
+    }
+    const say=(what,got,lim)=>{ if(got>lim+1e-6)
+      bad.push(id+'.'+what+' '+got.toFixed(2)+' > '+lim); };
+    say('hw',hw,V.hwMax); say('dz',dz,V.dzMax); say('dep',dep,V.dMax);
+  }
+  return {outOfBounds:bad, everyVenueInsideItsOwnBounds:bad.length===0};
+})()`,sandbox);
+console.log('venue bounds',bounds);
+if(!bounds.everyVenueInsideItsOwnBounds) console.log('  *** VENUE BOUNDS FAILURE ***');
+
+/* ── THE TRIGGER IS THE DRAG ───────────────────────────────────────────
+   The rest of the reel contract, which needs three more twenty-second fights
+   and therefore lives HERE rather than beside the first one. Dropped in next
+   to it, these ran four hundred extra frames of hooked fish and several
+   thousand RNG draws before the hop and stick checks further down, and put
+   TACKLE-THROUGH-A-HOP red on a build that was fine — the same way the
+   menu and marker checks did once before, and the reason those run last too.
+   They reseat every fish and reload the shipped preset when they are done. */
+const reeldrag=vm.runInContext(`(()=>{
+  const out={};
+  const settle=n=>{ for(let i=0;i<n;i++) renderer._loop(); };
+  const T=(RN-1)*3;
+  const gap=()=>hooked?Math.hypot(hooked.p.x-rpos[T],hooked.p.y-rpos[T+1],hooked.p.z-rpos[T+2]):0;
+  const fight=(size,squeeze)=>{
+    for(const f of fishes) f.reseat();
+    P.fishSize=size; for(const f of fishes) f.sizeSync();
+    lineOut=12; offSpool=lineOut+rodArc+2.2; resetCast(); settle(50);
+    runAction('!hookfish'); settle(8);
+    const d0=gap(), l0=lineOut;
+    rodPad.buttons[0].value=squeeze; rodPad.buttons[0].pressed=true;
+    let pk=0;
+    for(let i=0;i<900&&hooked;i++){ renderer._loop(); pk=Math.max(pk,M.tension); }
+    rodPad.buttons[0].value=0; rodPad.buttons[0].pressed=false;
+    return {peak:+pk.toFixed(1), closed:+(d0-gap()).toFixed(2),
+            gained:+(l0-lineOut).toFixed(2), stillOn:!!hooked};
+  };
+  out.normal =fight(1,1.00);
+  out.gentle =fight(2,0.35);
+  out.working=fight(2,0.65);
+  out.full   =fight(2,1.00);
+  /* an ordinary fish COMES when you wind — surviving a flat-out crank is not
+     the claim, because a flat-out crank is what "reeling too hard" means */
+  out.anOrdinaryFishComesIn = out.normal.closed>3.0;
+  /* Feathered, it is a loose drag, and a loose drag HOLDS a big fish — it does
+     not reliably gain on one. Measured across runs it wound anywhere between
+     0.7 m and 5.0 m depending on how much he ran, so asserting that it gains
+     was asserting the fish's temperament. What the setting actually promises
+     is that you cannot break him: nowhere near the tippet, still attached. */
+  out.aGentleHandKeepsHim = out.gentle.stillOn && out.gentle.peak<P.tippet*0.75;
+  /* and there is a squeeze that plays a big fish without breaking him */
+  out.thereIsAWayToPlayHim = out.working.stillOn && out.working.peak<P.tippet*0.90
+                             && out.working.gained>1.0;
+  /* the ceiling is set by the HAND, monotonically. This is the mechanism —
+     hold = drag + reelPower x squeeze — and unlike how far the fish came, it
+     is not a twenty second average of his own random runs. */
+  out.theTriggerIsTheDrag = out.gentle.peak<out.working.peak
+                         && out.working.peak<out.full.peak;
+  for(const f of fishes) f.reseat();
+  P.fishSize=1; for(const f of fishes) f.sizeSync();
+  applyPreset(SHIPPED); resetCast();
+  return out;
+})()`.replace(/SHIPPED/g,JSON.stringify(shipped)),sandbox);
+console.log('the trigger is the drag',reeldrag);
+{
+  const bad=Object.entries(reeldrag).filter(([k,v])=>v===false).map(([k])=>k);
+  if(bad.length) console.log('  *** REEL DRAG FAILURE:',bad.join(', '),'***');
 }
 
 console.log('OK');

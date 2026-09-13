@@ -174,9 +174,10 @@ const P = {
   rodModel:1, rodE:200, rodMass:0.077,
   stiffMul:1.434, rodDamp:14, tipSoft:0.6, rodTaper:1, fightFlex:1.00,
   massMul:1, lineBend:1, lineSmooth:0.15, menuScale:1, hudScale:1, dragMul:0.85, lineWt:5, statFric:0.05,
-  flyDrag:1,
-  reelSpeed:2.6, reelPower:30, lineStretch:60, spoolDrag:9, spoolDead:0.05, buoyancy:1, stick:1, tippet:40,
+  flyDrag:0.10,
+  reelSpeed:2.6, reelPower:34, lineStretch:60, spoolDrag:9, spoolDead:0.05, buoyancy:1, stick:1, tippet:40,
   guideMu:0.15, slipInertia:0.06, dragHeld:1, routeOn:0, handSlide:8, reelSlack:0.1, lineVis:0.8, flySize:1.8, haptics:1,
+  flyPat:0, rodHue:0, reelHue:0, lineHue:0, gripHue:0,
   moveSpeed:1.6, netRadius:0.3, invertY:0, reelHand:0, handGuide:1,
   teleport:0, tpRange:9, snapTurn:30,
   volume:0.7, volReel:1, volSplash:1, volRiver:0.55, volLine:1,
@@ -209,8 +210,8 @@ const P = {
   /* right stick / A / B drive the menu when the pointer is not on it */
   stickNav:1,
   takeRadius:0.7, maxSlip:0.32, latTol:1.2, upMax:6,
-  splashV:4.5, lineRad:0.5, spookT:5, fatigue:1,
-  riseRate:0.55, feedChance:0.6, nonFeedMult:0.15, fishPower:1,
+  splashV:2.6, lineRad:0.5, spookT:5, fatigue:1,
+  riseRate:0.55, feedChance:0.9, nonFeedMult:0.15, fishPower:1,
   /* venue mechanics. Zero on every river; the pond turns them on. */
   flySink:0, chaseMin:0.28, chaseMax:1.60, chaseRadius:4.5, chaseSpeed:1.15,
   chaseChance:0.9, chaseGiveUp:1.4, cruiseSpeed:1, branchOn:0, branchGrip:0.55,
@@ -242,7 +243,7 @@ const MENU=[
   ['Tippet length','tippetLen',0.20,2.50,0.05,'Level tippet at the fly end, cut from the leader total. Longer tippet drifts more freely but turns over less crisply.'],
   ['Line weight','lineWt',3.00,8.00,0.50,'AFFTA line rating. Sets real mass per metre: a 5wt head is 140 grains over 30 ft, which is 0.99 g/m. Heavier line loads the rod harder and carries further.'],
   ['Line air drag','dragMul',0.10,1.50,0.05,'Multiplier on the physical drag coefficient. 1.00 is a real cylinder in crossflow at this diameter. Drag force is LINEAR in diameter and inverse in mass, so this knob and Line mass mult move the same underlying ratio — change this one if the line moves wrong through the air but the rod loads right.'],
-  ['Fly air drag','flyDrag',0.00,3.00,0.05,'The fly\u2019s own air resistance, as a bluff body rather than as a piece of line. Line air drag treats every node as a smooth cylinder, which is right for the line and wrong for the thing on the end of it: a cylinder moving ALONG its own axis has almost no drag, so a fly dropping straight down beneath a hanging leader used to fall at a few percent of its real drag and hit the water at 6 m/s \u2014 past the Splash limit, so a fly that was only ever lowered onto the surface still slapped and put fish down. At 1.00 it is a size 14 dry: a 10 mm hackle at Cd 1.0, terminal velocity about 2.1 m/s. Raise it for something bushier, lower it toward 0 for a heavy nymph that knifes in. It barely touches the cast, where the fly is travelling across the leader and was already paying full drag; what it changes is how a fly ARRIVES.'],
+  ['Fly air drag','flyDrag',0.00,3.00,0.05,'The fly\u2019s own air resistance, as a bluff body rather than as a piece of line. Line air drag treats every node as a smooth cylinder, which is right for the line and wrong for the thing on the end of it: a cylinder moving ALONG its own axis has almost no drag, so a fly dropping straight down beneath a hanging leader used to fall at a few percent of its real drag and hit the water at 6 m/s \u2014 past the Splash limit, so a fly that was only ever lowered onto the surface still slapped and put fish down. At 1.00 it is a size 14 dry: a 10 mm hackle at Cd 1.0, terminal velocity about 2.1 m/s \u2014 which is physically right and, watched from the bank, parachutes. It ships at 0.10, which falls at about 6.6 m/s and reads like a fly rather than a feather on a string. Raise it for something bushier, lower it toward 0 for a heavy nymph that knifes in. It barely touches the cast, where the fly is travelling across the leader and was already paying full drag; what it changes is how a fly ARRIVES \u2014 and Splash limit is carried as a multiple of exactly this speed, so moving this row does not change what counts as a slap.'],
   ['Line taper','lineTaper',0,1,1,'0 is a level line: uniform mass and diameter for all 27 m. 1 is a real weight-forward profile — front taper, belly, rear taper, running line — normalised so the first 30 ft still weighs the AFFTA head weight. The front taper is what makes a loop unroll, so a level line needs far more air drag to look right.'],
   ['— FRICTION —',null,0,0,0,''],
   ['Guide friction','guideMu',0.00,0.60,0.01,'Capstan friction through the eyelets. Around 0.15 for fly line on chrome snakes. Every radian of rod bend multiplies the tension needed to make line slide.'],
@@ -261,13 +262,18 @@ const MENU=[
   ['Taper model','rodTaper',0,1,1,'0 uses the earlier hand-drawn stiffness curve. 1 uses the real second moment of area of a tapered tube, shaped by Tip softness below.'],
   ['Tip softness','tipSoft',0.20,1.50,0.05,'How hard the stiffness taper falls off toward the tip, as an exponent on the blank\u2019s real second moment of area. 1.00 is the true tube, whose tip is 500x softer than the butt and goes noodly at this node count. 0.60 keeps the shape without the flop.'],
   ['Reel speed','reelSpeed',0.50,6.00,0.10,'Retrieve speed at a full right-trigger squeeze. Light squeezes are proportionally slower.'],
-  ['Reel power N','reelPower',1.00,200.0,1.00,'Tension at which the reel stalls \u2014 full rate up to a bit past half of it, then a straight ramp to nothing. It ships at 30, BELOW the 40 N tippet, so the reel gives out before the line does and holding the trigger against a running fish costs you line rather than the fish. Above tippet strength and cranking beats the fish every time: it takes line faster than a fish can be dragged, and the difference goes into the tippet until it parts.'],
+  ['Reel power N','reelPower',0.00,200.0,1.00,'How much a hand on the handle holds the spool shut, ON TOP of Spool drag. The reel itself never stalls any more \u2014 it always takes line at Reel speed, because no fish out-swims somebody winding a handle \u2014 so this is what decides where the pull GOES when he will not come. It ships at 34, which with a 9 N drag holds at 44 against a 40 N tippet at a FULL squeeze, and at 32 two-thirds of the way in: crank on a fresh fish and you can break him off, which is the risk in cranking and is meant to be. Let the trigger go and it is a drag again at 9 N, and he can run. Set it below the tippet and the spool slips before the line parts, which is the forgiving reel \u2014 you will land everything eventually and never snap one off winding.'],
   ['Line stretch N/m','lineStretch',5.00,400.0,5.00,'Axial stiffness of the deployed line, which is what a hooked fish actually pulls against. Lower is a stretchy, forgiving connection; higher transmits every head shake and breaks tippets faster.'],
   ['Tippet (N)','tippet',2.00,60.0,0.50,'Breaking strain. 5X is 4.75 lb, about 21 N. 6X is 15.6 N, 4X is 26.7 N.'],
   ['Line float','buoyancy',0.20,3.00,0.05,'How firmly the line is held on the surface film once it is riding on it.'],
   ['Surface stick','stick',0.00,4.00,0.10,'Surface tension. Higher makes line cling and take a harder pull to lift off.'],
   ['Line thickness','lineVis',0.10,4.00,0.05,'Visual only. How fat the line is drawn. Real fly line is far thinner than is comfortable to see at distance.'],
+  ['Fly pattern','flyPat',0,5,1,'What is tied on: 0 parachute Adams, 1 foam ant, 2 stimulator, 3 elk hair caddis, 4 pheasant tail nymph, 5 woolly bugger. Not a skin \u2014 each one sets its own bluff radius, air drag and size, so the stimulator genuinely parachutes down and lands softest, the nymph and the bugger are weighted, sink, and knife in hard enough to slap if you drop them from a height. Splash limit is a multiple of whatever the fly on the end falls at, so it follows the pattern without being touched. Changing this overwrites Fly air drag and Fly size; move those afterwards if you want to hand-tune one.'],
   ['Fly size','flySize',0.50,4.00,0.10,'Visual only. Scales the fly and its hi-vis post.'],
+  ['Rod colour','rodHue',0,7,1,'The blank: 0 graphite, 1 olive, 2 claret, 3 blue, 4 sand, 5 forest, 6 slate, 7 orange.'],
+  ['Reel colour','reelHue',0,7,1,'The reel frame and spool, same eight.'],
+  ['Line colour','lineHue',0,7,1,'The fly line. Bright is easier to track in the air; dull is easier on a fish in clear water.'],
+  ['Grip colour','gripHue',0,7,1,'The winding check and reel seat below the cork.'],
   ['Haptics','haptics',0.00,2.00,0.10,'Vibration strength for rod load, fish tension, and spool clicks.'],
   ['— SOUND —',null,0,0,0,''],
   ['Master volume','volume',0.00,1.00,0.05,'Everything you hear. Zero is silence. Sound starts when you press Enter VR, because browsers will not open an audio context without a gesture.'],
@@ -378,13 +384,13 @@ const MENU=[
   ['Fit zone to the water','zoneAuto',0,1,1,'Whether each fish gets a zone sized by the water he is actually sitting in, or every fish in the reach gets the same box. On, two things set it. First what he can SEE: a trout looks at the surface through Snell\u2019s window, a circle whose radius is about 1.13 times his depth below the film, so a fish hanging in two feet of water first picks a floating fly up a long way further upstream than one tucked under the bank in six inches \u2014 deep pool fish therefore want a long clean drift and a pocket fish will forgive a short one. Second what is IN THE WAY: if a rock, a sunk log or the lip of a drop sits upstream in his line, the zone grows to reach past it by Zone clear, so the fly has to come over or around the feature and still be drifting when it gets to him. That is the whole difficulty of pocket water and the game did not have it before. Off gives every fish exactly Zone length by Zone half-width.'],
   ['Zone clear m','zoneClear',0.00,3.00,0.10,'How far PAST an upstream rock, log or lip a fish\u2019s presentation zone reaches. This is the drift you have to buy with a mend or with where you stand: at 0 the zone stops at the feature and dropping the fly into the seam behind it is enough, and by a metre you have to have the fly tracking properly before it comes over. Nothing at all if Fit zone to the water is off.'],
   ['Zone minimum m','zoneMin',0.10,3.00,0.10,'The shortest a fitted zone may get, whatever the water says. A fish in a few inches of pocket water has almost no window, and without a floor here he would eat anything dropped anywhere near him.'],
-  ['Splash limit','splashV',1.00,9.00,0.20,'Landing speed above which the fly slaps down and spooks nearby fish.'],
+  ['Splash limit','splashV',1.00,4.00,0.05,'How hard the fly has to arrive before it slaps the water and puts nearby fish down \u2014 as a MULTIPLE of the speed this fly falls at under its own air resistance, not as a speed in metres per second. Measured through the scripted caster, a delivery lands at roughly 0.9x that falling speed whatever the fly is, so 1.00 means every cast slaps and there is no such thing as a soft presentation, while 2.60 is forgiving: only a fly genuinely driven at the water counts. The reason it is a multiple is that it used to be a speed, and then lowering Fly air drag \u2014 which makes the fly fall faster \u2014 quietly turned every ordinary delivery into a slap on every venue at once. Below the limit the sound is a dimple and no fish minds; above it, both come in from nothing rather than all at once.'],
   ['Lining radius','lineRad',0.10,2.00,0.05,'How close fly line may land to a fish before he is lined and put down.'],
   ['Spook seconds','spookT',1.00,20.0,0.50,'How long a spooked fish sulks before returning to his lie.'],
   ['Stamina drain','fatigue',0.20,3.00,0.05,'How fast a hooked fish tires under tension. Affects how hard he is to steer, not whether he can be netted.'],
   ['Rise style','riseAggro',0.00,1.00,0.05,'Blends what a rise looks like. At 0 every fish sips: a slow tilt up, the nose just breaking, a single soft ring. Toward 1 you get head-and-tail rises where nose, dorsal and tail break in sequence, and finally explosive slashes that charge across the surface and throw a real splash. Bigger fish lean toward head-and-tail on their own.'],
   ['Rise interest','riseRate',0.05,2.00,0.05,'How often a feeding fish noses the surface for naturals.'],
-  ['Feeding chance','feedChance',0.00,1.00,0.05,'Odds a fish is actively feeding when he re-evaluates. Feeding fish are the catchable ones.'],
+  ['Feeding chance','feedChance',0.00,1.00,0.05,'Odds a fish is actively feeding when he re-evaluates, every eight to twenty-two seconds. Feeding fish are the catchable ones, and this is the floor under how many of them there are at any moment \u2014 it ships at 0.90, raised from 0.60, because a reach where a third of the fish will not look at anything reads as a broken game rather than a hard one. It is a FLOOR and not a flattening: each species still multiplies it by its own appetite, so a brookie is on almost always, a brown is choosy and a salmon is not feeding in fresh water at all and never will be. Turn it down for a tough day.'],
   ['Non-feeder mult','nonFeedMult',0.00,1.00,0.05,'Take chance multiplier for a fish that is not feeding.'],
   ['Fish power','fishPower',0.30,2.50,0.05,'How hard a hooked fish pulls and runs.'],
   ['Look seconds','lookSecs',0.00,20.0,0.50,'How long a netted fish hangs in front of you before he goes to the bank. He comes up to chest height an arm\u2019s length away with his flank turned toward you and his card under him, and for these seconds he is yours to take: let go of the net button and pinch to have him in your hand. Take hold of him and the clock stops \u2014 he only leaves when you let go. At 0 he goes straight to the bank, which is what this did before.'],
@@ -415,7 +421,7 @@ const MENU=[
   ['Undercut Bend','!venue:bend',0,0,0,'A meander pool. Deep and undercut on the outside, shelving gravel on the inside, two sweepers. The only wadeable ground is the inside of the bend. Push right to go there.'],
   ['Beaver Pond','!venue:pond',0,0,0,'Stillwater. The fish cruise instead of holding, the fly sinks and pulls the tippet under, and a take is earned by stripping it at a speed he believes \u2014 not too slow, not faster than he can swim. Push right to go there.'],
   ['Alder Tunnel','!venue:alder',0,0,0,'A brush creek with a roof on it. The branches are solid to the line, so there is no backcast and no lifting the rod. Push right to go there.'],
-  ['Boat Drift','!venue:drift',0,0,0,'You do not wade this one. You stand in a drift boat and the river carries you down two bends and round again \u2014 the reach is one lap of river that repeats, so the boat is picked up at one end and put down at the other with nothing changing but the fish you have already shown a fly to. The left stick is the OARS: push it away to row downstream and pull it back to hold against the current when you want to work a seam for longer. Left and right still turn you. Push right to go there.'],
+  ['Boat Drift','!venue:drift',0,0,0,'You do not wade this one. You stand in a drift boat and the river carries you down two bends and round again \u2014 the reach is one lap of river that repeats, so the boat is picked up at one end and put down at the other with nothing changing but the fish you have already shown a fly to. The left stick is the OARS, both ways: push it away to row downstream, pull it back to hold against the current when you want to work a seam for longer, and push it left or right to FERRY \u2014 the hull crabs across the channel and the bow comes round into the angle on its own, which is how you cross to the far seam without giving up the drift. There is no snap turn here; the boat has a heading of her own. Push right to go there.'],
   ['Branch collision','branchOn',0,1,1,'Whether foliage is solid to the line. Only the Alder Tunnel has any, so this does nothing anywhere else.'],
   ['Branch grip','branchGrip',0.00,0.95,0.05,'How much speed the line loses where it touches a branch. At 0 it slides off; near 1 it stops dead in the leaves.'],
 ];
@@ -428,7 +434,7 @@ const PHYSICAL={
   rodDamp:14.0, tipSoft:0.60, rodTaper:1, fightFlex:1.00,
   leaderLen:2.74, tippetLen:0.90,
   dragMul:0.85,     /* felt value. 1.00 is the isolated-cylinder physics */
-  flyDrag:1,        /* the hackle, as a bluff body. 1.00 is a size 14 dry */
+  flyDrag:0.10,     /* felt value: 1.00 is a size 14 dry, and parachutes */
   lineWt:5.0,       /* AFFTA 5wt head = 140 gr / 30 ft = 0.99 g/m */
   guideMu:0.15, statFric:0.05, slipInertia:0.06, dragHeld:1.00, reelSlack:0.10, spoolDrag:9.00, spoolDead:0.05,
   tippet:40.0,      /* raised while the fight is being tuned; 5X would be 21 */
@@ -530,8 +536,8 @@ const VENUE_BASE={
   grade:1, current:1, gridCell:0.45, gridSpan:80, obstHeight:0.85, vortex:0.6,
   foam:0.15, foamLife:1.5, surfWave:0.65, waveShade:0.65, drift:1,
   clarity:1, sediment:0.06, specks:0.16, speckSize:0.051, speckRange:45,
-  treeRange:38, takeRadius:0.7, maxSlip:0.32, lineRad:0.5, splashV:4.5,
-  spookT:5, riseAggro:0.35, riseRate:0.55, feedChance:0.6,
+  treeRange:38, takeRadius:0.7, maxSlip:0.32, lineRad:0.5, splashV:2.6,
+  spookT:5, riseAggro:0.35, riseRate:0.55, feedChance:0.9,
   /* HOW LONG A DRIFT THE WATER CAN ACTUALLY GIVE YOU. Six metres is a run or
      a glide, where the fly can be put down a long way above a fish and tracked
      the whole way in. Pocket water cannot do that and neither can a plunge
@@ -544,6 +550,21 @@ const VENUE_BASE={
   upMax:6,
   flySink:0, branchOn:0, cruiseSpeed:1,
 };
+
+const WATER_LOOKS=[
+  ['mountain freestone',{watR:0.114,watG:0.247,watB:0.263,clarity:1.60,sediment:0.10,waterOpaque:1.00,foamR:0.933,foamG:0.957,foamB:0.945,foamDirt:0.00}],
+  ['tannic',            {watR:0.235,watG:0.110,watB:0.035,clarity:0.85,sediment:0.06,waterOpaque:1.00,foamR:0.902,foamG:0.831,foamB:0.686,foamDirt:0.45}],
+  ['glacial melt',      {watR:0.310,watG:0.510,watB:0.530,clarity:0.70,sediment:0.85,waterOpaque:1.10,foamR:0.949,foamG:0.965,foamB:0.969,foamDirt:0.20}],
+  ['chalk stream',      {watR:0.180,watG:0.380,watB:0.310,clarity:4.20,sediment:0.05,waterOpaque:0.85,foamR:0.945,foamG:0.961,foamB:0.941,foamDirt:0.10}],
+  ['overcast steel',    {watR:0.200,watG:0.228,watB:0.245,clarity:1.30,sediment:0.14,waterOpaque:1.05,foamR:0.914,foamG:0.925,foamB:0.933,foamDirt:0.25}],
+  ['deep blue',         {watR:0.035,watG:0.090,watB:0.290,clarity:2.40,sediment:0.02,waterOpaque:1.00,foamR:0.925,foamG:0.945,foamB:0.973,foamDirt:0.15}],
+  ['ink',               {watR:0.020,watG:0.026,watB:0.032,clarity:1.10,sediment:0.00,waterOpaque:1.25,foamR:0.800,foamG:0.812,foamB:0.824,foamDirt:0.30}],
+];
+let waterLook=0;
+/* by name, so a venue can say which water it is rather than carrying a copy
+   of five colour channels that would drift from this table the first time
+   anybody tuned one of them */
+const LOOK=Object.fromEntries(WATER_LOOKS);
 
 const SCENES={};
 
@@ -623,7 +644,8 @@ float scDep(float x,float zr){
   return d;}`,
     obst:rocks,
     lies:bLies,
-    par:{grade:1, current:0.85, gridCell:0.30, gridSpan:52, obstHeight:0.95,
+    par:{...LOOK['overcast steel'],
+       grade:1, current:0.85, gridCell:0.30, gridSpan:52, obstHeight:0.95,
          vortex:0.9, foam:0.35, takeRadius:0.45, maxSlip:0.42, riseAggro:0.55,
          speckRange:26,
          /* the pocket IS the drift: about two metres of it between one
@@ -638,26 +660,39 @@ float scDep(float x,float zr){
    which is what makes the tongue and the standing wave below it. */
 {
   const lips=[-45,-27,-9,9,27,45];
-  const holes=lips.map(l=>({x:l+5.5,z:0,rx:4.2,rz:5.0,d:1.85}));
+  /* THE POOL IS THE POINT, AND IT WAS NOT ONE. This reach read as a rapid
+     rather than a fall into a pool: the tongue off each lip carried straight
+     down over the fish and the fly was gone before it could be presented —
+     reported as the water being far too fast where the fish are lying. The
+     pool is now deeper (a deeper pool passes the same water more slowly) and
+     the channel opens out into it rather than staying pinched, which is what
+     a plunge pool actually does below a fall. */
+  const holes=lips.map(l=>({x:l+5.5,z:0,rx:4.6,rz:5.4,d:2.25}));
   const lipCut=lips.map(l=>({x:l,z:0,rx:1.8,rz:9.0,d:-0.30}));
   const all=holes.concat(lipCut);
   const hF=holesJS(all);
   SCENES.falls={
     name:'Stairstep Falls', sub:'step and plunge pool, foam you can read',
-    hwMax:6.6, dzMax:0.0, dMax:2.4, slope:0.006,
+    /* hwMax has to BOUND the geometry, and the pool below each lip now opens
+       the channel out past the 6.6 it pinches from — see hw(). */
+    hwMax:8.8, dzMax:0.0, dMax:2.9, slope:0.006,
     drops:lips.map(l=>({x:l,h:1.20,w:1.3})),
     dz:x=>0,
     hw:x=>{let w=6.6;
       for(let i=0;i<lips.length;i++) w-=3.2*SG(x,lips[i],2.6);
+      for(let i=0;i<lips.length;i++) w+=2.1*SG(x,lips[i]+5.5,3.6);
       return w;},
-    dep:(x,zr)=>{let w=6.6;
-      for(let i=0;i<lips.length;i++) w-=3.2*SG(x,lips[i],2.6);
+    /* one definition of the width, called — not a second copy of it. The two
+       used to be written out separately and would have drifted the moment
+       either changed, which is exactly what changed here. */
+    dep:(x,zr)=>{const w=SCENES.falls.hw(x);
       return Math.max(0,0.50*SCROSS(zr/w)+hF(x,zr)*SCROSS(zr/(w+1.5)));},
     glsl:`
 float scDz(float x){return 0.0;}
 float scHw(float x){
   float w=6.6;
   ${lips.map(l=>`w-=3.2*scG(x,${l.toFixed(1)},2.6);`).join('\n  ')}
+  ${lips.map(l=>`w+=2.1*scG(x,${(l+5.5).toFixed(1)},3.6);`).join('\n  ')}
   return w;}
 float scDep(float x,float zr){
   float w=scHw(x);
@@ -671,7 +706,8 @@ float scDep(float x,float zr){
     lies:[{x:-40.0,z:0.6,len:0.38},{x:-22.5,z:-1.8,len:0.34},
           {x:-3.0,z:1.2,len:0.50},{x:14.5,z:-1.0,len:0.42},
           {x:31.0,z:0.8,len:0.36}],
-    par:{grade:1, current:1.05, gridCell:0.32, gridSpan:56, foam:0.55,
+    par:{...LOOK['deep blue'],
+       grade:1, current:0.62, gridCell:0.32, gridSpan:56, foam:0.55,
          foamLife:3.0, vortex:1.1, surfWave:0.9, waveShade:0.9,
          riseAggro:0.65, takeRadius:0.8,
          /* nothing drifts over a four-foot fall and keeps drifting, so the
@@ -701,10 +737,11 @@ float scDep(float x,float zr){return 1.05*pow(max(scCross((zr-scDz(x))/scHw(x)),
         {x:4,z:-1.2,len:0.52},{x:19,z:2.0,len:0.40},{x:34,z:-2.4,len:0.38}],
   weeds:[{x:-32,z:-2.2,r:2.4},{x:-18,z:2.6,r:2.0},{x:-2,z:-1.4,r:2.8},
          {x:12,z:2.2,r:2.2},{x:27,z:-2.6,r:2.5},{x:40,z:1.8,r:2.3}],
-  par:{grade:1, current:0.55, gridCell:0.45, gridSpan:70, vortex:0.15,
+  par:{...LOOK['chalk stream'],
+       grade:1, current:0.55, gridCell:0.45, gridSpan:70, vortex:0.15,
        foam:0.02, clarity:1.5, sediment:0.03, specks:0.10, speckSize:0.038,
-       maxSlip:0.16, takeRadius:0.55, lineRad:0.95, splashV:2.6,
-       riseAggro:0.10, riseRate:0.85, feedChance:0.75, spookT:9}
+       maxSlip:0.16, takeRadius:0.55, lineRad:0.95, splashV:1.6,
+       riseAggro:0.10, riseRate:0.85, feedChance:0.90, spookT:9}
 };
 
 /* ── 05 THE LONG RUN ──────────────────────────────────────────
@@ -728,7 +765,8 @@ float scDep(float x,float zr){
         {x:18,z:5.2,r:1.20,h:1.00,kind:'rock',sh:0,sgn:-1}],
   lies:[{x:-20,z:-4.4,len:0.44},{x:-2,z:0.4,len:0.50},
         {x:16,z:-4.8,len:0.46},{x:36,z:1.8,len:0.38},{x:50,z:-2.2,len:0.42}],
-  par:{grade:1, current:1.0, gridCell:0.42, gridSpan:64, treeRange:44,
+  par:{...LOOK['chalk stream'],
+       grade:1, current:1.0, gridCell:0.42, gridSpan:64, treeRange:44,
        takeRadius:0.85, maxSlip:0.28, speckRange:52, spookT:4}
 };
 
@@ -768,7 +806,8 @@ float scDep(float x,float zr){
      always meant to ask for. */
   lies:[{x:-27,z:-9.0,len:0.48},{x:-20.4,z:-8.0,len:0.54},
         {x:0,z:0.4,len:0.40},{x:23,z:8.8,len:0.46},{x:28,z:1.0,len:0.28}],
-  par:{grade:1, current:0.95, gridCell:0.38, gridSpan:58, vortex:0.7,
+  par:{...LOOK['tannic'],
+       grade:1, current:0.95, gridCell:0.38, gridSpan:58, vortex:0.7,
        takeRadius:0.6, lineRad:0.6, riseAggro:0.45}
 };
 
@@ -792,23 +831,27 @@ float scHw(float x){return 0.9+13.0*sqrt(max(0.0,1.0-(x/23.0)*(x/23.0)));}
 float scDep(float x,float zr){
   float h=scHw(x);
   return (0.40+1.75*scSS(1.2,7.0,h))*pow(max(scCross(zr/h),1e-4),0.75);}`,
-  /* drowned timber. Small radius, tall: nothing to the solver, everything
-     to a line being stripped past it. */
-  obst:[{x:-9,z:5.0,r:0.26,h:2.30,kind:'rock',sh:0,sgn:1},
-        {x:-2,z:-4.2,r:0.24,h:2.10,kind:'rock',sh:0,sgn:-1},
-        {x:6,z:2.0,r:0.28,h:2.40,kind:'rock',sh:0,sgn:1},
-        {x:13,z:-6.4,r:0.22,h:2.00,kind:'rock',sh:0,sgn:-1},
-        {x:-15,z:3.4,r:0.25,h:2.20,kind:'rock',sh:0,sgn:1}],
+  /* NO TIMBER. These were meant to be drowned snags — small radius, tall,
+     nothing to the solver and everything to a line being stripped past one.
+     Drawn with the rock mesh, which is a squashed SPHERE, a 0.26 m radius
+     stood at 2.2 m above the bed is not a snag: it is a smooth post standing
+     out of a still pond with nothing holding it up. Reported from the water
+     as boulders that make no sense, tall columns, take them out. A pond does
+     not need obstacles to be interesting — the fish cruise, and the whole
+     difficulty is the strip. If drowned timber comes back it needs a mesh of
+     its own that reaches the bed, not a boulder on stilts. */
+  obst:[],
   lies:[{x:-8,z:-3.0,len:0.44,cr:[5.5,3.4,0.16]},
         {x:5,z:6.0,len:0.52,cr:[6.5,4.2,0.12]},
         {x:12,z:-2.0,len:0.38,cr:[4.5,3.0,0.20]},
         {x:-15,z:1.0,len:0.46,cr:[4.0,2.6,0.14]}],
   cruise:true, chase:true, holdDeep:2.0,
-  par:{grade:1, current:0.35, gridCell:0.50, gridSpan:56, vortex:0.05,
+  par:{...LOOK['tannic'],
+       grade:1, current:0.35, gridCell:0.50, gridSpan:56, vortex:0.05,
        foam:0.0, specks:0.08, speckSize:0.040, speckRange:22, drift:1,
        clarity:1.25, sediment:0.10, surfWave:0.25, waveShade:0.35,
        flySink:0.32,
-       takeRadius:0.5, riseRate:0.30, feedChance:0.85, riseAggro:0.55,
+       takeRadius:0.5, riseRate:0.30, feedChance:0.95, riseAggro:0.55,
        treeRange:44, spookT:6}
 };
 
@@ -847,7 +890,8 @@ float scDep(float x,float zr){
             {x:-6,z:-2.4,y:1.9,r:2.0},{x:2,z:2.2,y:2.0,r:1.9},
             {x:10,z:-2.6,y:2.1,r:2.1},{x:18,z:2.4,y:1.9,r:2.0},
             {x:26,z:-2.2,y:2.0,r:1.9},{x:34,z:2.6,y:2.1,r:2.1}],
-    par:{grade:1, current:0.80, gridCell:0.22, gridSpan:40, obstHeight:0.90,
+    par:{...LOOK['overcast steel'],
+       grade:1, current:0.80, gridCell:0.22, gridSpan:40, obstHeight:0.90,
          vortex:0.8, foam:0.30, treeRange:24, speckRange:16,
          takeRadius:0.40, maxSlip:0.45, riseAggro:0.60, branchOn:1}
   };
@@ -943,7 +987,8 @@ float scDep(float x,float zr){
        can pull on the oars, and swing is how quickly the hull comes round to
        point where it is going. */
     boat:{free:0.34, row:0.62, swing:1.4, len:4.3, beam:1.55},
-    par:{grade:1, current:0.90, gridCell:0.50, gridSpan:84, vortex:0.5,
+    par:{...LOOK['deep blue'],
+       grade:1, current:0.90, gridCell:0.50, gridSpan:84, vortex:0.5,
          foam:0.20, treeRange:42, speckRange:34, obstHeight:0.85,
          takeRadius:0.70, maxSlip:0.34, riseAggro:0.45, spookT:4}
   };
@@ -1237,7 +1282,7 @@ let rodArc=ROD_ARC;       /* live path length through the guides */
 let handMode=0,rodPinch=false,wrapTotal=0;
 /* how much of the blank a pull at the tiptop is shared out over */
 const ROD_REACT=4;
-let clickAcc=0,slipOut=0,spoolOut=0,reeling=false;
+let clickAcc=0,slipOut=0,spoolOut=0,reeling=false,reelPull=0;
 /* fishTension is the raw pull in the line, which the rod reaction and the
    break-off test both want. fishCarried is what the tippet could actually
    transmit into the fish — see Trout.step and HANDOFF bug 15. Kept separate
@@ -1283,8 +1328,41 @@ function lineProfile(s){
   }
   return [0.00040,0.00050];
 }
-const FLY_R=0.005;                 /* hackle radius, metres */
+let FLY_R=0.005;                   /* bluff radius, metres — set by the pattern */
 let flyDragK=0;
+/* HOW FAST THIS FLY FALLS WHEN IT IS ONLY FALLING. Straight out of the drag
+   coefficient above: at terminal, dragK*v^2 = g. It is the natural unit for
+   everything about an ARRIVAL, and the reason is measured rather than argued.
+   Driving the scripted caster through a full delivery at four different
+   values of `Fly air drag` puts the fly on the water at:
+
+       flyDrag 1.000   terminal 2.10   arrives 1.82   (0.87x)
+       flyDrag 0.400   terminal 3.32   arrives 1.68   (0.51x)
+       flyDrag 0.100   terminal 6.64   arrives 5.77   (0.87x)
+       flyDrag 0.075   terminal 7.67   arrives 8.40   (1.10x)
+
+   — so a delivery lands at about the speed the fly falls at, whatever that
+   speed is. `Splash limit` used to be an absolute 4.5 m/s, which is 2.15x
+   terminal for a size 14 dry and 0.68x for anything that falls faster: move
+   Fly air drag and every venue's splash behaviour silently re-tuned itself,
+   and lowering it far enough made a fly that had only been LOWERED slap the
+   water again — the exact fault the bluff-body term was added to fix. So the
+   limit is now carried as a MULTIPLE of this, and cannot go stale. */
+const flyTerminal=()=>Math.sqrt(9.81/Math.max(1e-9,flyDragK*Math.max(0.001,P.flyDrag)));
+/* A CEILING ON TOP OF THE MULTIPLE, and it is what keeps a weighted fly
+   honest. Purely relative, the rule says a fly is only slapping if it beat
+   its OWN falling speed — true and useful for a dry, and nonsense for a bead
+   head: the pheasant tail falls at 16.9 m/s, so 2.6x of that put its slap
+   threshold at 44 m/s and a nymph dropped from any height in this game could
+   never have disturbed anything. Water does not care what you tied on. Nine
+   metres a second is a hard arrival by any fly's standards — twice the old
+   absolute limit, which is the forgiveness that was asked for — and it is a
+   fact about the surface rather than a matter of taste, so it is a constant
+   here and `Splash limit` stays the knob. The two rules together say what was
+   actually wanted: a floating fly that was merely lowered never slaps, and a
+   weighted one driven in still does. */
+const SLAP_CEIL=9.0;
+const splashLimit=()=>Math.min(flyTerminal()*Math.max(0.2,P.splashV),SLAP_CEIL);
 function rebuildMasses(){
   for(let i=0;i<MAXNODE;i++){
     const s=sArc(i), span=nodeSpan(i);
@@ -2091,7 +2169,11 @@ const RIDE=0.010, BREAK=2.6;
    measured in arc metres from the fly; SINK_FEATHER is how abruptly the film
    lets go across it, and SINK_LINE caps how much fly line the fly is strong
    enough to take with it. */
-const SINK_FEATHER=0.90, SINK_LINE=2.20;
+/* 0.90 was most of a leader, which sounds generous and is not: the feather
+   is where the line changes direction from flat to down, and a metre of
+   0.15 mm nylon turning through most of a right angle still reads as a
+   corner. 1.8 m spreads it over a length you can see curving. */
+const SINK_FEATHER=1.80, SINK_LINE=2.20;
 let sinkArc=0;
 function sinkStep(dt){
   if(P.flySink<=0.001){sinkArc=0;return;}
@@ -2142,13 +2224,28 @@ function waterAndGround(i,h,t){
        film, not sit on it. Hard-clamping every node was why a hooked fish showed
        a dead vertical line: the leader was nailed to the surface and the whole
        transition happened across one segment. */
-    if(sinking){
-      if(i===0) vel[p+1]+=(-P.flySink-vel[p+1])*Math.min(1,h*5);
-      else      vel[p+1]-=1.2*h*rel;
-    } else if(hooked&&sArc(i)<P.tippetLen*1.3){
-      vel[p+1]-=1.2*h;
+    /* THE FILM LETS GO BY DEGREES, IN POSITION AS WELL AS IN SPEED. `rel`
+       already graded how hard a node is pulled DOWN across the feather, but
+       everything the film still owned was hard-clamped flat onto it —
+       `pos = target`, exactly, with the downward velocity zeroed. So the
+       whole bend from surface to depth had to happen inside the one node
+       where rel crossed 0.02, and a sinking line on the pond read as a length
+       of rope lying flat on the water with a sharp corner in it. Reported as
+       "what's under the water looks realistic, the transition doesn't".
+       The hold is now 1 - rel: full where the film has the line, easing off
+       through the feather, gone where the fly has pulled it under. At rel 0
+       this is bit-for-bit the old hard clamp, so every dry-fly venue — where
+       flySink is 0 and rel is 0 for every node — is untouched. */
+    const hold=Math.max(0,Math.min(1,1-rel));
+    if(sinking&&i===0){
+      vel[p+1]+=(-P.flySink-vel[p+1])*Math.min(1,h*5);
     } else {
-      pos[p+1]=target;if(vel[p+1]<0)vel[p+1]=0;
+      if(sinking) vel[p+1]-=1.2*h*rel;
+      else if(hooked&&sArc(i)<P.tippetLen*1.3) vel[p+1]-=1.2*h;
+      if(hold>0.001&&!(hooked&&sArc(i)<P.tippetLen*1.3&&!sinking)){
+        pos[p+1]+=(target-pos[p+1])*hold;
+        if(vel[p+1]<0) vel[p+1]*=(1-hold);
+      }
     }
   }
   else if(vel[p+1]<BREAK){
@@ -2479,8 +2576,32 @@ function physics(dt){
          and gone inside a second, with the fish no closer than it started.
          The CORK CLAMP still holds everything — that is the deliberate act,
          and it is still how you break yourself off on purpose. */
-      if(hooked&&!rodPinch&&fishTension>thr&&offSpool<TOTAL_LINE){
-        const give=Math.min((fishTension-thr)/Math.max(P.lineStretch,1),0.08);
+      /* A HAND ON THE HANDLE HOLDS THE SPOOL. This branch used to give line at
+         the drag setting whether or not you were cranking, on the reasoning
+         that the drag, the line and the rod are in series and the drag is the
+         weakest link — true of a reel, and it made the fight unloseable and
+         unwinnable at once: tension could never climb past nine newtons, so
+         no fish could ever be pulled in and no fish could ever break you off.
+         What was asked for instead is the rule an angler actually plays by:
+         winding always gains line, and if he is pulling harder than you are
+         winding, that goes into the tippet and the tippet is what fails. So
+         while the trigger is down the drag is held shut by `Reel power` on
+         top of its setting, and the moment you let go it is a drag again and
+         he can run. Over-reeling is now the way you break yourself off, which
+         is the whole of the risk in cranking on a fresh fish. */
+      /* ...AND HOW FIRMLY IS HOW HARD YOU ARE PULLING THE TRIGGER. Holding
+         the spool shut by the full Reel power whenever the trigger was down
+         at all left no relief path anywhere below the tippet: tension rose
+         monotonically until the line parted, so every fish broke off and
+         easing the trigger only made it slower. Measured that way, a 2x
+         trout wound at a THIRD of the rate still popped at 41.8 N having
+         gained 0.58 m. Scaling the hold by the trigger makes the squeeze
+         itself the drag setting: feathered, the spool slips well below the
+         tippet and he can be played all day; pinned, it holds past breaking
+         and that is what snaps him off. */
+      const thrReel=thr+reelPull*Math.max(0,P.reelPower);
+      if(hooked&&!rodPinch&&fishTension>thrReel&&offSpool<TOTAL_LINE){
+        const give=Math.min((fishTension-thrReel)/Math.max(P.lineStretch,1),0.08);
         if(give>0){
           offSpool=Math.min(TOTAL_LINE,offSpool+give);
           lineOut+=give;
@@ -3115,10 +3236,31 @@ function skirtRock(m,o){
   pa.needsUpdate=true;
   m.geometry.computeVertexNormals();
 }
+/* A LOG HAS TO LIE ON SOMETHING. `h*obstHeight` is where the SOLVER wants the
+   centre of the collision ellipsoid, and for a rock the mesh is the same size
+   as that ellipsoid so the two agree. A log's mesh is not: it is a 0.24 m
+   trunk standing in for an ellipsoid 0.55r high, so on the Boat Drift its
+   centre went 0.85 m above the bed while its underside was only 0.24 m below
+   that — and the trunk hung six-tenths of a metre clear of the river bed with
+   the water running under it. Reported from the boat, and the same fault the
+   rocks had before rockSkirt.
+   A log rests on the HIGHEST ground under its length, the way one actually
+   would, and is bedded a little way into the gravel so no seam shows. */
+function logRest(o){
+  const half=o.r*1.1;                      /* the trunk is o.r*2.2 long */
+  const c=Math.cos(0.35), sn=Math.sin(0.35);
+  let top=bedY(o.x,o.z);
+  for(let k=-3;k<=3;k++){
+    const t=k/3*half;
+    top=Math.max(top,bedY(o.x+t*c,o.z-t*sn));
+  }
+  return top+0.24*0.75;
+}
 function placeObstacles(){
   for(let i=0;i<OBST.length;i++){const o=OBST[i];
     if(o.kind==='rock') skirtRock(obstMeshes[i],o);
-    obstMeshes[i].position.set(o.x,bedY(o.x,o.z)+o.h*P.obstHeight,o.z);}
+    obstMeshes[i].position.set(o.x,
+      o.kind==='log'?logRest(o):bedY(o.x,o.z)+o.h*P.obstHeight, o.z);}
 }
 placeObstacles();
 
@@ -4165,16 +4307,6 @@ function updateWaterColour(){
   }
 }
 /* named water, because six numbers is a lot to guess at from a standing start */
-const WATER_LOOKS=[
-  ['mountain freestone',{watR:0.114,watG:0.247,watB:0.263,clarity:1.60,sediment:0.10,waterOpaque:1.00,foamR:0.933,foamG:0.957,foamB:0.945,foamDirt:0.00}],
-  ['tannic',            {watR:0.235,watG:0.110,watB:0.035,clarity:0.85,sediment:0.06,waterOpaque:1.00,foamR:0.902,foamG:0.831,foamB:0.686,foamDirt:0.45}],
-  ['glacial melt',      {watR:0.310,watG:0.510,watB:0.530,clarity:0.70,sediment:0.85,waterOpaque:1.10,foamR:0.949,foamG:0.965,foamB:0.969,foamDirt:0.20}],
-  ['chalk stream',      {watR:0.180,watG:0.380,watB:0.310,clarity:4.20,sediment:0.05,waterOpaque:0.85,foamR:0.945,foamG:0.961,foamB:0.941,foamDirt:0.10}],
-  ['overcast steel',    {watR:0.200,watG:0.228,watB:0.245,clarity:1.30,sediment:0.14,waterOpaque:1.05,foamR:0.914,foamG:0.925,foamB:0.933,foamDirt:0.25}],
-  ['deep blue',         {watR:0.035,watG:0.090,watB:0.290,clarity:2.40,sediment:0.02,waterOpaque:1.00,foamR:0.925,foamG:0.945,foamB:0.973,foamDirt:0.15}],
-  ['ink',               {watR:0.020,watG:0.026,watB:0.032,clarity:1.10,sediment:0.00,waterOpaque:1.25,foamR:0.800,foamG:0.812,foamB:0.824,foamDirt:0.30}],
-];
-let waterLook=0;
 
 /* ---- how a speck is drawn -------------------------------------------------
    A speck is not a fleck of foam. What you actually see on a river is a train
@@ -5654,6 +5786,7 @@ class Trout{
        slow timer because they depend on where he is, and he moves. */
     this.zoneUp=P.upMax; this.zoneHalf=P.latTol; this.zoneT=0; this.zoneAcc=0;
     this.zoneEnter=null; this.zoneRun=0; this.zoneFit=0; this.zoneWhy='';
+    this.zoneWorst=0; this.zoneWorstAt=0; this.inBoat=false;
     this.mesh=makeTrout(this.len,this.sp);fishGroup.add(this.mesh);
     this.marker=makeMarker();fishGroup.add(this.marker);
   }
@@ -5788,7 +5921,8 @@ class Trout{
        head has covered none of it and is worth a quarter of the chance, a fly
        that came the whole way is worth all of it.
      ───────────────────────────────────────────────────────────────────────*/
-  zoneReset(){ this.zoneT=0; this.zoneAcc=0; this.zoneEnter=null; this.zoneRun=0; }
+  zoneReset(){ this.zoneT=0; this.zoneAcc=0; this.zoneEnter=null; this.zoneRun=0;
+               this.zoneWorst=0; this.zoneWorstAt=0; }
   /* Recomputed on a slow timer rather than every frame: it walks the obstacle
      list and samples the surface, and neither answer changes inside a second. */
   fitZone(){
@@ -5836,19 +5970,26 @@ class Trout{
     const crown=o=>bedY(o.x,o.z)+o.h*P.obstHeight
                   +o.r*(o.kind==='log'?0.55:0.72);
     const scan=ZONE_SCAN(base), clear=Math.max(0,P.zoneClear);
-    let why='window', stop=Infinity;
+    /* across the channel, at each one's own station — same reason as zoneStep */
+    const myZ=this.p.z-SC.dz(this.p.x), lat=o=>Math.abs((o.z-SC.dz(o.x))-myZ);
+    let why='window', whyD=Infinity, stop=Infinity;
     for(const o of OBST){
       const dx=this.p.x-o.x;                       /* >0: it is upstream of him */
       if(dx<=0.15||dx>scan) continue;
-      if(Math.abs(o.z-this.p.z)>o.r+this.zoneHalf+0.35) continue;
+      const off=lat(o);
+      if(off>o.r+this.zoneHalf+0.35) continue;
       up=Math.max(up,dx+o.r+clear);
       /* in HIS line, and standing out of the water: the drift starts below it */
-      if(Math.abs(o.z-this.p.z)<o.r&&crown(o)>surfY(o.x)+PROUD) stop=Math.min(stop,dx-o.r);
+      if(off<o.r&&crown(o)>surfY(o.x)+PROUD) stop=Math.min(stop,dx-o.r);
       /* Whose seam he is sitting in, for the refusal to be able to name it.
          Set when the feature is IN the box, not only when it stretched it —
          a rock already inside a deep fish's window is still the thing your
-         drift has to survive. */
-      why=o.kind==='log'?'log':'rock';
+         drift has to survive.
+         THE NEAREST ONE NAMES IT. This used to be whichever obstacle came
+         last in OBST order, which is an array index and not a fact about the
+         river: with two rocks in a fish's window the refusal could name the
+         one nine metres up rather than the one he is sitting behind. */
+      if(dx<whyD){ why=o.kind==='log'?'log':'rock'; whyD=dx; }
     }
     for(const d of DROPS){
       const dx=this.p.x-(d.x+d.w);
@@ -5867,11 +6008,29 @@ class Trout{
   zoneStep(dt,fx,fz,slip,live){
     if(!live||this.state!=='holding'){ this.zoneReset(); return; }
     const dx=this.p.x-fx;                          /* >0: fly is upstream */
-    const dz=Math.abs(fz-this.p.z);
+    /* HIS LANE BENDS WITH THE RIVER. This used to be |fz - his z| in WORLD
+       z, which is a box with its sides parallel to the x axis — right on a
+       straight reach and wrong on every other one. On the Boat Drift the
+       centreline swings 3.8 m either way over a 96 m lap, so it moves about
+       1.45 m sideways across a 6 m drift while a shallow fish's lane is
+       0.81 m wide: a fly tracking the current PERFECTLY sat outside the box
+       for most of its run and only entered near his nose, so zoneRun stayed
+       tiny, cover read low, and a good drift was reported as "it landed on
+       his head". Measured at four of the six lies on that reach.
+       Both offsets are taken from the centreline at their own station, so
+       what is compared is where each one sits ACROSS the channel. CZ is in
+       both and cancels. */
+    const dz=Math.abs((fz-SC.dz(fx))-(this.p.z-SC.dz(this.p.x)));
     if(dx>-0.25&&dx<this.zoneUp&&dz<this.zoneHalf){
       if(this.zoneEnter===null) this.zoneEnter=dx;
       this.zoneT+=dt; this.zoneAcc+=slip*dt;
       this.zoneRun=Math.max(this.zoneRun,this.zoneEnter-dx);
+      /* and WHERE it dragged, which is what lets the refusal name a seam
+         honestly. A fly that skated the whole way down and one that was
+         snatched away in the last half metre are the same average, and only
+         the first of them has anything to do with the rock at the top of
+         the box. */
+      if(slip>this.zoneWorst){ this.zoneWorst=slip; this.zoneWorstAt=dx; }
     } else if(dx<=-0.25||dz>this.zoneHalf*1.7||dx>=this.zoneUp*1.25){
       this.zoneReset();
     }
@@ -5893,7 +6052,11 @@ class Trout{
        worth a quarter; one that came the whole way down it is worth all of it */
     const pres=drifting?0.25+0.75*cover:1;
     const chance=(this.feeding?1:P.nonFeedMult)*(clean?1:0.06)*pres*beh(this,'take');
-    return {avgSlip,clean,cover,pres,chance,seen};
+    /* Where the worst of the drag was, as a fraction of the box: 1 is up at
+       the top where a seam would be, 0 is on his nose. Only meaningful when
+       the fly was actually watched through the box. */
+    const dragUp=seen?Math.max(0,Math.min(1,this.zoneWorstAt/Math.max(0.35,this.zoneUp))):0;
+    return {avgSlip,clean,cover,pres,chance,seen,dragUp};
   }
   /* ── LANDED ────────────────────────────────────────────────────────────
      Two stages, and the first one is the point of the whole game.
@@ -5946,14 +6109,44 @@ class Trout{
     const eye=_bankTmp.y;
     const x=Math.max(-48,Math.min(48,_bankTmp.x))+((this.trophy%3)-1)*0.55;
     const cz=CZ+SC.dz(x), side=_bankTmp.z>=cz?1:-1;
-    let u=0.98, z=cz+side*SC.hw(x)*u;
-    while(u>0.45&&bedDepth(x,z)<0.22){u-=0.03;z=cz+side*SC.hw(x)*u;}
+    /* WATER, OR IT DOES NOT COUNT. This walk used to stop at u=0.45 whether
+       or not it had found any, and then put him wherever it had got to — so
+       on a reach whose margin is dry gravel or standing rock for that whole
+       band, a landed fish was parked on the bank and swam up out of the
+       river to get there. Reported from Boulder Garden, whose pockets are
+       exactly that: shallow water between boulders, with the crown of a
+       boulder reading as bed a long way above the film.
+       So it now walks the WHOLE half-section to the centreline, refuses
+       anything standing out of the water, tries the far side if this one has
+       nothing, and failing both puts him back in his own lie — which is by
+       construction water a fish can be in. There is no branch left that
+       returns dry ground. */
+    const holds=(zz)=>{
+      if(bedDepth(x,zz)<0.22) return false;
+      for(const o of OBST){                    /* not inside something solid */
+        if(Math.hypot(o.x-x,o.z-zz)<o.r+0.25) return false;
+      }
+      return true;
+    };
+    let z=null;
+    for(const sd of [side,-side]){
+      for(let u=0.98;u>=0;u-=0.03){
+        const zz=cz+sd*SC.hw(x)*u;
+        if(holds(zz)){ z=zz; break; }
+      }
+      if(z!==null) break;
+    }
+    if(z===null){ this.bank.copy(this.lie); return; }
     /* CHEST HEIGHT, NOT THE BED. He used to settle into two inches of margin,
        which put him below the waterline and out of sight from anywhere but
        directly above him — you had to wade over and look down to find what you
        had caught. He now hangs at the same height he was held up at, so the
        fish on the bank reads from across the reach and can still be taken in
-       the hand without stooping into the shallows. The bed is the only floor. */
+       the hand without stooping into the shallows. The bed is the only floor.
+       (Deliberately ABOVE the film, and left that way: what was reported from
+       Boulder Garden was a fish resting over dry GROUND, which is the lateral
+       search above, not the height. Capping this at the surface instead would
+       sink him back into the margin the comment is about.) */
     this.bank.set(x,Math.max(bedY(x,z)+0.15,eye-P.chestDrop),z);
   }
   /* Chest height, an arm's length along the way you are actually looking, and
@@ -6224,19 +6417,30 @@ class Trout{
         if(this.showT>0){
           this.showT-=dt;
           if(this.showT<=0){
-            /* THERE IS NO BANK FROM A BOAT. Nowhere to rest him, and nowhere
-               you could walk to afterwards to look at him again — the boat
-               will be two hundred metres downstream by then. So the look IS
-               the whole of it: he goes over the side, swims down out of the
-               light, and is back in his lie by the time you come round. */
+            /* THE STERN LOCKER IS THE BANK, FROM A BOAT. There is no margin to
+               rest him on and nowhere you could walk back to — but there is a
+               boat, and the boat comes with you. He used to go over the side
+               and be gone the moment you had looked at him, which threw away
+               the whole point of landing one: from the deck you got a fish
+               for `lookSecs` and then an empty river.
+               So he goes aft onto the locker behind the rower's bench, where
+               he stays in view for the rest of the drift and MAX_TROPHY culls
+               him in his turn like any other. Stored boat-local, because a
+               world point aft of a moving hull is only true for one frame. */
             if(SC.boat){
-              this.released=true;
-              this.bank.set(this.p.x,
-                surfY(this.p.x)-Math.min(1.10,Math.max(0.35,bedDepth(this.p.x,this.p.z)*0.55)),
-                this.p.z);
-              say('back he goes',this);
+              this.inBoat=true;
+              say('he goes in the locker',this);
             } else say('he\u2019s away to rest at the bank',this);
           }
+        }
+        /* A FISH IN THE BOAT IS STORED IN THE BOAT. His rest is read back out
+           of boat-local coordinates every frame while he is aboard, so the
+           hull can drift, swing through a bend and wrap a lap without it
+           going stale. The three trophies share the locker lid abreast of
+           each other rather than stacking in one spot. */
+        if(this.inBoat&&boatOn&&SC.boat){
+          const slot=((this.trophy%3)-1)*0.26;
+          boatToWorld((SC.boat.len||4.3)*-0.45+0.10, 0.33, slot, this.bank);
         }
         /* The bob goes in the TARGET, not on top of the position: adding it to
            p every frame is an integral, not an offset, and the fish would
@@ -6477,7 +6681,7 @@ class Trout{
   }
   reseat(){
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
-    this.released=false;
+    this.released=false;this.inBoat=false;
     this.badT=0;this.trophy=0;this.showT=0;this.zoneReset();
     this.hideLabel();
     if(this.held){this.held=false;if(fishHeld===this)fishHeld=null;}
@@ -6623,7 +6827,19 @@ const DYN_N=170;
 const lineTube=new DynTube(DYN_N,4);
 lineTube.mesh.renderOrder=3;scene.add(lineTube.mesh);
 const dynPath=new Float32Array(DYN_N*3);
+/* ── YOUR TACKLE, YOUR COLOURS ─────────────────────────────────────────
+   Eight, chosen to be told apart at arm's length in a headset rather than to
+   be a colour wheel: two neutrals, two earths, and four that read as a rod
+   somebody picked on purpose. Hue and saturation only — the lightness ramp,
+   the label wrap, the ferrule bands and the metal all keep their own shading,
+   so a recoloured rod still looks like a rod and not like a painted stick. */
+const TACKLE_HUES=[
+  ['graphite',0.565,0.10],['olive',0.22,0.45],['claret',0.98,0.55],
+  ['blue',0.585,0.62],   ['sand',0.10,0.38],['forest',0.34,0.50],
+  ['slate',0.58,0.14],   ['orange',0.065,0.78]];
+const hueOf=k=>TACKLE_HUES[Math.max(0,Math.min(7,Math.round(P[k]||0)))];
 const cFly=new THREE.Color(0xffb320),cLdr=new THREE.Color(0xfff0c8),cBack=new THREE.Color(0xd8d2c0);
+const cFly0=cFly.clone(),cLdr0=cLdr.clone(),cBack0=cBack.clone();
 
 /* rod tube */
 class RodTube{
@@ -6644,6 +6860,10 @@ class RodTube{
       if(Math.abs(t-0.33)<0.016||Math.abs(t-0.63)<0.016)
         c.setHSL(0.56,0.35,0.09);                              /* ferrules    */
       for(let j=0;j<R;j++){const k=(i*R+j)*3;col[k]=c.r;col[k+1]=c.g;col[k+2]=c.b;}
+      /* the same three bands, kept as HSL, so a repaint can move the hue and
+         leave the lightness ramp and the wraps exactly where they were */
+      if(!this.band) this.band=[];
+      this.band[i]=(t>0.045&&t<0.135)?1:(Math.abs(t-0.33)<0.016||Math.abs(t-0.63)<0.016)?2:0;
     }
     for(let i=0;i<n-1;i++)for(let j=0;j<R;j++){
       /* WINDING. The frame here is (radial, angular, alongTube) and it is
@@ -6657,10 +6877,26 @@ class RodTube{
     g.setAttribute('position',new THREE.BufferAttribute(this.p,3));
     g.setAttribute('normal',new THREE.BufferAttribute(this.nm,3));
     g.setAttribute('color',new THREE.BufferAttribute(col,3));
-    g.setIndex(idx);this.geo=g;
+    g.setIndex(idx);this.geo=g;this.col=col;
     this.mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
       vertexColors:true,roughness:0.22,metalness:0.30}));
     this.mesh.frustumCulled=false;
+  }
+  /* REPAINT, KEEPING THE ROD A ROD. Only hue and saturation move: the
+     lightness ramp toward the tip, the pale label wrap and the dark ferrule
+     bands are all rebuilt at the new hue from the band map, so an orange rod
+     still has its wraps and its ferrules rather than becoming one flat
+     orange stick. */
+  recolour(hue,sat){
+    const n=this.n,R=this.R,col=this.col,c=new THREE.Color();
+    for(let i=0;i<n;i++){
+      const t=i/(n-1);
+      if(this.band[i]===1)      c.setHSL(hue,Math.min(0.30,sat*0.35),0.72);
+      else if(this.band[i]===2) c.setHSL(hue,Math.min(0.55,sat*0.60),0.09);
+      else                      c.setHSL(hue,sat,0.17+0.10*t);
+      for(let j=0;j<R;j++){const k=(i*R+j)*3;col[k]=c.r;col[k+1]=c.g;col[k+2]=c.b;}
+    }
+    this.geo.attributes.color.needsUpdate=true;
   }
   update(src){
     const n=this.n,R=this.R;
@@ -6878,16 +7114,131 @@ for(let g=0;g<NG;g++){
 
 const flyGrp=new THREE.Group();
 const flyAnchor=new THREE.Group();flyGrp.add(flyAnchor);
-{
-  const body=new THREE.Mesh(new THREE.SphereGeometry(0.011,8,6),
-    new THREE.MeshStandardMaterial({color:0x2e2a22,roughness:0.9}));
-  const hackle=new THREE.Mesh(new THREE.TorusGeometry(0.014,0.0035,4,10),
-    new THREE.MeshStandardMaterial({color:0x9b8862,roughness:0.85}));
-  hackle.rotation.x=Math.PI/2;
-  const post=new THREE.Mesh(new THREE.ConeGeometry(0.008,0.030,6),
-    new THREE.MeshStandardMaterial({color:0xff5a2b,emissive:0xff3300,emissiveIntensity:0.6,roughness:0.6}));
-  post.position.y=0.020;
-  flyAnchor.add(body,hackle,post);
+/* ── WHAT IS ON THE END ────────────────────────────────────────────────
+   There used to be exactly one fly: a dark sphere, a tan torus and an orange
+   cone, which from arm's length reads as a small red thing rather than as
+   anything anybody ties. These are six patterns you would actually carry, and
+   they are not a skin: each one carries its own bluff radius and air drag, so
+   a bushy stimulator genuinely parachutes down and a weighted nymph genuinely
+   knifes in, and the splash limit — being a multiple of whatever the chosen
+   fly's own terminal fall is — follows them without being touched.
+
+   `r` is the bluff radius that feeds flyDragK, `drag` the coefficient it
+   ships at, `size` the visual scale, `sink` the fly's own sink rate (0 floats;
+   a venue that sets flySink of its own, like the pond, still wins). */
+const M_=(c,ro)=>new THREE.MeshStandardMaterial({color:c,roughness:ro===undefined?0.9:ro});
+const POST_=()=>{
+  const m=new THREE.Mesh(new THREE.ConeGeometry(0.008,0.030,6),
+    new THREE.MeshStandardMaterial({color:0xff5a2b,emissive:0xff3300,
+      emissiveIntensity:0.6,roughness:0.6}));
+  m.position.y=0.020; return m;
+};
+/* a hair wing: a few tapered tufts laid back over the body */
+const WING_=(n,len,rise,col,spread)=>{
+  const g=new THREE.Group();
+  for(let i=0;i<n;i++){
+    const a=(i/(n-1)-0.5)*spread;
+    const h=new THREE.Mesh(new THREE.ConeGeometry(0.0022,len,4),M_(col,0.95));
+    h.rotation.z=Math.PI/2+rise; h.rotation.y=a;
+    h.position.set(-len*0.42*Math.cos(a),0.004+len*0.16,len*0.42*Math.sin(a));
+    g.add(h);
+  }
+  return g;
+};
+const FLIES=[
+  ['Parachute Adams', {r:0.005, drag:0.10, size:1.8, sink:0}, ()=>{
+    const g=new THREE.Group();
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.011,8,6),M_(0x53514b)));
+    const h=new THREE.Mesh(new THREE.TorusGeometry(0.015,0.0032,4,12),M_(0x8d8a80,0.85));
+    h.rotation.x=Math.PI/2; h.position.y=0.006; g.add(h);
+    g.add(POST_());
+    return g;
+  }],
+  ['Foam ant',        {r:0.0042, drag:0.13, size:1.7, sink:0}, ()=>{
+    /* two fat foam segments and a waist, which is the whole silhouette */
+    const g=new THREE.Group();
+    const a=new THREE.Mesh(new THREE.SphereGeometry(0.0085,8,6),M_(0x17161a,0.75));
+    a.position.x=-0.009; a.scale.set(1.15,0.9,0.9);
+    const b=new THREE.Mesh(new THREE.SphereGeometry(0.0072,8,6),M_(0x17161a,0.75));
+    b.position.x=0.009;
+    const w=new THREE.Mesh(new THREE.CylinderGeometry(0.0028,0.0028,0.010,6),M_(0x1d1c20,0.8));
+    w.rotation.z=Math.PI/2;
+    const leg=new THREE.Mesh(new THREE.TorusGeometry(0.010,0.0012,3,8),M_(0x2a2620,0.95));
+    leg.rotation.x=Math.PI/2;
+    const dot=new THREE.Mesh(new THREE.SphereGeometry(0.0034,6,5),
+      new THREE.MeshStandardMaterial({color:0xffd24a,emissive:0xff9900,
+        emissiveIntensity:0.45,roughness:0.7}));
+    dot.position.set(0.002,0.008,0); dot.scale.y=0.5;
+    g.add(a,b,w,leg,dot); return g;
+  }],
+  ['Stimulator',      {r:0.0088, drag:0.26, size:2.1, sink:0}, ()=>{
+    /* big, bushy, palmered the whole way: the one that floats over anything */
+    const g=new THREE.Group();
+    const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0062,0.0042,0.024,7),M_(0xd4741f,0.9));
+    bod.rotation.z=Math.PI/2; g.add(bod);
+    for(let i=0;i<4;i++){
+      const h=new THREE.Mesh(new THREE.TorusGeometry(0.0092-i*0.0006,0.0022,4,10),M_(0xa9713a,0.95));
+      h.rotation.x=Math.PI/2; h.position.x=-0.010+i*0.0068; g.add(h);
+    }
+    const tail=new THREE.Mesh(new THREE.ConeGeometry(0.003,0.012,5),M_(0xb8611c,0.95));
+    tail.rotation.z=Math.PI/2; tail.position.x=-0.018; g.add(tail);
+    g.add(WING_(5,0.020,0.30,0xc8b189,1.0));
+    return g;
+  }],
+  ['Elk hair caddis', {r:0.0065, drag:0.17, size:1.9, sink:0}, ()=>{
+    const g=new THREE.Group();
+    const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0050,0.0034,0.019,7),M_(0x8a6a3c));
+    bod.rotation.z=Math.PI/2; g.add(bod);
+    const h=new THREE.Mesh(new THREE.TorusGeometry(0.0075,0.0020,4,10),M_(0x9c7c4c,0.95));
+    h.rotation.x=Math.PI/2; h.position.x=0.006; g.add(h);
+    g.add(WING_(6,0.023,0.16,0xcbb083,0.55));      /* the tent wing */
+    return g;
+  }],
+  ['Pheasant tail',   {r:0.0028, drag:0.05, size:1.5, sink:0.16}, ()=>{
+    /* slim, weighted, and it goes down: a nymph knifes in and does not slap */
+    const g=new THREE.Group();
+    const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0034,0.0020,0.017,6),M_(0x6b4a2a));
+    bod.rotation.z=Math.PI/2; g.add(bod);
+    const th=new THREE.Mesh(new THREE.SphereGeometry(0.0048,7,5),M_(0x2f2a24,0.7));
+    th.position.x=0.008; g.add(th);
+    const bead=new THREE.Mesh(new THREE.SphereGeometry(0.0040,8,6),
+      new THREE.MeshStandardMaterial({color:0xc9a227,metalness:0.8,roughness:0.28}));
+    bead.position.x=0.012; g.add(bead);
+    const tail=new THREE.Mesh(new THREE.ConeGeometry(0.0018,0.010,4),M_(0x7a5730,0.95));
+    tail.rotation.z=-Math.PI/2; tail.position.x=-0.012; g.add(tail);
+    return g;
+  }],
+  ['Woolly bugger',   {r:0.0060, drag:0.09, size:2.2, sink:0.22}, ()=>{
+    const g=new THREE.Group();
+    const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0055,0.0040,0.022,7),M_(0x2c3a24));
+    bod.rotation.z=Math.PI/2; g.add(bod);
+    for(let i=0;i<3;i++){
+      const h=new THREE.Mesh(new THREE.TorusGeometry(0.0080,0.0016,3,9),M_(0x384a2c,0.95));
+      h.rotation.x=Math.PI/2; h.position.x=-0.008+i*0.008; g.add(h);
+    }
+    const mar=new THREE.Mesh(new THREE.ConeGeometry(0.0042,0.026,6),M_(0x222d1c,0.98));
+    mar.rotation.z=-Math.PI/2; mar.position.x=-0.024; g.add(mar);
+    const bead=new THREE.Mesh(new THREE.SphereGeometry(0.0045,8,6),
+      new THREE.MeshStandardMaterial({color:0xb08d3a,metalness:0.75,roughness:0.3}));
+    bead.position.x=0.013; g.add(bead);
+    return g;
+  }],
+];
+let flyBuilt=-1;
+function applyFly(){
+  const i=Math.max(0,Math.min(FLIES.length-1,Math.round(P.flyPat)));
+  if(i===flyBuilt) return;
+  flyBuilt=i;
+  const [name,spec,build]=FLIES[i];
+  while(flyAnchor.children.length){
+    const c=flyAnchor.children.pop(); disposeTree(c);
+  }
+  flyAnchor.add(build());
+  /* the physics of it, not just the picture: FLY_R feeds flyDragK, which is
+     what decides how it falls and therefore what counts as a slap */
+  FLY_R=spec.r; P.flyDrag=spec.drag; P.flySize=spec.size;
+  rebuildMasses();
+  return name;
 }
 flyGrp.renderOrder=4;scene.add(flyGrp);
 const flyWake=new THREE.Mesh(new THREE.RingGeometry(0.90,1.0,20),
@@ -6903,6 +7254,27 @@ const reelAnchor=new THREE.Group(); reelAnchor.position.set(0,-0.055,0.20);
 const gripAnchor=new THREE.Group();
 handRig.add(reelAnchor,gripAnchor);
 let reelHandParts=null;
+/* the pieces a colour row is allowed to touch, filled in as they are built */
+let reelFrameMat=null, seatMat=null;
+/* WHAT COLOUR EVERYTHING IS. Four rows, one function, called on a change and
+   once at startup — so a preset, a URL and the phone all land here too rather
+   than each knowing which mesh is which. Metal stays metal: the reel frame
+   and the seat take the hue at a fraction of the saturation, because an
+   anodised frame is tinted aluminium and not painted plastic. */
+function applyTackleColours(){
+  {const [,h,sa]=hueOf('rodHue'); if(typeof rodTube!=='undefined'&&rodTube) rodTube.recolour(h,sa);}
+  {const [,h,sa]=hueOf('reelHue');
+   if(reelFrameMat) reelFrameMat.color.setHSL(h,sa*0.45,0.72);}
+  {const [,h,sa]=hueOf('gripHue');
+   if(seatMat) seatMat.color.setHSL(h,sa*0.50,0.42);}
+  {const [,h,sa]=hueOf('lineHue');
+   /* 0 is graphite, which for a FLY LINE means "leave it as it shipped" —
+      a desaturated grey line is a thing you choose, not a default */
+   if(Math.round(P.lineHue||0)===0){ cFly.copy(cFly0);cLdr.copy(cLdr0);cBack.copy(cBack0); }
+   else { cFly.setHSL(h,Math.min(0.95,sa+0.25),0.56);
+          cLdr.setHSL(h,Math.min(0.55,sa*0.5),0.86);
+          cBack.setHSL(h,Math.min(0.40,sa*0.4),0.78); }}
+}
 function applyReelHand(){
   if(!reelHandParts) return;
   const hs=P.reelHand>0.5?1:-1;
@@ -6993,11 +7365,13 @@ const reelFaceTex=(()=>{
   const seatGeo=mergeGeos(seatParts);seatGeo.rotateX(Math.PI/2);
   const seat=new THREE.Mesh(seatGeo,
     new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.30,metalness:0.72}));
+  seatMat=seat.material;
   seat.position.z=0.175;
 
   const RX=0,RY=-0.055,RZ=0.20;
   const cage=new THREE.Mesh(new THREE.CylinderGeometry(0.0435,0.0435,0.020,26),
     new THREE.MeshStandardMaterial({color:0xb4bcc0,roughness:0.26,metalness:0.85}));
+  reelFrameMat=cage.material;
   cage.rotation.z=Math.PI/2;cage.position.set(RX,RY,RZ);
   const faceMat=new THREE.MeshStandardMaterial({map:reelFaceTex,roughness:0.30,
     metalness:0.60,transparent:true});
@@ -7200,7 +7574,8 @@ function toastStep(dt){
   toast.mesh.material.transparent=true;
   toast.mesh.visible=toastFade>0.01&&mode<2;
 }
-const M={bend:0,drift:0,tension:0,depth:0,fps:60,lineVmax:0,lineVnode:0,lineVwhere:'-'};
+const M={bend:0,drift:0,tension:0,depth:0,fps:60,lineVmax:0,lineVnode:0,lineVwhere:'-',
+         zCover:0,zWhy:'-',zSlip:0,zUp:0};
 const HANDTXT=['free','routing','pinched'];
 function drawHUD(){
   const c=hud.cx;c.clearRect(0,0,HW,HH);
@@ -7235,6 +7610,9 @@ function drawHUD(){
     ['GUIDE WRAP',(wrapTotal*180/Math.PI).toFixed(0)+'\u00B0'],
     ['TIP vs HOLD',probeOut.toFixed(2)+' / '+probeThr.toFixed(2)+' N'],
     ['DRIFT',hooked?'\u2014':M.drift.toFixed(0)+' %'],
+    ['ZONE',hooked||M.zWhy==='-'?'\u2014'
+            :(M.zCover*100).toFixed(0)+' % of '+M.zUp.toFixed(1)+' m  '
+             +M.zSlip.toFixed(2)+'/'+P.maxSlip.toFixed(2)+'  '+M.zWhy],
     ['TENSION',M.tension.toFixed(1)+' / '+P.tippet.toFixed(0)+' N'],
     ['FEEDING',feed+' of '+fishes.length],
     ['HOOKED',hooked?(hooked.stamina*100).toFixed(0)+' % left':'\u2014'],
@@ -7293,6 +7671,9 @@ function afterSettingsChange(){
   gSpeckResize();
   updateWaterColour();
   rebuildBed();placeObstacles();
+  /* a preset, a URL or the phone can move any of these five at once, so they
+     are re-applied here rather than only from onSettingChanged */
+  applyFly(); applyTackleColours();
   lastGrade=P.grade;
   lastSig=P.nodeLen*1+P.leadNode*97+P.leaderLen*13;lastTipSoft=P.tipSoft, lastTaper=P.rodTaper, lastCell=P.gridCell, lastObst=P.obstHeight;
 }
@@ -7925,6 +8306,8 @@ function onSettingChanged(key){
   if(key==='grade'){waterMat.uniforms.uGrade.value=P.grade;placeTrees();placeRocks();}
   if(key==='bankGrass'){placeGrass();placeTrees();}
   if(key==='reelHand')applyReelHand();
+  if(key==='flyPat')applyFly();
+  if(key==='rodHue'||key==='reelHue'||key==='lineHue'||key==='gripHue')applyTackleColours();
   if(key==='bedDetail'&&bedMat&&bedMat.normalScale)
     bedMat.normalScale.set(P.bedDetail,P.bedDetail);
   if(key==='treeRange'||key==='sceneTris'){placeTrees();placeRocks();}
@@ -8021,7 +8404,7 @@ const sndClick =()=>sndBurst(2600,9,0.035,0.35*P.volReel,0.6);
 const sndSplash=v=>sndBurst(560+Math.random()*260+v*40, 1.1,
                             0.10+Math.min(0.55,v*0.075),
                             Math.min(0.85,0.012*v*v)*P.volSplash, 0.25);
-const sndPlop  =()=>sndBurst(420,2.0,0.13,0.30*P.volSplash,0.35);
+const sndPlop  =(k=1)=>sndBurst(420,2.0,0.13,0.30*P.volSplash*Math.max(0.12,k),0.35);
 
 /* ════════════════════════════════════════════════════════════
    6. CONTROLLERS
@@ -8477,6 +8860,39 @@ function carryTackle(dx,dz){
       hooked.p.z=CZ+SC.dz(hooked.p.x);
       hooked.p.y=hooked.restY();
     }
+    /* AND HE IS STILL ON THE END OF THE LINE HE WAS ON. `fishTension` is
+       `lineStretch x (tip-to-fish - lineOut)`, so any geometry the hop leaves
+       behind is read as stretch and charged to the tippet — and a hop is a
+       discontinuity in where you are standing, not a pull on a fish. Carrying
+       him rigidly covers the common case; what is left is the reach bending
+       under the hop, and the branch just above putting him back in the
+       channel when the hop would have beached him, which can move him several
+       metres sideways in a single frame.
+       Measured before this: 59 N through a 40 N tippet — a hop while playing
+       a fish broke him off. `smoke.mjs` has asserted against exactly that
+       since the hop was written, and caught it about one run in four; raising
+       Feeding chance to 0.90 made it every run, because a feeding fish holds
+       shallower and `restY` above therefore moves him further. The bug was
+       always real, and more feeding fish only stopped it hiding.
+       He is drawn back along the line to the length that line actually is.
+       Paying the difference off the SPOOL instead also clears the tension —
+       measured, 59 N to 10 N — but it lengthens the material without
+       redistributing it, and peak stretch went 2.1 to 8.6 doing it. Moving
+       the fish touches no line at all. Slack is left alone: slack is a real
+       thing to have. */
+    {
+      const T=(RN-1)*3;
+      const lx=hooked.p.x-rpos[T], ly=hooked.p.y-rpos[T+1], lz=hooked.p.z-rpos[T+2];
+      const d=Math.hypot(lx,ly,lz);
+      if(d>lineOut&&d>1e-6){
+        const k=lineOut/d;
+        hooked.p.x=rpos[T]+lx*k; hooked.p.y=rpos[T+1]+ly*k; hooked.p.z=rpos[T+2]+lz*k;
+        /* and not onto the gravel doing it */
+        if(surfY(hooked.p.x)-bedY(hooked.p.x,hooked.p.z)<=0.10){
+          hooked.p.z=CZ+SC.dz(hooked.p.x); hooked.p.y=hooked.restY();
+        }
+      }
+    }
   }
   /* A fish that had committed to the fly did not commit to it over there. */
   for(const f of fishes) if(f.state==='striking'||f.state==='chasing') f.reseat();
@@ -8790,8 +9206,55 @@ function guideStep(){
    lies, because they are the reason to come round again.
    ════════════════════════════════════════════════════════════ */
 let boatGrp=null, boatOars=null, boatOn=false, boatSeated=false;
-let boatYaw=0, boatRow=0, boatSnap=0, boatBob=0;
+let boatYaw=0, boatRow=0, boatSnap=0, boatBob=0, boatFerry=0;
 const boatP=new THREE.Vector3(), boatV=new THREE.Vector3(), boatOff=new THREE.Vector3();
+/* WHERE A THING IN THE BOAT IS, IN THE WORLD, and back again. The hull is
+   placed at the waterline under its own station and turned about Y by boatYaw
+   — nothing else — so the pair below is that transform written out rather
+   than a matrix inverse, and they are exact inverses of each other by
+   construction. Everything the boat CARRIES is stored boat-local and read
+   back through these every frame: a world point stops being true the instant
+   the river moves the hull out from under it, which is what left a landed
+   fish hanging in the air over the water he came out of. */
+function boatFloorY(){ return surfY(boatP.x)+((SC.boat&&SC.boat.free)||0.12); }
+function boatToWorld(lx,ly,lz,out){
+  const c=Math.cos(boatYaw), sn=Math.sin(boatYaw);
+  return out.set(boatP.x+lx*c+lz*sn, boatFloorY()+ly, boatP.z-lx*sn+lz*c);
+}
+function worldToBoat(wx,wy,wz,out){
+  const c=Math.cos(boatYaw), sn=Math.sin(boatYaw);
+  const dx=wx-boatP.x, dz=wz-boatP.z;
+  return out.set(dx*c-dz*sn, wy-boatFloorY(), dx*sn+dz*c);
+}
+const _boatL=new THREE.Vector3();
+
+/* One oar blade: a dished spoon `len` along the shaft (+X), `wide` across the
+   vertical (Y), and `dish` deep through the face (Z). Two curves do the work —
+   the outline tapers in at the throat and rounds off at the tip, and the face
+   is bowed so it catches water instead of slapping it. Both sides are emitted
+   so the blade reads solid from the bank as well as from the seat. */
+function oarBlade(len,wide,dish){
+  const NU=9,NV=5,pos=[],idx=[];
+  for(let i=0;i<NU;i++){
+    const u=i/(NU-1);
+    /* narrow at the throat, widest two thirds out, rounded at the tip */
+    const w=wide*0.5*(0.34+0.66*Math.sin(Math.PI*Math.pow(u,0.72)));
+    const bow=dish*Math.sin(Math.PI*u);          /* the spoon */
+    for(let j=0;j<NV;j++){
+      const v=j/(NV-1)*2-1;
+      pos.push(len*u, w*v, bow*(1-v*v*0.35));
+    }
+  }
+  for(let i=0;i<NU-1;i++) for(let j=0;j<NV-1;j++){
+    const a=i*NV+j, b=a+NV;
+    idx.push(a,b,a+1, b,b+1,a+1);                /* face */
+    idx.push(a,a+1,b, b,a+1,b+1);                /* and its back */
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
 
 /* A McKenzie dory, lofted from fourteen stations: flat-bottomed, flared, with
    the rocker that lifts both ends clear of the water and the high sheer that
@@ -8827,6 +9290,19 @@ function buildBoat(){
     const a=[prev.x,prev.keel,-prev.w*0.55], b=[prev.x,prev.keel,prev.w*0.55];
     const c=[cur.x, cur.keel, -cur.w*0.55],  d=[cur.x, cur.keel, cur.w*0.55];
     push(floor,a,b,c); push(floor,b,d,c);
+    /* AND THE SOLE YOU ACTUALLY STAND ON, which is the one that has to be
+       there. The hull bottom is 0.22 m BELOW the waterline — correct for a
+       boat, and the reason the river's own surface passed straight through
+       the inside of this one: the water mesh sits between the keel and your
+       eye, so from the deck you watched ripples crossing the floor. Reported
+       from the boat.
+       The origin of this group is documented as "the FLOOR you stand on" and
+       until now nothing was drawn there. A solid sole at that height is both
+       the missing piece of the boat and the thing that occludes the river:
+       it is opaque, it is above the film, and it wins the depth test. */
+    const e=[prev.x,-0.02,-prev.w*0.62], f2=[prev.x,-0.02,prev.w*0.62];
+    const g2=[cur.x, -0.02,-cur.w*0.62],  h2=[cur.x, -0.02,cur.w*0.62];
+    push(floor,e,f2,g2); push(floor,f2,h2,g2);
     prev=cur;
   }
   const mk=arr=>{const g=new THREE.BufferGeometry();
@@ -8888,7 +9364,15 @@ function buildBoat(){
     const ox=bench.x-0.10, oy=0.50, oz=s*w;
     oarAt(new THREE.CylinderGeometry(0.020,0.026,2.30,8),BLADE,
           ox+dxo*1.05,oy-0.16,oz+dzo*1.05, 0,th,-Math.PI/2);
-    oarAt(new THREE.BoxGeometry(0.16,0.03,0.44),BLADE,
+    /* THE BLADE. It was a BoxGeometry(0.16,0.03,0.44): three centimetres thin
+       in Y, which is to say lying FLAT like a shelf, and with its long side
+       across the shaft instead of along it. Both wrong, and between them the
+       reason the oars read as broom handles with bricks on the end.
+       A real blade is a spoon: long along the shaft, tall across the vertical
+       so its face is what pushes the water when the oar sweeps, thin through,
+       and dished. Built along +X because the shaft is laid over to +X by the
+       same quarter turn, so the two share one plan angle. */
+    oarAt(oarBlade(0.46,0.19,0.055),BLADE,
           ox+dxo*2.25,oy-0.34,oz+dzo*2.25, 0,th,0);
     oarAt(new THREE.CylinderGeometry(0.028,0.028,0.16,8),METAL,ox,oy,oz);
   }
@@ -8905,7 +9389,7 @@ function buildBoat(){
    scale those are not the same place and a boat centred on the origin puts
    you over the gunwale before you have moved. */
 function boatEnter(){
-  boatOn=true; boatSeated=false; boatRow=0; boatSnap=0; boatBob=0;
+  boatOn=true; boatSeated=false; boatRow=0; boatSnap=0; boatBob=0; boatFerry=0;
   buildBoat();
   boatGrp.visible=true;
   /* the hop is not on offer here, and its arc must not be left hanging in the
@@ -8932,9 +9416,19 @@ function boatStep(dt,fwd,ax){
   }
   /* SNAP TURN still lives on the cross axis. The stick is the oars now, and a
      boat you cannot turn around in is a boat with one bank in it. */
-  if(P.snapTurn>0.5&&Math.abs(ax)>0.70&&Math.abs(ax)>Math.abs(fwd)*1.2){
-    if(boatSnap===0){ snapTurn(-Math.sign(ax)*P.snapTurn*Math.PI/180); boatSnap=Math.sign(ax); pulse(0.25); }
-  } else if(Math.abs(ax)<0.45) boatSnap=0;
+  /* BOTH AXES ARE THE OARS. Left and right used to snap-turn the RIG — you
+     spun on the spot in 45 degree steps and the boat carried on exactly as
+     before, which is the one thing a stick in a rower's hands should never
+     do. Reported from the boat as "side to side doesn't actually seem to do
+     anything with the boat", and right.
+     What a guide does with that input is FERRY: angle the hull and pull, and
+     she crabs across the current without giving up much of the drift. So it
+     is a sideways push across the channel — across, not across the world,
+     because the channel bends — and the bow comes round to it on its own
+     through the heading rule further down, which is exactly the ferry angle
+     you would see from the bank. */
+  boatFerry+=(ax-boatFerry)*Math.min(1,dt*4);
+  if(Math.abs(boatFerry)<0.02) boatFerry=0;
 
   /* WHAT THE RIVER DOES WITH YOU. A boat is not a leaf. It has weight, so it
      answers the water it is sitting in over a second or so rather than
@@ -8951,6 +9445,17 @@ function boatStep(dt,fwd,ax){
   if(Math.abs(boatRow)<0.02) boatRow=0;
   tx+=Math.cos(boatYaw)*boatRow*B.row;
   tz+=-Math.sin(boatYaw)*boatRow*B.row;
+  /* and the ferry, ACROSS the channel at this station. The centreline swings,
+     so "across" is the normal to the centreline here and not the world z
+     axis — ferrying on a bend otherwise walks you into the bank you are
+     trying to hold off. Two thirds of the downstream oar authority, because
+     crabbing across a current is harder than pulling along it. */
+  if(boatFerry!==0){
+    const gz=(SC.dz(boatP.x+0.5)-SC.dz(boatP.x-0.5));     /* dz per metre of x */
+    const inv=1/Math.hypot(1,gz);
+    tx+=(-gz*inv)*boatFerry*B.row*0.66;
+    tz+=( 1*inv)*boatFerry*B.row*0.66;
+  }
   /* AND THE GUIDE KEEPS IT OFF THE BANK. Left to itself a drifting hull goes
      to the outside of every bend and sits down in the willows. */
   const cz=CZ+SC.dz(boatP.x), hw=Math.max(0.5,SC.hw(boatP.x));
@@ -8970,9 +9475,24 @@ function boatStep(dt,fwd,ax){
   boatV.x+=(tx-boatV.x)*Math.min(1,dt*0.9);
   boatV.z+=(tz-boatV.z)*Math.min(1,dt*0.9);
   const dx=boatV.x*dt, dz=boatV.z*dt;
+  const wasY=boatFloorY();
   boatP.x+=dx; boatP.z+=dz;
   /* the rig goes with the hull, so where you chose to stand in it is yours */
   player.position.x+=dx; player.position.z+=dz;
+  /* AND SO DOES WHAT IS IN YOUR HANDS. loopCarry already knew that a hooked,
+     landed or held fish is part of the rig — but it only runs at the join,
+     once a lap, so between joins a fish you had just landed stayed at the
+     world point he was landed at and the boat slid out from under him. From
+     the deck that reads as a trout stopping dead in mid air while the river
+     carries you away from it, which is what was reported. The same three
+     states, carried every frame, on the same rule. */
+  const dy=boatFloorY()-wasY;
+  for(const f of fishes){
+    if(f.state!=='hooked'&&f.state!=='landed'&&!f.held) continue;
+    f.p.x+=dx; f.p.y+=dy; f.p.z+=dz;
+    f.present.x+=dx; f.present.y+=dy; f.present.z+=dz;
+    f.bank.x+=dx; f.bank.y+=dy; f.bank.z+=dz;
+  }
   /* the bow comes round to where she is going, slowly */
   const sp=Math.hypot(boatV.x,boatV.z);
   if(sp>0.05){
@@ -8990,7 +9510,9 @@ function boatStep(dt,fwd,ax){
   boatGrp.rotation.set(Math.sin(boatBob*0.83)*0.011-boatRow*0.035,
                        boatYaw,
                        Math.sin(boatBob*0.61+1.2)*0.020,'YXZ');
-  if(boatOars) boatOars.rotation.y=boatRow*0.42;
+  /* the oars answer both hands: the pull sweeps them fore and aft, the ferry
+     carries one further than the other, which is what a ferry stroke is */
+  if(boatOars) boatOars.rotation.y=boatRow*0.42+boatFerry*0.22;
 }
 
 /* THE JOIN ITSELF. Called after the boat has moved and before the physics
@@ -9385,24 +9907,23 @@ renderer.setAnimationLoop(()=>{
   const trigRDown=trigR>0.6;
   const onPanel=menuPointer(trigRDown, trigRDown&&!prevTrigR);
   reeling=trigR>0.05&&!onPanel;
+  /* HOW HARD YOU ARE HOLDING THE HANDLE, not just whether you are. This is
+     the whole skill in the new fight: the trigger IS the drag. */
+  reelPull=reeling?Math.max(0,Math.min(1,trigR)):0;
   prevTrigR=trigRDown;
   if(trigR>0.05&&!onPanel){
-    /* THE REEL STALLS AT REEL POWER, which is what its row has always said and
-       is not what this did. `1-(T-R)/R` is 1 at R and only reaches 0 at TWICE
-       R, so a reel set to 60 N wound at full speed until 60 and did not stop
-       until 120 — three times a 40 N tippet. Holding the trigger against a
-       fish therefore always ended the same way: the reel took 2.6 m of line a
-       second, the fish could be dragged at about 1.5, and the difference went
-       into the tippet until it parted. Measured on a two-times trout: 45 N and
-       gone inside a second of cranking, every time, with the fish no closer
-       than it started.
-       Full rate up to a bit past half power, then a straight ramp to nothing
-       at power itself. Set below the tippet — where it now ships — the reel
-       gives out before the line does, and a big fish is landed by winding when
-       he lets you rather than by out-pulling him. */
-    const rp=Math.max(0.05,P.reelPower);
-    const eff=Math.max(0,Math.min(1,(rp-M.tension)/(0.45*rp)));
-    let take=P.reelSpeed*trigR*dt*eff;
+    /* THE REEL DOES NOT STALL. It used to taper to nothing at `Reel power`,
+       so a reel set below the tippet gave out before the line did and a big
+       fish could not be wound in at all — you waited for him to allow it.
+       What was asked for is the opposite and simpler rule: no fish out-swims
+       a person winding a handle, so the reel always takes line at its full
+       rate, and what a fish pulling harder than that buys you is TENSION.
+       That part needs no code. `fishTension` is `lineStretch x (tip-to-fish
+       distance - lineOut)`, so shortening lineOut against a fish that will
+       not come is already, exactly, a rising pull in the tippet — and the
+       break-off test is already watching it. Taking the gate out is all that
+       was standing between the fight and the behaviour. */
+    let take=P.reelSpeed*trigR*dt;
     const slack=offSpool-lineOut-rodArc;
     const fromSlack=Math.min(Math.max(0,slack-MIN_SLACK),take);
     offSpool-=fromSlack;take-=fromSlack;
@@ -9452,8 +9973,20 @@ renderer.setAnimationLoop(()=>{
            picture is what said "splash" every time. A fly settling at a metre a
            second leaves a dimple; one arriving at the splash limit throws a
            proper ring, and above it a bigger one still. */
-        spawnRing(fx,fz,0.22+0.55*Math.min(2.0,speed/Math.max(0.5,P.splashV)));
-        if(SND.ok) sndSplash(speed);
+        const slap=splashLimit();
+        spawnRing(fx,fz,0.22+0.55*Math.min(2.0,speed/Math.max(0.5,slap)));
+        /* AND THE SOUND COMES IN FROM NOTHING. It used to be sndSplash(speed)
+           on every single arrival, so the quietest delivery you can make still
+           went "plip" at a level set by how fast it happened to be going —
+           reported as a pop that was too loud and too eager. Under the gentle
+           mark it is a dimple, and above it the splash is scaled by the
+           EXCESS rather than by the whole speed, so it starts at silence at
+           the point where a slap begins instead of arriving already loud. */
+        const gentle=slap*0.45;
+        if(SND.ok){
+          if(speed<=gentle) sndPlop(Math.min(1,speed/Math.max(0.4,gentle)));
+          else sndSplash(speed-gentle);
+        }
         const lastFree=Math.floor(idxAt(lineOut));
         for(const f of fishes){
           if(f.state!=='holding')continue;
@@ -9470,8 +10003,18 @@ renderer.setAnimationLoop(()=>{
           }
           const near=Math.hypot(fx-f.p.x,fz-f.p.z);
           if(lined) f.spook('lined a '+f.sp.label+' \u2014 put down',1);
-          else if(speed>P.splashV/Math.max(0.2,beh(f,'wary'))&&near<2.5*beh(f,'wary'))
-            f.spook('splashed near a '+f.sp.label,0.7);
+          /* AND HE ONLY MINDS A REAL ONE. The threshold used to be DIVIDED by
+             the species' wariness, which put a wary fish's limit below the
+             splash limit itself — so a delivery that the game did not think
+             was a slap still put him down, over a radius of two and a half
+             rod-lengths-ish. Reported as fish reacting far too hard to the
+             fly landing. Now nothing under the limit disturbs anybody, the
+             radius is smaller, and how much it costs you scales with how far
+             over you actually were rather than being a flat 0.7 every time.
+             Wariness still decides the radius, which is where it belongs. */
+          else if(speed>slap&&near<1.6*beh(f,'wary'))
+            f.spook('splashed near a '+f.sp.label,
+                    0.25+0.45*Math.min(1,(speed-slap)/(0.6*slap)));
         }
       }
       driftT+=dt;driftAcc+=slip*dt;
@@ -9489,6 +10032,21 @@ renderer.setAnimationLoop(()=>{
   for(const f of fishes){
     if(refit&&f.state==='holding') f.fitZone();
     f.zoneStep(dt,fx,fz,slip,driftLive);
+  }
+  /* WHAT THE RULE IS ACTUALLY SEEING, on the stats window and on the phone.
+     Two refusals were reported from the water as untrue — "drag off the rock"
+     and "it landed on his head" — and there was no way from inside the
+     headset to tell a wrong VERDICT from a wrong SENTENCE, because the only
+     thing the game said out loud was the sentence. Cover, the slip the box
+     actually averaged and which feature is shaping it are the three numbers
+     the rule decides on, so they are the three that go on the glass. The fish
+     shown is whoever is watching the longest drift right now. */
+  {
+    let w=null;
+    for(const f of fishes) if(f.state==='holding'&&f.zoneT>0.05&&(!w||f.zoneT>w.zoneT)) w=f;
+    if(w){ M.zCover=w.zoneCover(); M.zSlip=w.zoneAcc/Math.max(w.zoneT,1e-3);
+           M.zWhy=w.zoneWhy||'window'; M.zUp=w.zoneUp; }
+    else { M.zCover=0; M.zSlip=0; M.zWhy='-'; M.zUp=0; }
   }
 
   if(driftLive&&driftT>0.20){
@@ -9511,11 +10069,23 @@ renderer.setAnimationLoop(()=>{
       const clean=J.clean, cover=J.cover, chance=J.chance;
       if(Math.random()<chance){
         f.beginStrike();pulse(0.35);
-      } else say(!clean?(f.zoneWhy==='rock'?'drag off the rock \u2014 refused'
-                        :f.zoneWhy==='drop'?'drag over the lip \u2014 refused'
-                        :'drag \u2014 refused')
-                 :(drifting&&cover<0.45)?'it landed on his head \u2014 no drift'
-                 :(f.feeding?'the '+f.sp.label+' looked and passed':'that one isn\u2019t feeding'),f);
+      } else {
+        /* NAME THE SEAM ONLY IF THE SEAM DID IT. zoneWhy says which feature
+           shapes his window, which is a fact about the river and is true
+           whether or not it had anything to do with this drift. Blaming it
+           for every refusal produced "drag off the rock" over flies that
+           dragged on his nose, three metres below the rock, and over flies
+           that never went near it — reported from the water, and right.
+           The drag has to have happened in the upper part of the box, where
+           the feature actually is, before the feature gets the blame. */
+        const seam=J.dragUp>0.45?f.zoneWhy:'';
+        say(!clean?(seam==='rock'?'drag off the rock \u2014 refused'
+                   :seam==='log'?'drag off the log \u2014 refused'
+                   :seam==='drop'?'drag over the lip \u2014 refused'
+                   :'drag \u2014 refused')
+            :(drifting&&cover<0.45)?'it landed on his head \u2014 no drift'
+            :(f.feeding?'the '+f.sp.label+' looked and passed':'that one isn\u2019t feeding'),f);
+      }
     }
   }
 
@@ -10101,6 +10671,9 @@ function remoteStats(){
     offSpool:+offSpool.toFixed(2), total:Math.round(TOTAL_LINE),
     tension:+M.tension.toFixed(1), tippet:+P.tippet.toFixed(1),
     drift:hooked?null:Math.round(M.drift),
+    zone:(hooked||M.zWhy==='-')?null:{cover:Math.round(M.zCover*100),
+         slip:+M.zSlip.toFixed(2), max:+P.maxSlip.toFixed(2),
+         up:+M.zUp.toFixed(1), why:M.zWhy},
     hand:HANDTXT[handMode]+(rodPinch?' / cork':''),
     feeding:fishes.filter(f=>f.feeding&&f.state==='holding').length,
     fish:fishes.length,
@@ -10502,6 +11075,7 @@ if(!navigator.xr){
     if(!ok){enterBtn.disabled=true;enterBtn.textContent='Headset not detected';}});
 }
 applyDisplay();
+applyFly(); applyTackleColours();
 /* restore a shared settings string, e.g. #s=nodeLen=0.200&... */
 if(location.hash&&location.hash.indexOf('s=')>=0){
   try{
