@@ -1374,6 +1374,62 @@ Recorded because each one was mis-diagnosed at least once.
    water", which is false — nothing in the take or spook logic reads line colour, and the
    help now says so and names what does (line landing near him, and species wariness).
 
+32. **The zone asked which way was upstream and answered with the x axis.** This is the
+   third and last time this assumption has cost something, and it is now gone. `dx = his x
+   - fly x` treated upstream as -x for the whole reach. On a bend that is approximately
+   wrong, which an earlier round patched by measuring lateral offset from the centreline.
+   In an EDDY it is *inverted*: behind a boulder the recirculation carries a fly back
+   upstream, so a fish lying there had his entire drift window on the downstream side of
+   himself and every presentation was refused with "it landed on his head — no drift".
+   Reported from Stairstep Falls, where two lies had deliberately been put in exactly
+   that water the round before.
+
+   The frame is now the channel's tangent unless the local flow disagrees with it by more
+   than about 70 degrees, in which case it is the flow's. The hybrid matters: sampling the
+   flow everywhere broke eight tuned claims on the reference reach, because a point sample
+   at his nose is swung twenty degrees by any nearby rock while the channel frame is exact
+   over the whole length of the box. Measured: cover 0.97 on an eddy drift with the right
+   frame, 0.00 with the old one.
+
+   A holding fish also used to be drawn at a flat heading of zero — "the current runs
+   toward +X" — so the eddy fish faced downstream, tail first into the water feeding him.
+   He now points down the same cached upstream vector, which on a straight reach is a
+   heading of zero, so nothing that was right moved.
+
+33. **The line sank by a travelling front, and the front was the hinge.** `sinkArc` started
+   at the fly and crawled up the line at `flySink*2.2` m/s, with only line behind it
+   released from the film. Two reports came out of that shape and both were the shape
+   rather than the tuning. Nothing sank for the first second or two — at the pond's 0.32
+   a 3.6 m leader needs about five seconds before its far end is let go. And wherever the
+   front had got to, line ahead of it was pinned flat and line behind it was being pulled
+   down, so the whole change of direction happened at one moving point. Feathering that
+   over 1.8 m softened the corner and could not remove it, because the corner was what
+   the model was made of. Two rounds were spent smoothing it before that was clear.
+
+   Replaced with the physical statement: a leader sinks because nylon is denser than
+   water, every centimetre of it, the moment the surface lets go. `sinkRate(i)` is a
+   property of the node — the leader at the full rate, the fatter fly line at two thirds
+   of it — the film has no positional hold on a node that is sinking, and each node eases
+   toward its own terminal speed rather than taking a constant downward shove, which was
+   an acceleration and let the belly outrun the leader. The curve at the waterline is now
+   emergent, which is the only way it was going to stop looking authored.
+
+34. **Two settings that were shading a picture rather than changing a thing.** `Reel
+   colour` multiplied a material over the painted reel face, which tints the machined
+   frame along with the spool and leaves anything painted a fixed colour — the handle
+   knob, the handle and the reel foot stayed green whatever you chose. It is now eight
+   whole reels: the face canvas is a function of frame metal, spool anodising, hub,
+   backing, line colour and port count, and every metal part takes its colour from the
+   same entry. `Grip colour` dyed the cork one hue; a grip is a stack of rings and what
+   makes one recognisable is their arrangement, so it is now eight ring patterns —
+   burl, rubber composite, accent rings at the check, full wraps — and the stack is
+   rebuilt rather than shaded.
+
+35. **A toggle for being put down.** `Put down by line` ships on, which is the real
+   behaviour, and turns off the lined/splashed spook entirely. Asked for from the water as
+   the single most frustrating thing in the game: a fish still refuses a dragging fly and
+   still declines a good one, he just stops being removed from play by the line itself.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock

@@ -1057,38 +1057,58 @@ if(ran('scenery')){
   if(skirt.floating||!skirt.crownHeld||skirt.underDropped!==0||!skirt.deeperWhenTaller)
     console.log('  *** FLOATING ROCK ***');
 
-  /* The film has to let go of the line from the fly BACKWARDS. A switch at a
-     fixed arc length is what produced the plumb drop from a flat line down to a
-     sunk fly; the front has to start at the fly, walk back, and stall in the fly
-     line rather than swallowing all of it. */
+  /* ── A LINE SINKS BECAUSE IT IS HEAVY ─────────────────────────────
+     This block used to drive `sinkStep` and assert that a FRONT walked up the
+     line from the fly and stalled in the fly line. That model is gone, and the
+     two things reported from the water are why: nothing sank for the first
+     second or two while the front crawled out of the leader, and wherever the
+     front had got to was a hinge, because line ahead of it was pinned to the
+     surface and line behind it was being pulled down.
+     What is asserted now is the contract that replaced it. A node's sink rate
+     is a property of the node — so it starts immediately, there is nothing to
+     wait for, and the leader outsinks the belly because nylon is thinner and
+     denser than PVC. And a dry-fly venue is untouched, which is every river
+     here and the thing most likely to be broken by this. */
 }
 if(ran('sink')){
   const sink=vm.runInContext(`(()=>{
-    const was=P.flySink; P.flySink=0.32;
-    sinkArc=0;
-    /* fly under the film, well clear of the bed */
-    pos[0]=0; pos[2]=CZ; pos[1]=filmY(0,CZ,simTime)-0.30;
-    const walk=[];
-    for(let f=0;f<1800;f++){ sinkStep(1/72); if(f%300===0) walk.push(+sinkArc.toFixed(3)); }
-    const settled=+sinkArc.toFixed(3);
-    /* fly line is buoyant: the front must stop inside SINK_LINE of the leader */
-    const capped=settled<=leaderTot+SINK_LINE+1e-6 && settled>leaderTot;
-    /* the release has to be graded across the feather, not a step */
-    const relAt=s=>Math.max(0,Math.min(1,(sinkArc-s)/SINK_FEATHER));
-    const graded=relAt(settled-SINK_FEATHER*0.5)>0.2&&relAt(settled-SINK_FEATHER*0.5)<0.8;
-    /* pick the fly up and the film takes all of it back */
-    pos[1]=filmY(0,CZ,simTime)+0.60; sinkStep(1/72);
-    const reset=sinkArc===0;
-    /* and a dry fly never releases anything */
-    P.flySink=0; sinkStep(1/72);
-    const dryStaysUp=sinkArc===0;
-    P.flySink=was; sinkArc=0;
-    return {walk, settled, leader:+leaderTot.toFixed(2), capped, graded, reset, dryStaysUp,
-            monotonic:walk.every((v,i)=>i===0||v>walk[i-1])};
+    const was=P.flySink;
+    /* a dry-fly reach: nothing anywhere on the line has any sink at all */
+    P.flySink=0;
+    let dryAny=0;
+    for(let i=0;i<nAct;i++) dryAny=Math.max(dryAny,sinkRate(i));
+    /* and a sinking one */
+    P.flySink=0.32;
+    const atFly=+sinkRate(0).toFixed(3);
+    /* a node inside the leader, and one out in the fly line */
+    let iLead=-1,iBelly=-1;
+    for(let i=0;i<nAct;i++){
+      const a=sArc(i);
+      if(iLead<0&&a>leaderTot*0.5) iLead=i;
+      if(iBelly<0&&a>leaderTot+1.0) iBelly=i;
+    }
+    const lead=+sinkRate(iLead).toFixed(3), belly=+sinkRate(iBelly).toFixed(3);
+    const out={dryAny:+dryAny.toFixed(4), atFly, lead, belly,
+               leader:+leaderTot.toFixed(2)};
+    out.aDryReachIsUntouched = dryAny===0;
+    /* NO WAITING. The old front needed leaderTot/(flySink*2.2) seconds - about
+       five at these numbers - before the far end of the leader was released.
+       Every node is live on the first frame now. */
+    out.itStartsAtOnce = atFly>0 && lead>0 && belly>0;
+    /* and the leader beats the belly down, which is what makes the curve */
+    out.theLeaderOutsinksTheBelly = lead>belly*1.2;
+    /* the rate is a RATE, not an acceleration: it must not depend on how long
+       the node has been under, which is what the old constant shove did */
+    out.itIsATerminalRate = Math.abs(sinkRate(iLead)-sinkRate(iLead))<1e-12
+                            && lead<=P.flySink+1e-9;
+    P.flySink=was;
+    return out;
   })()`,sandbox);
-  console.log('sink front walks up the line',sink);
-  if(!(sink.capped&&sink.graded&&sink.reset&&sink.dryStaysUp&&sink.monotonic))
-    console.log('  *** SINK FRONT FAILURE ***');
+  console.log('a line sinks because it is heavy',sink);
+  {
+    const bad=Object.entries(sink).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** SINK FAILURE:',bad.join(', '),'***');
+  }
 
   /* A netted fish goes to the nearest margin and stays there with its card, and
      the margin cannot silt up with the whole river. */
@@ -2547,6 +2567,35 @@ if(ran('zone')){
       out.offLaneCover=+f.zoneCover().toFixed(2);
       out.aDriftInTheNextLaneIsNot = f.zoneCover()<0.1;
       f.zoneReset(); SC.dz=wasDz;
+    }
+
+    /* ── AND A FISH IN AN EDDY FACES THE OTHER WAY ──────────────────────
+       Behind a boulder the recirculation runs back upstream, and the zone used
+       to answer "which way is upstream" with the x axis for the whole reach —
+       so a fish lying there had his window on the downstream side of himself,
+       every presentation drifted away from it, and every one was refused with
+       "it landed on his head". Reported from Stairstep Falls, where two lies
+       sit in exactly that water.
+       The frame is the channel's unless the flow argues with it, so this drives
+       a fly through the box the way the WATER goes and asks that he sees it.
+       The same drift read on the channel frame is not his, which is what makes
+       this a test of the frame rather than of the box. */
+    {
+      P.zoneAuto=0; P.upMax=6; P.latTol=0.8; P.maxSlip=1.0;
+      const ex=0, ez=CZ;
+      f.p.set(ex,surfY(ex)-0.42,ez); f.fitZone();
+      const drift=()=>{
+        f.zoneReset();
+        for(let i=40;i>=0;i--) f.zoneStep(0.05,ex+6*(i/40),ez,0.02,true);
+        return +f.zoneCover().toFixed(2);
+      };
+      f.eddy=true; f.fux=1; f.fuz=0;      /* upstream is +x in this pocket */
+      out.eddyCover=drift();
+      out.anEddyDriftIsSeen = out.eddyCover>0.9;
+      f.eddy=false; f.fux=-1; f.fuz=0;    /* the frame the reach would have used */
+      out.wrongFrameCover=drift();
+      out.theFrameIsWhatDecides = out.wrongFrameCover<0.1;
+      f.zoneReset();
     }
 
     for(const k in was) {}
