@@ -213,7 +213,7 @@ const P = {
   splashV:2.6, lineRad:0.5, spookT:5, fatigue:1, spookLine:1,
   riseRate:0.55, feedChance:0.9, nonFeedMult:0.15, fishPower:1,
   /* venue mechanics. Zero on every river; the pond turns them on. */
-  flySink:0, chaseMin:0.28, chaseMax:1.60, chaseRadius:4.5, chaseSpeed:1.15,
+  flySink:0, tipSink:0, lineSink:0, chaseMin:0.28, chaseMax:1.60, chaseRadius:4.5, chaseSpeed:1.15,
   chaseChance:0.9, chaseGiveUp:1.4, cruiseSpeed:1, branchOn:0, branchGrip:0.55,
 };
 const MENU=[
@@ -410,8 +410,15 @@ const MENU=[
   ['Cutthroat','spCutt',0,1,1,'Whether cutthroat trout are in the water. Brassy gold with large dark spots crowding the rear third and the orange-red slash under the jaw. Famously willing on a dry fly \u2014 nearly as easy to fool as a brookie \u2014 but the rise is a slow deliberate sip rather than a slash, so he gives you time to strike too early. An ordinary fight.'],
   ['Salmon','spSalmon',0,1,1,'Whether salmon are in the water. Chrome flanks over a blue-green back, sparse X-shaped spots above the lateral line and almost none below, a forked tail. He is not really feeding in fresh water, so takes are rare and mostly temper \u2014 but he is far and away the biggest and strongest fish here, and a hooked one makes long runs and repeated jumps. On a 5wt and a trout tippet he will break you off; raise Tippet strength or lower Fish power if you would rather land one.'],
   ['Species traits','spTraits',0,1,1,'Whether the species differ in anything but paint. At 1 each one carries its own size, willingness, wariness, holding depth, rise style, strength and fight. At 0 every fish behaves exactly like a rainbow and the species are purely cosmetic, which is the setting to use when you are tuning the FISH numbers above and want one variable at a time.'],
+  /* A TAB OF ITS OWN, because it was asked for by name: "where is the
+     sink setting?" It was one row buried at the top of STILLWATER, which is
+     the last place you would look for it on a river. Three rows now, one per
+     part of the rig — see sinkRate(). */
+  ['\u2014 SINK & FLOAT \u2014',null,0,0,0,''],
+  ['Fly sink m/s','flySink',0.00,1.20,0.02,'Terminal sink rate of the FLY, and of the tippet it drags down with it. At 0 the fly rides the film and is a dry fly. Above 0 it goes down at this rate and the tippet follows it in a curve, easing off over the tippet\u2019s length, so the line above is not hinged flat at the fly — which is what a bead-head actually does on a floating line. Each fly pattern sets this for you when you change flies: the pheasant tail arrives at 0.16 and the woolly bugger at 0.22 because both are weighted, and the four dries arrive at 0. Move it afterwards to hand-tune one, but changing pattern will overwrite it again.'],
+  ['Tippet sink m/s','tipSink',0.00,1.20,0.02,'Terminal sink rate of the LEADER AND TIPPET — all the nylon between the fly line and the fly. This is what a sinking leader gives you: the fly line stays on top where you can see it, mend it and pick it up, and everything below the join goes down. At 0 the nylon floats too. The Beaver Pond ships at 0.32; every river ships at 0.'],
+  ['Line sink m/s','lineSink',0.00,1.20,0.02,'Terminal sink rate of the FLY LINE itself — the thick belly out past the leader. At 0 this is a floating line, which is what almost every trout rig is and what every river here ships: it lies on the surface, can be mended, and lifts off cleanly. Above 0 it is a sinking or intermediate line, the whole cast settles, and the line gets very hard to pick back up. The Beaver Pond ships at 0.21.'],
   ['\u2014 STILLWATER \u2014',null,0,0,0,''],
-  ['Fly sink m/s','flySink',0.00,1.20,0.02,'Terminal sink rate of the fly. At 0 the fly is a dry fly and rides the film exactly as it always has. Above 0 it sinks at this rate and takes line down with it — the film lets go from the fly BACKWARDS, up the tippet, then the leader, and finally a couple of metres of fly line before the line’s own float stops it. So the sag deepens into a curve as the fly goes down instead of dropping plumb off a line pinned flat, and the rest of the line stays on top. The pond ships at 0.32; a river venue ships at 0.'],
   ['Cruise speed','cruiseSpeed',0.10,3.00,0.10,'How fast a stillwater fish works its beat. Cruisers have no lie to hold, so this is what you are leading when you cast in front of one.'],
   ['Chase min m/s','chaseMin',0.00,1.50,0.05,'How fast the fly must move through the water before a fish reads it as alive. Below this he ignores it, and a fly you stop moving is one he loses interest in.'],
   ['Chase max m/s','chaseMax',0.30,4.00,0.10,'How fast the fly can move and still be catchable. Strip harder than this and he cannot get in front of it, and he breaks off the chase.'],
@@ -555,7 +562,7 @@ const VENUE_BASE={
      six-metre box, so the best cast anyone could make covered a third of it
      and every one of those fish was capped at a quarter of his chance. */
   upMax:6,
-  flySink:0, branchOn:0, cruiseSpeed:1,
+  flySink:0, tipSink:0, lineSink:0, branchOn:0, cruiseSpeed:1,
 };
 
 const WATER_LOOKS=[
@@ -739,10 +746,19 @@ float scDep(float x,float zr){
        is still inside the tongue: no drag-free drift could be got over him
        and every attempt was close enough to line him. He is now at the tail
        of that plunge pool, in water the fall has finished with. */
+    /* TIGHT IN BEHIND THE STONE. Both eddy lies sat nearly three radii
+       downstream, which is past the recirculation and out in the wake where
+       the water is only slow rather than reversed — the flow sample there
+       came back sideways, and that was half of why the drift box read wrong.
+       Measured across the pocket behind each boulder: 1.7 radii down and
+       0.8 m off the flank is where the flow is most firmly REVERSED
+       (-0.8 and -0.75 on the channel, at 0.3-0.7 m/s), which is the water
+       the fish should be sitting in and the water the box is drawn for.
+       Asked for from the water: "move the fish closer to the rock." */
     lies:[{x:-36.5,z:0.6,len:0.38},{x:-22.5,z:-1.8,len:0.34},
-          {x:-19.6,z:4.1,len:0.44},          /* eddy behind the -22 boulder */
+          {x:-20.5,z:4.2,len:0.44},          /* eddy behind the -22 boulder */
           {x:-3.0,z:1.2,len:0.50},{x:14.5,z:-1.0,len:0.42},
-          {x:16.6,z:3.6,len:0.40},           /* eddy behind the +14 boulder */
+          {x:15.4,z:3.8,len:0.40},           /* eddy behind the +14 boulder */
           {x:31.0,z:0.8,len:0.36}],
     par:{/* SEE INTO IT. Reported from the water: every reach had gone soupy, and
        that is this round's own doing — a named water look carries its own
@@ -933,7 +949,14 @@ float scDep(float x,float zr){
        grade:1, current:0.35, gridCell:0.50, gridSpan:56, vortex:0.05,
        foam:0.0, specks:0.08, speckSize:0.040, speckRange:22, drift:1,
        clarity:1.25, sediment:0.10, surfWave:0.25, waveShade:0.35,
-       flySink:0.32,
+       /* THE POND SHIPS A SINKING LINE, not a sinking fly. This used to be
+          one number that drove the whole rig, so it could not express the
+          thing asked for from the water — "a floating line with a fly that
+          sinks" — nor its opposite. It is now the leader and the belly that
+          are dense here, and the fly's own weight comes from whatever is
+          tied on (see FLIES). Same water as before: 0.32 on the leader and
+          0.21 on the fly line is exactly what the old single number did. */
+       tipSink:0.32, lineSink:0.21,
        takeRadius:0.5, riseRate:0.30, feedChance:0.95, riseAggro:0.55,
        treeRange:44, spookT:6}
 };
@@ -1636,6 +1659,9 @@ let gridCentre=0;
 let gdx=0.40, GNX=1, GNZ=1, gridReady=false, gbed=null;
 let gfoam=null, gfoam0=null, gdivs=null, gshear=null;
 let gu,gv,gu0,gv0,gp,gdiv,gh,ginv43,gsolid,gslope,gsurf;
+/* per-column plunge-pool mask, and the speed of the run feeding the fall
+   above it — see gridBuildPlunge and gridStep step 1b */
+let gplunge=null,gpCap=null;
 function gridAlloc(){
   gdx=Math.max(0.10,P.gridCell);
   const span=Math.max(10,P.gridSpan);
@@ -1655,6 +1681,7 @@ function gridAlloc(){
   gfoam=new Float32Array(n); gfoam0=new Float32Array(n);
   gdivs=new Float32Array(n); gshear=new Float32Array(n);
   gsolid=new Uint8Array(n); gslope=new Float32Array(GNX); gsurf=new Float32Array(GNX);
+  gplunge=new Float32Array(GNX); gpCap=new Float32Array(GNX);
   /* SEEDED, NOT STARTED FROM REST. The solver's own equilibrium IS Manning's
      formula, and it reaches it by accelerating at g*S — which on a steep
      freestone is a few seconds and on a big slow river is well over a minute.
@@ -1664,6 +1691,58 @@ function gridAlloc(){
      same thing a column exposed by the window sliding has always done. */
   gridBuildBed(0,GNX,true);
   gridReady=true;
+}
+/* WHERE THE POOLS ARE. A plunge is not a steep bit of river, it is a
+   BOUNDARY: the water goes over the lip, the fall turns its potential energy
+   into noise and spray, and what comes out at the bottom is a pool moving at
+   about the speed of the run that fed it. The solver had no idea of that. It
+   sees a 1.20 m step as a 46% surface slope and drives the water down it at
+   g*S, so Stairstep Falls measured 8 m/s at every lip — the solver's own
+   ceiling — and was still doing 5.3 m/s eighteen metres later, against 1.1
+   in the run above. Six lips, six rapids, and the three previous attempts at
+   this all decelerated the tongue a little more gently somewhere further
+   down, which is the wrong place: the momentum should never have got past the
+   lip. Asked for from the water in exactly those terms: "make the water
+   disappear at the lip and regenerate slow water in the pool."
+   So each genuine fall gets a band below it, and this works out where those
+   bands are and which column of river feeds each one. Only a real plunge
+   counts — a 20 cm freestone step you can drift a fly over is not one and
+   every other venue here is made of those. */
+const PLUNGE_KILL=8.0;      /* 1/s: how fast the band absorbs what arrives */
+function gridBuildPlunge(){
+  gplunge.fill(0); gpCap.fill(0);
+  if(!DROPS.length) return;
+  /* the falls, in order, that are deep enough to plunge rather than step */
+  const lips=DROPS.filter(d=>d.h*P.grade>=0.60).sort((a,b)=>a.x-b.x);
+  if(!lips.length) return;
+  const wasX=flowX, wasZ=flowZ;
+  for(let n=0;n<lips.length;n++){
+    const d=lips[n];
+    const start=d.x+d.w;                       /* the foot of the fall */
+    /* out to the approach of the next fall, so the next tongue is still free
+       to form — the fall has to LOOK like a fall */
+    const next=n+1<lips.length?lips[n+1].x-lips[n+1].w-3.0:start+16;
+    const end=start+Math.max(4.0,Math.min(16.0,next-start));
+    /* HOW FAST THE RUN ABOVE IT IS GOING: Manning's on the reach's own slope,
+       on the centreline, clear of the drawdown above the lip. Taken
+       analytically rather than read out of the solved grid, for two reasons.
+       The approach to the top fall in a reach is often outside the solver
+       window, where there is no grid to read — which is exactly what happened
+       at the first attempt, and the whole cap was silently inert there. And a
+       number taken from the grid would be the very field this cap is shaping,
+       which is how a feedback loop starts. It depends on the channel and the
+       settings only, so it belongs here with the rest of the geometry. */
+    analyticFlow(d.x-d.w-2.5,CZ);
+    const cap=Math.max(0.15,Math.hypot(flowX,flowZ));
+    for(let i=0;i<GNX;i++){
+      const x=GX0+(i+0.5)*gdx;
+      if(x<start||x>end) continue;
+      const w=smoothstep(start,start+0.8,x)*(1-smoothstep(end-2.5,end,x));
+      if(w<=gplunge[i]) continue;
+      gplunge[i]=w; gpCap[i]=cap;
+    }
+  }
+  flowX=wasX; flowZ=wasZ;
 }
 function gridBuildBed(i0,i1,seed){
   i0=i0===undefined?0:i0; i1=i1===undefined?GNX:i1;
@@ -1676,6 +1755,7 @@ function gridBuildBed(i0,i1,seed){
     gsurf[i]=surfY(x);
     gslope[i]=(surfY(x-gdx)-surfY(x+gdx))/(2*gdx);   /* +ve downstream */
   }
+  gridBuildPlunge();
   for(let j=0;j<GNZ;j++){
     const z=GZ0+(j+0.5)*gdx;
     for(let i=i0;i<i1;i++){
@@ -1806,6 +1886,18 @@ function gridStep(dt){
   if(!gridReady) return;
   const g=9.81, n2=P.manningN*P.manningN;
   /* 1. body force: gravity down the surface slope, minus Manning bed friction */
+  /* 1b. AND THE PLUNGE POOLS ABSORB WHAT COMES OVER THE LIP. The band and the
+     column of run that feeds it are worked out in gridBuildPlunge; all that
+     happens here is that water in a band may not run faster downstream than
+     the water feeding the fall above it. A pool cannot pass more than the run
+     delivers, and the fall's own energy goes into the white water, not into
+     the pool's momentum.
+     Only the EXCESS is taken, and only from the downstream component. That is
+     what keeps the eddies: a recirculation behind a boulder runs BACK up the
+     channel, which is under the cap and untouched, and the cross-stream
+     component is never looked at, so the pool still turns. Damping the pool
+     as a whole would have flattened exactly the water that was asked to be
+     kept. */
   for(let k=0;k<gu.length;k++){
     if(gsolid[k]){gu[k]=0;gv[k]=0;continue;}
     const i=k%GNX;
@@ -1815,6 +1907,10 @@ function gridStep(dt){
     const damp=1/(1+fr*dt);
     gu[k]=(gu[k]+dt*g*gslope[i]*P.current*2.0)*damp;
     gv[k]=gv[k]*damp;
+    /* one compare and, in a band, one lerp */
+    const pl=gplunge[i];
+    if(pl>0.001&&gu[k]>gpCap[i])
+      gu[k]+=(gpCap[i]-gu[k])*Math.min(1,dt*PLUNGE_KILL*pl);
   }
   /* 2. semi-Lagrangian advection */
   gu0.set(gu); gv0.set(gv);
@@ -2312,15 +2408,27 @@ const RIDE=0.010, BREAK=2.6;
    and held above. The curve is emergent rather than authored, which is the
    only way it was ever going to stop looking authored. */
 const SINK_EASE=4.0;         /* how fast a node reaches its terminal sink */
-/* what this node does when the water has hold of it. Zero is a floating line,
-   which is every river here; above zero it is the rate that node settles at.
-   The leader always outsinks the belly, because it is nylon and thin. */
+/* THREE MATERIALS, THREE NUMBERS. This was one setting, `Fly sink`, with the
+   leader hard-wired to sink at it and the fly line at two thirds of it — so
+   the one rig a nymph fisherman actually uses, a FLOATING line with a weighted
+   fly on the end of it, could not be built. Asked for from the water: "I want
+   a floating line where the fly sinks", and separately "line and tippet
+   buoyancy should be their own settings from the fly's".
+   So each part of the rig now carries its own terminal sink rate:
+   `flySink` the fly, `tipSink` the leader and tippet, `lineSink` the belly.
+   Zero is a floating line, which is every river here.
+
+   The fly's own weight is not felt only at the fly, either: a bead-head drags
+   the tippet down with it in a curve, and clamping node 1 flat to the film
+   while node 0 sinks would put back exactly the one-node hinge the last round
+   removed. So the fly's rate bleeds off along the tippet and the material
+   rate takes over from there, and whichever is greater wins. */
 function sinkRate(i){
-  if(P.flySink<=0.001) return 0;
+  if(P.flySink<=0.001&&P.tipSink<=0.001&&P.lineSink<=0.001) return 0;
   const a=sArc(i);
-  /* the leader is the whole of it at first, then the fly line, which is
-     fatter and closer to neutral and settles at about two thirds the rate */
-  return P.flySink*(a<=leaderTot?1:0.66);
+  const mat=Math.max(0,a<=leaderTot?P.tipSink:P.lineSink);
+  const pull=Math.max(0,P.flySink)*Math.max(0,1-a/Math.max(0.2,P.tippetLen));
+  return Math.max(mat,pull);
 }
 function waterAndGround(i,h,t){
   const p=i*3,x=pos[p],z=pos[p+2];
@@ -6104,8 +6212,40 @@ class Trout{
        is inverted, and the fish's whole window sits on the wrong side of him.
        So: the channel unless the water is actually arguing with it. */
     const agree=sp>0.06?(flowX*tx+flowZ*tz)/sp:1;
-    this.eddy=agree<0.35;
-    if(this.eddy){ this.fux=-flowX/sp; this.fuz=-flowZ/sp; }
+    /* AND A RECIRCULATION IS A FACT ABOUT THE GEOMETRY BEFORE IT IS A FACT
+       ABOUT THE SAMPLE. Reading it off the flow alone needs the water to be
+       arguing loudly, and how loudly it argues depends on how fast the reach
+       is running: the same lie behind the same boulder read -0.85 on the
+       channel when Stairstep was a rapid and +0.36 once the plunge pools
+       were made to behave, which flipped its frame back to the wrong one for
+       no reason a fisherman would recognise. Where he IS is not in doubt,
+       though. So a fish lying in a boulder's lee — downstream of it, within
+       a couple of radii of its flank — is taken to be in the recirculation on
+       a much weaker hint from the water: the seam BESIDE a rock runs with the
+       river and reads near 1, and nothing there is touched. */
+    let lee=false;
+    for(let i=0;i<OBST.length;i++){
+      const o=OBST[i];
+      const rx=this.p.x-o.x, rz=this.p.z-o.z;
+      const along=rx*tx+rz*tz, off=Math.abs(rx*tz-rz*tx);
+      if(along>0.2*o.r&&along<3.2*o.r&&off<1.9*o.r){ lee=true; break; }
+    }
+    this.eddy=agree<0.35||(lee&&agree<0.75);
+    /* IN AN EDDY, THE REVERSED CHANNEL — not the raw flow sample. Using the
+       sample itself was right in principle and wrong in practice: a
+       recirculation is a rotation, so at the flank of one the water is
+       running mostly ACROSS the river, and at the second Stairstep lie the
+       sample came back (0.05, 0.84) — almost pure sideways. The box was
+       therefore laid across the current rather than back up it, which is
+       what was reported: "the box is still pointing the wrong way." It also
+       wobbled, because the sample is retaken every half second and the
+       rotation moves under it.
+       What the fish is actually doing in an eddy is facing the recirculation,
+       which as a whole runs back up the channel. So the frame flips the
+       channel rather than following the eddy's local swirl: exact over the
+       length of the box, steady between refreshes, and it cannot point
+       across the river however the swirl is turning. */
+    if(this.eddy){ this.fux=tx; this.fuz=tz; }
     else { this.fux=-tx; this.fuz=-tz; }
   }
   /* how far upstream of him the fly is, and how far across his lane */
@@ -7387,7 +7527,7 @@ const POST_=()=>{
    somebody has threaded the fly through. Reported for the ant, the bugger,
    the stimulator, the caddis and the Adams, which is all of them.
    Real legs come off the thorax in pairs, angle back and down, and taper. */
-const LEGS_=(n,len,col,back0,y0)=>{
+const LEGS_=(n,len,col,back0,y0,fan,thin)=>{
   /* SIX LEGS YOU CAN SEE. The first version put each leg's CENTRE at an
      offset built from mismatched factors, so most of every leg sat inside the
      body and what stuck out was a 0.9 mm spike — reported as legs that are
@@ -7399,14 +7539,21 @@ const LEGS_=(n,len,col,back0,y0)=>{
      how a dry fly sits on the film, and what was asked for.
      The centre then goes half a leg-length down that axis from the thorax, so
      the leg starts at the body and ends in clear air. */
+  /* SHORTER AND SPLAYED WIDER. Reported from the water after the first cut:
+     the legs read now, but they are too long for the hook and they come off
+     the thorax in a tight bundle rather than a fan. `fan` is the fore-and-aft
+     sweep the pairs are spread over, about its own centre so widening it does
+     not tip the whole set back, and `thin` scales the fibre. Both default to
+     what was here, so a pattern that is not asked to change does not. */
   const g=new THREE.Group(), per=Math.max(1,Math.round(n/2));
+  const sw=(fan===undefined?0.70:fan), th=(thin===undefined?1:thin);
   for(const side of [1,-1]) for(let k=0;k<per;k++){
     const t=per===1?0.5:k/(per-1);            /* 0 front leg .. 1 rear leg */
-    const back=(back0||0)-0.25+t*0.70;        /* front pair forward, rear swept */
+    const back=(back0||0)+0.10-sw*0.5+t*sw;   /* front pair forward, rear swept */
     const a=-side*(Math.PI/2-back);
     const ax=Math.cos(a), az=-Math.sin(a);
     const L=len*(1-0.12*Math.abs(t-0.5));
-    const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.0013,0.0005,L,4),col);
+    const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.0013*th,0.0005*th,L,4),col);
     leg.rotation.set(0,a,-Math.PI/2);
     leg.position.set(-0.001+t*0.003+ax*L*0.5,(y0===undefined?-0.001:y0),az*L*0.5);
     g.add(leg);
@@ -7435,7 +7582,7 @@ const FLIES=[
     const g=new THREE.Group();
     const b=new THREE.Mesh(new THREE.SphereGeometry(0.0095,8,6),M_(0x53514b));
     b.scale.set(1.5,0.85,0.85); g.add(b);
-    g.add(LEGS_(6,0.024,M_(0x9a978c,0.95),0.05,-0.0012));
+    g.add(LEGS_(6,0.018,M_(0x9a978c,0.95),0.05,-0.0012,1.15));
     const tail=new THREE.Mesh(new THREE.ConeGeometry(0.0016,0.011,4),M_(0x8d8a80,0.95));
     tail.rotation.z=-Math.PI/2; tail.position.x=-0.012; g.add(tail);
     g.add(POST_());
@@ -7468,7 +7615,8 @@ const FLIES=[
        cylinder is not what makes a stimulator read — the wing is. */
     const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0016,0.0011,0.015,7),M_(0xd4741f,0.9));
     bod.rotation.z=Math.PI/2; g.add(bod);
-    g.add(LEGS_(6,0.026,M_(0xa9713a,0.95),0.10,-0.0015));
+    /* shorter, thinner and wider: asked for by name from the water */
+    g.add(LEGS_(6,0.017,M_(0xa9713a,0.95),0.10,-0.0015,1.20,0.72));
     const tail=new THREE.Mesh(new THREE.ConeGeometry(0.0022,0.010,5),M_(0xb8611c,0.95));
     tail.rotation.z=-Math.PI/2; tail.position.x=-0.011; g.add(tail);
     g.add(WING_(6,0.022,0.26,0xc8b189,0.7));
@@ -7478,7 +7626,8 @@ const FLIES=[
     const g=new THREE.Group();
     const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0019,0.0013,0.011,7),M_(0x8a6a3c));
     bod.rotation.z=Math.PI/2; g.add(bod);
-    g.add(LEGS_(6,0.023,M_(0x9c7c4c,0.95),0.15,-0.0015));
+    /* the caddis was the worst offender — shortest and thinnest of the set */
+    g.add(LEGS_(6,0.013,M_(0x9c7c4c,0.95),0.15,-0.0015,1.25,0.65));
     g.add(WING_(7,0.024,0.16,0xcbb083,0.55));      /* the tent wing, the whole point */
     return g;
   }],
@@ -7500,7 +7649,9 @@ const FLIES=[
     const g=new THREE.Group();
     const bod=new THREE.Mesh(new THREE.CylinderGeometry(0.0055,0.0040,0.022,7),M_(0x2c3a24));
     bod.rotation.z=Math.PI/2; g.add(bod);
-    g.add(LEGS_(6,0.025,M_(0x384a2c,0.95),0.15,-0.002));
+    /* NO LEGS. A woolly bugger has no legs — it has a palmered hackle and a
+       marabou tail, and the six splayed fibres read as a spider. Asked for
+       from the water: "take the legs off the bugger entirely." */
     const mar=new THREE.Mesh(new THREE.ConeGeometry(0.0042,0.026,6),M_(0x222d1c,0.98));
     mar.rotation.z=-Math.PI/2; mar.position.x=-0.024; g.add(mar);
     const bead=new THREE.Mesh(new THREE.SphereGeometry(0.0045,8,6),
@@ -7521,7 +7672,14 @@ function applyFly(){
   flyAnchor.add(build());
   /* the physics of it, not just the picture: FLY_R feeds flyDragK, which is
      what decides how it falls and therefore what counts as a slap */
+  /* AND ITS WEIGHT. `sink` had been declared for the nymph and the bugger
+     since the table was written and never read, so the two weighted patterns
+     in the box fished exactly like the four dries. It drives the FLY's own
+     rate only — the leader and the belly are the venue's business and are
+     left alone, so a weighted fly on the pond's sinking leader is the sum of
+     the two rather than one overwriting the other. */
   FLY_R=spec.r; P.flyDrag=spec.drag; P.flySize=spec.size;
+  P.flySink=spec.sink||0;
   rebuildMasses();
   return name;
 }
@@ -7998,9 +8156,24 @@ function drawHUD(){
 }
 /* ---- settings export / presets ---- */
 let settingsStr='', copyState='';
-function encodeSettings(){
+/* WHAT TRAVELS WITH YOU, AND WHAT BELONGS TO THE RIVER. The URL used to carry
+   the whole of P on every venue switch, and the boot block then applied the
+   whole of P back on top of the new reach — with a guard, `sw=1`, that nothing
+   in the file ever wrote. So the venue-owned numbers leaked: whatever the last
+   reach had set for clarity, current, upMax, feeding or sink came back out of
+   the address bar and sat on the next one, and the venue's own defaults were
+   never put back. It is the same split applyVenue already makes, so it is made
+   the same way: a key that appears in VENUE_BASE or in this venue's par is the
+   river's business and is left out, and everything else — rod, line, reel,
+   volumes, display, the fly — is yours and goes in.
+   `all` overrides that for the deliberate share: `Copy settings` hands over a
+   complete tuning including the water, and marks the URL so the boot block
+   knows not to overwrite it. */
+function venueOwned(k){ return (k in VENUE_BASE)||(SC.par&&(k in SC.par)); }
+function encodeSettings(all){
   const parts=[];
-  for(const k of Object.keys(P)) parts.push(k+'='+(+P[k]).toFixed(3));
+  for(const k of Object.keys(P))
+    if(all||!venueOwned(k)) parts.push(k+'='+(+P[k]).toFixed(3));
   return parts.join('&');
 }
 function applySettings(str){
@@ -8054,11 +8227,13 @@ function afterSettingsChange(){
    refresh still puts you back on the reach you were fishing with your tackle
    intact, which the reload used to give us for free. */
 function syncUrl(){
-  try{ location.hash='v='+SCENE_ID+'&s='+encodeURIComponent(encodeSettings()); }catch(e){}
+  try{ location.hash='v='+SCENE_ID+'&s='+encodeURIComponent(encodeSettings(false)); }catch(e){}
 }
 function copySettings(){
-  settingsStr=encodeSettings();
-  syncUrl();
+  /* the whole tuning, water included, because this is the button you press to
+     hand someone the river you set up */
+  settingsStr=encodeSettings(true);
+  try{ location.hash='v='+SCENE_ID+'&all=1&s='+encodeURIComponent(settingsStr); }catch(e){}
   const url=location.href;
   copyState='copied to clipboard';
   if(navigator.clipboard&&navigator.clipboard.writeText){
@@ -10349,8 +10524,16 @@ renderer.setAnimationLoop(()=>{
   const fx=pos[0],fy=pos[1],fz=pos[2];
   const film=filmY(fx,fz,simTime);
   const onWater=fy<film+0.06&&bedDepth(fx,fz)>0.02;
+  /* HELD, not re-read. `flowX/flowZ` are one shared pair that whoever called
+     computeFlow last owns, and between here and the take test below every
+     holding fish refits its own frame — which calls computeFlow at its own
+     nose. So "is this water drifting", which decides whether a fish judges
+     the fly on its drift or on the stillwater chase, was reading the flow at
+     the LAST FISH in the list instead of at the fly, on every frame a refit
+     happened. Copied out at the one place it is measured. */
   computeFlow(fx,fz);
-  const slip=Math.hypot(vel[0]-flowX,vel[1],vel[2]-flowZ);
+  const flyFlowX=flowX, flyFlowZ=flowZ;
+  const slip=Math.hypot(vel[0]-flyFlowX,vel[1],vel[2]-flyFlowZ);
 
   if(!hooked){
     if(onWater){
@@ -10444,7 +10627,7 @@ renderer.setAnimationLoop(()=>{
     /* Slow water has no drift to judge and no upstream to come from, so the
        zone means nothing there and the old circle is what is left. The pond
        earns its takes on the chase path below instead. */
-    const flowSpd=Math.hypot(flowX,flowZ);
+    const flowSpd=Math.hypot(flyFlowX,flyFlowZ);
     const drifting=flowSpd>0.08;
     for(const f of fishes){
       if(f.state!=='holding')continue;
@@ -10487,8 +10670,7 @@ renderer.setAnimationLoop(()=>{
      catches up. Off on every river, because SC.chase is only set on the pond. */
   if(SC.chase&&!hooked){
     const sub=fy<film-0.015&&bedDepth(fx,fz)>0.05;
-    computeFlow(fx,fz);
-    const strip=Math.hypot(vel[0]-flowX,vel[2]-flowZ);
+    const strip=Math.hypot(vel[0]-flyFlowX,vel[2]-flyFlowZ);
     const alive=sub&&strip>P.chaseMin&&strip<P.chaseMax;
     for(const f of fishes){
       if(f.state==='chasing'){
@@ -11473,9 +11655,13 @@ if(location.hash&&location.hash.indexOf('s=')>=0){
     const raw=decodeURIComponent(location.hash.slice(location.hash.indexOf('s=')+2));
     const n=applySettings(raw);
     if(n) hint.innerHTML='<b>Loaded '+n+' settings from the URL.</b> '+hint.innerHTML;
-    /* arrived here from a venue switch: the tackle in the URL stays, but the
-       water and fish numbers belong to the venue, so they go back on top */
-    if(/[#&]sw=1/.test(location.hash||'')) applyPreset(Object.assign({},VENUE_BASE,SC.par));
+    /* THE WATER AND THE FISH GO BACK ON TOP, unless this is a shared tuning
+       that deliberately includes them. syncUrl no longer writes venue-owned
+       keys at all, so for a URL this build wrote this is a no-op; it is here
+       for the ones already in circulation, which carry the whole of P and a
+       `sw=1` guard that nothing ever wrote. */
+    if(!/[#&]all=1/.test(location.hash||''))
+      applyPreset(Object.assign({},VENUE_BASE,SC.par));
   }catch(e){}
 }
 

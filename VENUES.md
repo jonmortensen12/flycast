@@ -120,6 +120,25 @@ because the pool now runs wider than the width the lip pinches from — and `smo
 a check that every venue's geometry actually stays inside its own declared bounds, which
 is a rule this file has stated from the beginning and nothing had ever tested.
 
+That was three rounds ago and it was not enough, because all three treated the
+tongue as water to be slowed down rather than momentum that should never have
+existed. Measured, every lip still pinned the solver's 8 m/s ceiling and the
+water was doing 5.3 m/s eighteen metres below it, against 1.1 in the run above.
+**A plunge is a boundary.** `gridBuildPlunge` now gives every fall over
+`h*grade = 0.60` — Stairstep and nothing else here — a band from the foot of the
+fall out to the approach of the next one, carrying the speed of the run that
+feeds it, and inside that band the solver may not carry water downstream faster
+than that. The fall's energy goes into the white water; the pool passes what the
+run delivers. The band lets go before the next lip so the fall still forms.
+Measured: 8 m/s at the lip, 1.28 at its foot, 0.77 through the pool — 5.5 seconds
+of drift against Zone length 4.2 — and 5.08 m/s at the next lip.
+
+**And the two eddy lies moved in behind their stones.** They sat nearly three
+radii below their boulders, which is out in the wake where the water is only slow
+rather than reversed; they are now at 1.7 radii and 0.8 m off the flank, which is
+where the flow actually turns back. `smoke.mjs falls` asserts both the pool
+speeds and the eddy frames.
+
 ## Switching venues
 
 Venues hot-swap. `runAction('!venue:<id>')` calls `requestVenue()`, which queues
@@ -174,8 +193,18 @@ speck budget are deliberately not in that list, so they simply persist: there is
 no URL round trip carrying them any more, because nothing reloads.
 
 `syncUrl()` still writes `#v=<id>&s=<settings>` after every swap, so the address
-bar stays a shareable link and a manual refresh puts you back where you were.
-Old `sw=1` links keep working; nothing produces them now.
+bar stays a shareable link and a manual refresh puts you back where you were —
+but it no longer writes the river's own numbers into it. It used to write the
+whole of `P`, and the boot block applied the whole of `P` back on top of whatever
+reach loaded, guarded by `sw=1` — which nothing in the file has ever written. So
+the venue-owned numbers leaked: clarity, current, `upMax`, feeding and sink came
+back out of the address bar and sat on the next reach, and the venue's own
+defaults were never restored. `encodeSettings(all)` now makes the same split
+`applyVenue` does — a key in `VENUE_BASE` or in the venue's `par` is the river's
+business and is left out — and the boot block re-applies venue defaults unless
+the URL carries `all=1`, which repairs the links already in circulation.
+`Copy settings` is the one path that passes `all=1` and the complete tuning,
+because that is the button for handing someone the river you set up.
 
 ## The pond
 
@@ -184,15 +213,20 @@ no river uses:
 
 - **Cruising fish.** A lie with a `cr` entry becomes a beat rather than a
   holding spot. The fish never stops, so the cast goes where he is going.
-- **A sinking fly.** `flySink` gives the fly node a terminal sink rate and
-  releases the tippet from the film, so the leader is pulled under *by* the fly
-  instead of holding it up. At `flySink = 0` — every river — the dry-fly
-  behaviour is byte-for-byte what it was.
+- **A sinking line.** Three numbers, one per part of the rig, on the
+  **SINK & FLOAT** tab: `flySink` for the fly (and the tippet it drags down with
+  it, easing off along the tippet's length so there is no hinge at the fly),
+  `tipSink` for the leader and tippet, `lineSink` for the belly. The pond ships
+  `tipSink 0.32, lineSink 0.21`; every river ships zeros, where the dry-fly
+  behaviour is byte-for-byte what it was. This was one number driving all three,
+  which meant a floating line with a weighted fly — the commonest nymph rig
+  there is — could not be expressed. `flySink` is also set for you by the fly
+  box: the pheasant tail arrives at 0.16 and the woolly bugger at 0.22.
 - **The chase.** A submerged fly moving through the water between `chaseMin`
   and `chaseMax` reads as alive. A fish inside `chaseRadius` commits, swims at
   where the fly *will be*, and eats it if he catches up. Too slow or stopped and
   he loses interest after `chaseGiveUp`; too fast and he gives up because he
-  cannot get in front of it. All eight numbers are in the **STILLWATER** tab.
+  cannot get in front of it. The seven chase numbers are in the **STILLWATER** tab.
 
 The starting numbers are guesses. `Chase min 0.28` and `Chase max 1.60` are the
 two to play with first — they are the whole feel of the retrieve.

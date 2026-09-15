@@ -381,7 +381,7 @@ const ARGS=process.argv.slice(2);
 const ONLY=ARGS.filter(a=>a[0]!=='-');
 const SECTIONS=['water','perf','specks','menu','venue','fight','boat','settings',
                 'scenery','sink','trophy','teleport','splash','guide','fish',
-                'remote','species','markers','zone','flies'];
+                'remote','species','markers','zone','flies','falls'];
 const ran=n=>!ONLY.length||ONLY.includes(n);
 if(ARGS.includes('--list')){
   console.log('sections: '+SECTIONS.join(' '));
@@ -1072,36 +1072,80 @@ if(ran('scenery')){
 }
 if(ran('sink')){
   const sink=vm.runInContext(`(()=>{
-    const was=P.flySink;
-    /* a dry-fly reach: nothing anywhere on the line has any sink at all */
-    P.flySink=0;
-    let dryAny=0;
-    for(let i=0;i<nAct;i++) dryAny=Math.max(dryAny,sinkRate(i));
-    /* and a sinking one */
-    P.flySink=0.32;
-    const atFly=+sinkRate(0).toFixed(3);
-    /* a node inside the leader, and one out in the fly line */
-    let iLead=-1,iBelly=-1;
+    const was={f:P.flySink,t:P.tipSink,l:P.lineSink,pat:P.flyPat};
+    /* THREE MATERIALS, THREE NUMBERS. This case used to drive the whole rig
+       off flySink alone, because that is all there was: the leader sank at
+       it and the belly at two thirds of it, hard-wired. The one rig a nymph
+       fisherman actually uses - a FLOATING line with a weighted fly - could
+       not be expressed, and it was asked for by name from the water. So the
+       claims are now about which part of the rig each number moves. */
+    /* pick a node inside the tippet, one further up the leader, and one out
+       in the fly line */
+    let iTip=-1,iLead=-1,iBelly=-1;
     for(let i=0;i<nAct;i++){
       const a=sArc(i);
+      if(iTip<0&&a>P.tippetLen*0.3&&a<P.tippetLen*0.6) iTip=i;
       if(iLead<0&&a>leaderTot*0.5) iLead=i;
       if(iBelly<0&&a>leaderTot+1.0) iBelly=i;
     }
-    const lead=+sinkRate(iLead).toFixed(3), belly=+sinkRate(iBelly).toFixed(3);
-    const out={dryAny:+dryAny.toFixed(4), atFly, lead, belly,
-               leader:+leaderTot.toFixed(2)};
-    out.aDryReachIsUntouched = dryAny===0;
+    const rate=i=>+sinkRate(i).toFixed(3);
+    const all=()=>{let m=0;for(let i=0;i<nAct;i++)m=Math.max(m,sinkRate(i));return +m.toFixed(4);};
+    const out={leader:+leaderTot.toFixed(2), tippet:+P.tippetLen.toFixed(2),
+               nodes:{tip:iTip,lead:iLead,belly:iBelly}};
+
+    /* 1. a dry-fly reach: nothing anywhere on the line has any sink at all */
+    P.flySink=0; P.tipSink=0; P.lineSink=0;
+    out.dryAny=all();
+    out.aDryReachIsUntouched = out.dryAny===0;
+
+    /* 2. A FLOATING LINE WITH A SINKING FLY, which is the point of the split.
+       The fly goes down at its own rate and drags the tippet after it, easing
+       off along the tippet so there is no hinge at the fly - and the fly line
+       does not sink at all. */
+    P.flySink=0.32; P.tipSink=0; P.lineSink=0;
+    out.floatLine={fly:rate(0), tip:rate(iTip), lead:rate(iLead), belly:rate(iBelly)};
+    out.theFlyGoesDownOnItsOwn = out.floatLine.fly>0.3;
+    out.itTakesTheTippetWithIt = out.floatLine.tip>0.05
+                                 && out.floatLine.tip<out.floatLine.fly;
+    out.andTheLineStaysUp = out.floatLine.lead===0 && out.floatLine.belly===0;
+
+    /* 3. a sinking leader on a floating line: all the nylon goes, the belly
+       stays on top where you can still mend it */
+    P.flySink=0; P.tipSink=0.32; P.lineSink=0;
+    out.sinkLeader={tip:rate(iTip), lead:rate(iLead), belly:rate(iBelly)};
+    out.aSinkingLeaderTakesAllTheNylon = out.sinkLeader.tip===0.32
+                                         && out.sinkLeader.lead===0.32;
+    out.andLeavesTheBellyOnTop = out.sinkLeader.belly===0;
+
+    /* 4. the Beaver Pond's own rig, which is what the venue ships and has to
+       behave exactly as it did when one number drove both: leader 0.32, belly
+       0.21, and the leader beating the belly down is what makes the curve */
+    P.flySink=0; P.tipSink=0.32; P.lineSink=0.21;
+    out.pond={lead:rate(iLead), belly:rate(iBelly)};
+    out.theLeaderOutsinksTheBelly = out.pond.lead>out.pond.belly*1.2;
     /* NO WAITING. The old front needed leaderTot/(flySink*2.2) seconds - about
        five at these numbers - before the far end of the leader was released.
        Every node is live on the first frame now. */
-    out.itStartsAtOnce = atFly>0 && lead>0 && belly>0;
-    /* and the leader beats the belly down, which is what makes the curve */
-    out.theLeaderOutsinksTheBelly = lead>belly*1.2;
+    out.itStartsAtOnce = rate(0)>0 && out.pond.lead>0 && out.pond.belly>0;
     /* the rate is a RATE, not an acceleration: it must not depend on how long
        the node has been under, which is what the old constant shove did */
     out.itIsATerminalRate = Math.abs(sinkRate(iLead)-sinkRate(iLead))<1e-12
-                            && lead<=P.flySink+1e-9;
-    P.flySink=was;
+                            && out.pond.lead<=P.tipSink+1e-9;
+
+    /* 5. AND THE FLY BOX CARRIES ITS OWN WEIGHT. the spec's own sink was declared for the
+       nymph and the bugger when FLIES was written and never read by applyFly,
+       so the two weighted patterns in the box fished exactly like the four
+       dries. Changing pattern has to set it. */
+    P.flySink=0; P.tipSink=0; P.lineSink=0;
+    const bySink={};
+    for(let i=0;i<FLIES.length;i++){ P.flyPat=i; applyFly(); bySink[FLIES[i][0]]=+P.flySink.toFixed(3); }
+    out.bySink=bySink;
+    out.theDriesFloat = bySink['Parachute Adams']===0 && bySink['Foam ant']===0
+                     && bySink['Stimulator']===0 && bySink['Elk hair caddis']===0;
+    out.theWeightedOnesSink = bySink['Pheasant tail']>0.1 && bySink['Woolly bugger']>0.1;
+
+    P.flySink=was.f; P.tipSink=was.t; P.lineSink=was.l;
+    P.flyPat=was.pat; applyFly();
     return out;
   })()`,sandbox);
   console.log('a line sinks because it is heavy',sink);
@@ -2798,6 +2842,87 @@ if(ran('fight')){
   {
     const bad=Object.entries(reeldrag).filter(([k,v])=>v===false).map(([k])=>k);
     if(bad.length) console.log('  *** REEL DRAG FAILURE:',bad.join(', '),'***');
+  }
+}
+
+/* ── A PLUNGE POOL IS SLOW, AND THE EDDY BEHIND THE ROCK IS STILL THERE ──
+   Reported from the water three sessions running: "the bottom and the middle
+   of the waterfall are still unfishable." Measured, the reason was not
+   subtle. The solver reads a 1.20 m step as a 46% surface slope and drives
+   the water down it at g*S, so every lip on Stairstep Falls pinned the
+   solver's own 8 m/s ceiling and was STILL doing 5.3 m/s eighteen metres
+   later, against 1.1 m/s in the run feeding it. Six lips, six rapids, and no
+   drift anywhere in the reach.
+   Three earlier rounds each decelerated the tongue a little more gently a
+   little further down, which is the wrong place. The fix asked for from the
+   water is the right one and is what this tests: the lip is a BOUNDARY. The
+   fall's energy goes into the white water, the pool below passes what the run
+   above delivers and no more, and the fall itself still forms because the
+   band lets go before the next lip.
+   And the thing that must survive it: the recirculation behind each boulder,
+   which is the water this reach is worth fishing for and which is made of
+   exactly the momentum the cap takes away. */
+if(ran('falls')){
+  const falls=vm.runInContext(`(()=>{
+    const loop=renderer._loop;
+    runAction('!venue:falls');
+    for(let f=0;f<420;f++) loop();
+    const u=x=>{ computeFlow(x,CZ); return +flowX.toFixed(2); };
+    /* the -27 lip: the run above it, the foot of the fall, the middle of the
+       pool, and the drawdown into the next lip at -9 */
+    const out={ run:u(-30.5), lip:u(-27), foot:u(-24), pool:u(-19.5),
+                tail:u(-14), approach:u(-10.5), next:u(-9) };
+    /* THE POOL PASSES WHAT THE RUN DELIVERS. Not a fixed number: it is the
+       run's own speed that sets the cap, so this is a ratio and it holds at
+       any grade or current. */
+    out.thePoolIsNotARapid = out.pool < out.run*1.6;
+    out.theTongueDiesAtTheLip = out.foot < out.run*2.0;
+    /* and the fall is still a fall: the water accelerates into the next lip
+       rather than the whole reach being flattened */
+    out.theFallStillForms = out.next > out.pool*2.5;
+    /* FISHABLE, which is the actual complaint. Zone length here is 4.2 m, and
+       a drift you can present is one that takes seconds rather than an
+       instant to come down it. */
+    out.driftSeconds = +(P.upMax/Math.max(out.pool,0.01)).toFixed(1);
+    out.thereIsTimeToPresentAFly = out.driftSeconds > 2.5;
+
+    /* the two eddy lies, which the venue puts a little over a radius below
+       their boulders and off the flank */
+    const eddies=[], mid=[];
+    for(const f of fishes){
+      f.reseat(); f.fitZone();
+      let lee=null;
+      for(const o of OBST){
+        const dx=f.p.x-o.x, dz=Math.abs(f.p.z-o.z);
+        if(dx>0&&dx<3.2*o.r&&dz<1.9*o.r){ lee={dx:+dx.toFixed(2),r:o.r}; break; }
+      }
+      const row={x:+f.p.x.toFixed(1), eddy:f.eddy, fux:+f.fux.toFixed(2),
+                 lee:lee?lee.dx/lee.r:null};
+      (lee?eddies:mid).push(row);
+    }
+    out.eddies=eddies; out.mid=mid;
+    /* BOTH of them, and they are read off the geometry rather than off a flow
+       sample whose size depends on how fast the reach happens to run. That
+       was the bug: the same lie behind the same boulder read -0.85 on the
+       channel while this reach was a rapid and +0.28 once the pools behaved,
+       which flipped its frame back for no reason a fisherman would know. */
+    out.bothEddyLiesAreInALee = eddies.length===2;
+    /* and the frame is the REVERSED channel, which is the whole point: his
+       window is back UP the reach, on the rock's side of him */
+    out.theEddyFramesAreReversed = eddies.length>0 && eddies.every(e=>e.eddy&&e.fux>0.5);
+    /* TIGHT IN BEHIND THE STONE. They used to sit nearly three radii down,
+       out in the wake where the water is only slow rather than reversed. */
+    out.theyAreTuckedInBehindTheRock = eddies.every(e=>e.lee<2.5);
+    /* and nothing in open water is flipped: a fish in the channel keeps the
+       channel frame, or every drift on every venue turns round */
+    out.openWaterIsUntouched = mid.length>0 && mid.every(m=>!m.eddy&&m.fux<0);
+    for(const f of fishes) f.reseat();
+    return out;
+  })()`,sandbox);
+  console.log('the fall lands in a pool',falls);
+  {
+    const bad=Object.entries(falls).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** PLUNGE POOL FAILURE:',bad.join(', '),'***');
   }
 }
 

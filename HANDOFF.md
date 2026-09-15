@@ -1430,6 +1430,82 @@ Recorded because each one was mis-diagnosed at least once.
    the single most frustrating thing in the game: a fish still refuses a dragging fly and
    still declines a good one, he just stops being removed from play by the line itself.
 
+36. **A plunge pool is a boundary, not a ramp.** Stairstep Falls was reported unfishable
+   three sessions running — "the bottom and the middle of the waterfall." Measured, the
+   grid solver read each 1.20 m step as a 46% surface slope and drove the water down it at
+   `g*S`, so every lip pinned the solver's own 8 m/s ceiling and the water was STILL doing
+   5.3 m/s eighteen metres later, against 1.1 m/s in the run feeding it. Six lips, six
+   rapids. Three earlier rounds each decelerated the tongue a little more gently a little
+   further down, which is the wrong place: the momentum should never have got past the lip.
+   The fix is the one asked for from the water. `gridBuildPlunge` gives every genuine fall
+   (`h*grade >= 0.60`, which is Stairstep and nothing else here) a band from the foot of the
+   fall out to the approach of the next one, and stores the speed of the run above it, taken
+   from Manning's on the reach's own slope. In the band the solver may not carry water
+   downstream faster than that: the fall's energy goes into the white water, and the pool
+   passes what the run delivers. The band lets go before the next lip, so the fall still
+   forms. Measured after: 8 m/s at the lip, 1.28 at its foot, 0.77 through the pool — a 5.5
+   second drift against Zone length 4.2 — and 5.08 at the next lip.
+   The cap is taken analytically rather than from the solved grid for two reasons, both
+   learned the hard way: the approach to the top fall in a reach is often outside the solver
+   window, where there is no grid to read at all (the first version was silently inert
+   there), and a cap read from the field it is shaping is a feedback loop.
+   Only the EXCESS downstream component is taken, never the cross-stream one and never
+   anything already under the cap, which is what lets the recirculations survive it.
+
+37. **A recirculation is a fact about the geometry before it is a fact about the flow.**
+   `fitFrame` decided a fish was in an eddy by sampling the flow at his nose and asking
+   whether it disagreed with the channel. That was right in principle and fragile in two
+   ways. A recirculation is a rotation, so at its flank the water runs mostly ACROSS the
+   river: at the second Stairstep lie the sample came back (0.05, 0.84), almost pure
+   sideways, and the frame built from it laid the drift box across the current — reported
+   twice as "the box is still pointing the wrong way." And the size of the disagreement
+   depends on how fast the reach happens to run: the same lie behind the same boulder read
+   -0.85 on the channel while this reach was a rapid and +0.28 once bug 36 made the pools
+   behave, which flipped its frame back for no reason a fisherman would recognise.
+   Two changes. In an eddy the frame is now the REVERSED CHANNEL rather than the raw sample
+   — exact over the length of the box, steady between the half-second refreshes, and it
+   cannot point across the river however the swirl is turning. And a fish lying in a
+   boulder's LEE (downstream of it, inside 3.2 radii, within 1.9 radii of its flank) is
+   taken to be in the recirculation on a much weaker hint from the water, because where he
+   is sitting is not in doubt. The seam BESIDE a rock runs with the river and reads near 1,
+   so nothing in open water is touched — `smoke.mjs falls` asserts that too.
+   Both Stairstep eddy lies also moved from nearly three radii below their boulders to 1.7,
+   which is where the flow is actually reversed rather than merely slow.
+
+38. **Three materials, three sink rates.** `Fly sink` was one number: the leader sank at it
+   and the fly line at two thirds of it, hard-wired. So the one rig a nymph fisherman
+   actually uses — a floating line with a weighted fly on the end — could not be built, and
+   it was asked for by name. `flySink`, `tipSink` and `lineSink` are now independent, on a
+   `SINK & FLOAT` tab of their own because "where is the sink setting?" was also asked: it
+   had been one row at the top of STILLWATER, which is the last place to look for it on a
+   river. The Beaver Pond ships `tipSink 0.32, lineSink 0.21`, which is exactly what the old
+   single number did, so that water is unchanged.
+   The fly's own rate bleeds off along the tippet rather than stopping at node 0, because
+   clamping node 1 flat to the film while the fly sinks would put back the one-node hinge
+   bug 33 removed. And `FLIES` had carried a `sink` field for the nymph and the bugger since
+   the table was written that `applyFly` never read — the two weighted patterns in the box
+   fished exactly like the four dries. It is wired now: 0.16 and 0.22.
+
+39. **`computeFlow` writes to two shared globals, and everyone assumed they owned them.**
+   `flowX`/`flowZ` belong to whoever called last. Between the one place the fly's flow is
+   measured and the take test thirty lines later, every holding fish refits its own frame —
+   which calls `computeFlow` at its own nose. So "is this water drifting", which decides
+   whether a fish judges the fly on its drift or on the stillwater chase, was reading the
+   flow at the LAST FISH in the list, on every frame a refit happened. Copied into locals at
+   the point of measurement.
+
+40. **Venue settings leaked through the address bar.** `syncUrl` wrote the whole of `P` on
+   every venue change and the boot block applied the whole of `P` back on top of the new
+   reach — guarded by `sw=1`, which nothing in the file ever wrote. So whatever the last
+   reach set for clarity, current, `upMax`, feeding or sink came back out of the URL and sat
+   on the next one, and the venue's own defaults were never restored. `encodeSettings` now
+   makes the same split `applyVenue` does: a key in `VENUE_BASE` or in the venue's own `par`
+   is the river's business and is left out, and everything else — rod, line, reel, volumes,
+   display, the fly — travels with you. `Copy settings` passes `all=1` and the complete
+   tuning, because that is the button for handing someone the river you set up; the boot
+   block restores venue defaults unless it sees that marker, which also repairs the URLs
+   already in circulation.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
@@ -1505,6 +1581,16 @@ reports undeclared identifier reads. `node --check` catches none of this.
 3. **Re-discretising mid-cast pops.** Acceptable for a tuning knob, not for gameplay.
 4. **The slack belly is simulated but cannot tangle** on boots, rocks or the reel.
 5. **No haul mechanic.** Single and double hauls are the obvious next casting feature.
+6f. **The plunge cap is a ceiling, not a model of a plunge.** Bug 36 stops the fall's
+   momentum reaching the pool, which is what was needed and is measurably right on the
+   surface. What it does not have is the pool's own structure: a real plunge pool
+   recirculates vertically, with the surface running out and the bottom running back under
+   the fall, and this is a two-dimensional solver that cannot represent that at all. The
+   consequence in play is that the recirculations behind the two boulders in those pools are
+   now weak — 0.14 m/s where they were 0.57 — which is why bug 37's lee test exists. If the
+   eddies ever need to be strong water rather than slack water, the honest fix is a depth-
+   averaged plunge source term, not a larger cap.
+
 6. **Nine reaches, six fly patterns, no hatch.** Fly selection is in (section 2.8); what is
    still missing is a hatch — a time-driven table of what is on the water and what the fish
    are keyed to — and any fish memory of having been pricked.
