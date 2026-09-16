@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Flycast Brown Trout Viewer</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#151515;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  #ui{position:fixed;left:14px;top:14px;right:14px;z-index:2;color:white;pointer-events:none}
+  .panel{display:inline-block;background:rgba(0,0,0,.58);backdrop-filter:blur(8px);border-radius:12px;padding:10px 12px}
+  #title{font-weight:700;font-size:16px}
+  #sub{font-size:12px;opacity:.8;margin-top:3px}
+  #axis{position:fixed;right:14px;bottom:14px;color:white;background:rgba(0,0,0,.5);border-radius:10px;padding:8px 10px;font-size:12px;line-height:1.45}
+  #hint{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);color:white;background:rgba(0,0,0,.5);border-radius:10px;padding:8px 12px;font-size:12px;white-space:nowrap;opacity:.85}
+</style>
+</head>
+<body>
+<div id="ui"><div class="panel">
+  <div id="title">Flycast • Brown Trout</div>
+  <div id="sub">Nose at X≈0 • tail extends +X</div>
+</div></div>
+<div id="axis">X → tail<br>Y ↔ lateral<br>Z ↑ dorsal</div>
+<div id="hint">Drag to rotate • pinch to zoom</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
+import {GLTFLoader} from 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/loaders/GLTFLoader.js';
+import {OrbitControls} from 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/controls/OrbitControls.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x151515);
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, 0.01, 100);
+camera.position.set(-0.8, 1.0, 0.55);
+
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x303030,2.0));
+const key = new THREE.DirectionalLight(0xffffff,2.5);
+key.position.set(-2,3,4);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xaab8ff,1.0);
+fill.position.set(3,-2,1);
+scene.add(fill);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = .07;
+controls.enablePan = false;
+controls.minDistance = .45;
+controls.maxDistance = 8;
+
+const loader = new GLTFLoader();
+loader.load('./brown_trout_flycast.glb', gltf=>{
+  const fish = gltf.scene;
+  scene.add(fish);
+
+  const box = new THREE.Box3().setFromObject(fish);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  fish.position.sub(center);
+
+  // Target the model's center. The fish's longitudinal axis remains +X.
+  controls.target.set(0,0,0);
+  camera.position.set(-size.x*0.65, size.y*2.7, size.z*1.8);
+  controls.update();
+}, undefined, err=>{
+  document.getElementById('sub').textContent='Could not load brown_trout_flycast.glb';
+  console.error(err);
+});
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+let lastTouch=performance.now();
+renderer.domElement.addEventListener('pointerdown',()=>lastTouch=performance.now());
+renderer.domElement.addEventListener('pointerup',()=>{
+  if(performance.now()-lastTouch>1200) document.getElementById('hint').style.display='none';
+});
+
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>
