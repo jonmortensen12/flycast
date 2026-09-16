@@ -1631,6 +1631,31 @@ Recorded because each one was mis-diagnosed at least once.
    announces itself with a `***` line, so `console.log` is wrapped to notice one and the
    banner now reads `*** NOT OK ***` when it has seen any.
 
+51. **Cedar Run wore whatever colour the last river was.** Eight keys — `watR/G/B`,
+   `waterOpaque`, `foamR/G/B`, `foamDirt` — are set by every venue but one, through the
+   `...LOOK[...]` spread in its `par`, and `VENUE_BASE` did not name any of them. So
+   `applyVenue` never reset them, and Cedar Run is the one venue that does not spread a
+   look. Measured: go to Stairstep Falls and come back, and the reference reach — the river
+   every constant in this game was tuned on — arrives in deep blue, `watR/G/B` still at
+   0.035/0.09/0.29 with Stairstep's foam dirt on it. It has been that way for as long as
+   the water looks have existed, and it is very probably part of why the water was reported
+   wrong three sessions running.
+   The eight are now declared in `VENUE_BASE` at the factory values, which is the look
+   Cedar Run is tuned as. No-op for the eight venues that state one.
+   Found sideways: multiplayer needs `venueOwned()` to mean the same thing on both
+   headsets, so `smoke.mjs mp` asserts that no venue's `par` sets a key `VENUE_BASE` does
+   not declare — and that assertion went red on a gap that had nothing to do with
+   networking. It is the second time this round an invariant caught something older and
+   larger than the change that motivated it.
+
+52. **The sandbox had every typed array and no ArrayBuffer.** Third instance of the same
+   harness gap (see `Infinity`, and the URL globals): the Proxy answers `has` with true for
+   everything, so any intrinsic not explicitly on `base` resolves to `undefined`. Fine
+   until something does binary I/O — the second angler sends `frame.buffer` down the data
+   channel and the receiver asks `d instanceof ArrayBuffer`, and `instanceof` against
+   `undefined` throws rather than answering false. `ArrayBuffer`, `DataView` and `Blob` are
+   on the table now.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
@@ -1696,6 +1721,100 @@ and skipped the line-hand path entirely. The context's global object is also a P
 reports undeclared identifier reads. `node --check` catches none of this.
 
 ---
+
+## 5b. Fishing with somebody else
+
+Two headsets, two people, one river. What is built is the part that lets you **see each
+other and watch each other fish**; the trout are still each player's own.
+
+### Why it was small
+Three things already existed for other reasons, and all three were reused rather than
+rebuilt:
+
+- **The transport.** The phone remote (4b) already introduces two devices through a PeerJS
+  broker and then talks peer to peer over a WebRTC data channel. `remoteLoadPeer` — two
+  CDNs, for the reason given there — is reused verbatim. Room ids are `flycast-mp-XXXX`, a
+  different prefix from the phone's `flycast-XXXX` so the two cannot collide.
+- **The renderer.** The motion recorder already draws a second angler: a full twelve-node
+  rod with real blank flex, a reel, a line hand and a line tube, all driven from *recorded
+  data* rather than from the local solver. That is exactly the shape of a remote player.
+  Section 8c builds its own set of those objects rather than borrowing the ghost's, because
+  you may well want to replay a recording while your friend is standing next to you.
+- **The settings split.** `venueOwned()` already knows which of `P` is the river's and
+  which is yours, because the URL needed the same answer.
+
+### The packet
+One flat `Float32Array` of **199 numbers, 796 bytes**, twenty times a second — about
+**16 kB/s each way**.
+
+| offset | floats | what |
+|---|---|---|
+| `MP_ROD` 0 | 36 | the whole rod, twelve nodes |
+| `MP_HEAD` 36 | 7 | head position and orientation |
+| `MP_HAND` 43 | 4 | line hand, and its grip mode |
+| `MP_QUAT` 47 | 4 | rod-hand orientation — this is what puts the reel in the right place |
+| `MP_INFO` 51 | 4 | line out, fish on, its length, sim time |
+| `MP_LINE` 55 | 144 | the line, resampled to 48 points |
+
+The line is **decimated, not truncated** — the last point sent is the last point of the
+chain, or his line would stop short of his reel. The recorder's 140 points are for
+diagnosing a single misbehaving node; 48 is plenty to watch a loop unroll.
+
+### What is deliberately not sent
+**The water.** It does not need to be. Each angler's rod, line and fly are solved locally
+and transmitted as *geometry*, so it does not matter that the two solvers disagree about
+where a vortex is. The only state that would have to agree is the fish, and the fish are
+still each player's own. That is the whole reason this stage is cheap and the next one is
+not.
+
+### Who owns what
+The **river** is the host's — the venue, the water, the feeding — and it travels once a
+second. Your **tackle** is yours: rod, reel, line, flies, display, volumes. Both ends
+filter on `venueOwned()`, sender *and* receiver: the sender's filter was the only one at
+first, which meant a peer sending `lineWt` would have rewritten the other angler's tackle
+from across the internet. `smoke.mjs mp` caught that. Same rule the phone remote is built
+on — a message is a REQUEST, and the thing that owns `P` decides.
+
+A venue change is applied on its own and the river is taken from the *next* beat, because
+the swap re-applies `VENUE_BASE` and the new venue's `par` on the frame the screen is
+black and would overwrite anything set just before it.
+
+### Joining
+**Hosting** is a menu row (`Fish with a friend`, under PRESETS) or a button on the flat
+page. **Joining is typed, which means it is typed outside the headset**: four letters are
+trivial on the front page and miserable on a VR keyboard, so the guest joins before putting
+the headset on — from the front page, or straight from the address bar with `#mp=CODE`,
+which is how you hand somebody a room in a text message.
+
+### Smoothing
+Frames arrive at 20 Hz and the headset draws at 72, so the newest frame is *eased* toward
+rather than snapped to: every number at `MP_SMOOTH` per second, which costs 199 lerps a
+frame and buys about eighty milliseconds of lag — invisible on somebody else's backcast.
+A componentwise quaternion lerp is only valid for small steps, which is all this takes, but
+it does leave the quaternion off the unit sphere, so it is normalised before use.
+A friend who goes quiet for `MP_STALE` stops being drawn rather than standing in the river
+forever.
+
+### What is left, and what cannot be tested here
+`smoke.mjs mp` covers the packet, the round trip through `mpData` as raw bytes, the
+smoothing converging onto the sender's own rig, the stale timeout, and the river/tackle
+split in both directions. What it cannot cover is **NAT traversal**, and that is the one
+thing likely to stop this working for a given pair of people. The PeerJS broker provides
+signalling and STUN; most home-to-home connections do come up, but some will not, and the
+fix is a TURN server, which relays and therefore costs something. Two headsets on two
+networks is the only test for it.
+
+Known limitations, none of them hidden:
+
+- **The Boat Drift will be wrong.** Poses are world-space, and that venue moves the hull
+  and wraps laps. Wading venues are fine.
+- No voice yet. WebRTC gives it nearly free on the connection that is already open, and it
+  is probably the highest-value thing left — fishing with somebody is mostly talking to
+  them. Microphone permission has to be granted before entering the immersive session.
+- Two players, one code. No lobby, no matchmaking, and no server to run.
+- Reliable, ordered channel — the default, and the path already proven in this file. For a
+  pose stream an unreliable one would be strictly better; `{reliable:false}` is the change
+  if latency spikes ever show up on a bad link.
 
 ## 6. Open problems
 

@@ -309,6 +309,16 @@ const code=src.slice(src.indexOf('<script type="module">')+22, src.lastIndexOf('
 const seen=new Set();
 const base={THREE,document,console,Math,JSON,Date,Object,Array,Number,String,Boolean,
   Float32Array,Float64Array,Uint8Array,Uint8ClampedArray,Uint16Array,Uint32Array,Int32Array,Int8Array,Int16Array,
+  /* AND THE BUFFER THE TYPED ARRAYS ARE VIEWS OF. Every typed array was on
+     the table and ArrayBuffer was not, which is fine until something does
+     binary I/O: the second angler sends `frame.buffer` down a data channel
+     and the receiver asks `d instanceof ArrayBuffer`, and instanceof against
+     undefined throws rather than answering false. Third time the same gap
+     has bitten — see Infinity above and the URL globals below. DataView
+     comes with it because it is the other half of the same tool, and Blob
+     because a browser always has one and the binary receive path has to
+     decide whether it was handed one. */
+  ArrayBuffer,DataView,Blob,
   Promise,Error,isNaN,isFinite,parseFloat,parseInt,Set,Map,Symbol,RegExp,
   /* the URL restore path reads these. They were missing, so the whole
      `#s=...` block threw on the first line and was swallowed by its own
@@ -395,7 +405,7 @@ const ARGS=process.argv.slice(2);
 const ONLY=ARGS.filter(a=>a[0]!=='-');
 const SECTIONS=['water','perf','specks','menu','venue','fight','boat','settings',
                 'scenery','sink','trophy','teleport','splash','guide','fish',
-                'remote','species','markers','zone','flies','falls','sunk','box','slack'];
+                'remote','species','markers','zone','flies','falls','sunk','box','slack','mp'];
 const ran=n=>!ONLY.length||ONLY.includes(n);
 if(ARGS.includes('--list')){
   console.log('sections: '+SECTIONS.join(' '));
@@ -3186,6 +3196,132 @@ if(ran('slack')){
   {
     const bad=Object.entries(sl).filter(([k,v])=>v===false).map(([k])=>k);
     if(bad.length) console.log('  *** SLACK FAILURE:',bad.join(', '),'***');
+  }
+}
+
+/* ── A SECOND ANGLER IN THE RIVER ───────────────────────────────────────
+   There is no network in this harness and there does not need to be: the
+   parts that can be got wrong without one are the packet, the river split
+   and the renderer, and all three are ordinary functions. So this packs a
+   frame from the live rig, hands it back through mpData as raw bytes the
+   way the data channel would, lets the smoothing converge, and asks
+   whether the second angler ended up standing where the first one is.
+   If that holds, what is left to go wrong is NAT traversal, which no test
+   can answer and only two headsets on two networks can. */
+if(ran('mp')){
+  const mp=vm.runInContext(`(()=>{
+    const out={};
+    /* the packet, and the bandwidth claim that goes in the docs */
+    out.floats=MP_STRIDE; out.bytes=MP_STRIDE*4;
+    out.kBps=+((MP_STRIDE*4*MP_HZ)/1000).toFixed(1);
+    out.theLayoutIsContiguous = MP_HEAD===RN*3 && MP_LINE+MPL_N*3===MP_STRIDE;
+    out.itFitsOneDatagram = out.bytes<1200;
+    out.itIsCheapOnTheWire = out.kBps<25;
+
+    applyVenue('cedar'); applyPreset(SHIPPED);
+    const loop=renderer._loop;
+    for(let i=0;i<40;i++) loop();
+
+    /* PACK. The rod and the fly have to survive verbatim — a peer drawn
+       from a lossy copy of the rod is a peer whose blank does not flex. */
+    const f=mpPack();
+    out.theWholeRodTravels = Math.abs(f[0]-rpos[0])<1e-6
+                          && Math.abs(f[RN*3-1]-rpos[RN*3-1])<1e-6;
+    out.theFlyTravels = Math.abs(f[MP_LINE]-dynPath[0])<1e-6
+                     && Math.abs(f[MP_LINE+2]-dynPath[2])<1e-6;
+    /* the line is DECIMATED, not truncated: the last point sent has to be
+       the last point of the chain, or his line stops short of his reel */
+    out.theLineSpansTheWholeChain =
+      Math.abs(f[MP_LINE+(MPL_N-1)*3]-dynPath[(DYN_N-1)*3])<1e-6;
+
+    /* RECEIVE it the way the channel delivers it, as bytes */
+    mpHide(); MP.last=null; MP.shown=null; MP.rx=0;
+    mpData(f.buffer);
+    out.bytesAreAccepted = MP.rx===1 && !!MP.last;
+    /* a runt frame is refused rather than half-read */
+    mpData(new Float32Array(9).buffer);
+    out.aRuntFrameIsRefused = MP.rx===1;
+
+    /* DRAW, and let the smoothing settle */
+    for(let i=0;i<300;i++) mpShow(1/72);
+    out.heIsDrawn = peerTube.mesh.visible && peerLine.mesh.visible
+                 && peerHead.visible && peerBody.visible
+                 && peerFly.visible && peerHand.visible && peerReel.visible;
+    /* he was packed from MY rig, so he must converge onto it */
+    out.rodErr=+Math.max(Math.abs(_mpRod[0]-rpos[0]),
+                         Math.abs(_mpRod[RN*3-1]-rpos[RN*3-1])).toFixed(4);
+    out.hisRodArrivesWhereMineIs = out.rodErr<0.01;
+    out.flyErr=+Math.hypot(peerFly.position.x-dynPath[0],
+                           peerFly.position.y-dynPath[1],
+                           peerFly.position.z-dynPath[2]).toFixed(4);
+    out.hisFlyArrivesWhereMineIs = out.flyErr<0.02;
+    /* and his head is at a head height rather than at the origin, which is
+       what a dropped pose looks like */
+    out.headY=+peerHead.position.y.toFixed(2);
+    out.heHasAHeadAndItIsUp = peerHead.position.y>0.8;
+    out.hisBodyHangsUnderIt = peerBody.position.y < peerHead.position.y-0.3;
+
+    /* STALE. A friend whose headset went to sleep must stop being drawn
+       rather than standing in the river forever. */
+    MP.rxT-=MP_STALE+500;
+    mpShow(1/72);
+    out.aSilentFriendStopsBeingDrawn = !peerTube.mesh.visible && !peerHead.visible;
+
+    /* THE RIVER TRAVELS AND THE TACKLE DOES NOT. Same split the URL uses,
+       so there is one definition of what belongs to the water. */
+    const r=mpRiver();
+    const keys=Object.keys(r.p);
+    out.riverKeys=keys.length;
+    out.itCarriesTheVenue = r.venue===SCENE_ID;
+    out.itCarriesTheWater = keys.indexOf('clarity')>=0 && keys.indexOf('current')>=0
+                         && keys.indexOf('upMax')>=0;
+    out.itLeavesMyTackleAlone = keys.indexOf('lineWt')<0 && keys.indexOf('tippet')<0
+                             && keys.indexOf('nodeLen')<0 && keys.indexOf('flyPat')<0
+                             && keys.indexOf('hudScale')<0;
+    out.everyKeyIsTheRivers = keys.every(k=>venueOwned(k));
+    /* and applying one does not reach into the tackle even if it is told to */
+    const wasWt=P.lineWt, wasClar=P.clarity;
+    P.lineWt=7.5;
+    mpTakeRiver({t:'river', venue:SCENE_ID, p:{clarity:wasClar+1.5, lineWt:4.0}});
+    out.appliedWater = Math.abs(P.clarity-(wasClar+1.5))<1e-9;
+    out.tackleSurvivedIt = P.lineWt===7.5;
+    P.lineWt=wasWt; P.clarity=wasClar; afterSettingsChange();
+
+    /* AND venueOwned HAS TO MEAN THE SAME THING ON BOTH HEADSETS. It reads
+       VENUE_BASE and the CURRENT venue's par, so if any venue set a key that
+       VENUE_BASE does not list, that key would be the river's on one headset
+       and the angler's on the other — and the receive filter would drop it
+       or let it through depending on where each of them happened to be
+       standing. This asserts the thing that makes the split venue-independent. */
+    const stray=[];
+    for(const id in SCENES){
+      const par=SCENES[id].par||{};
+      for(const k in par) if(!(k in VENUE_BASE)&&!stray.includes(k)) stray.push(k);
+    }
+    out.strayVenueKeys=stray;
+    out.everyVenueOwnedKeyIsDeclared = stray.length===0;
+
+    /* a guest must not be able to tell the host what river to be in */
+    MP.role='host';
+    const beforeVenue=SCENE_ID;
+    mpData({t:'river', venue:'pond', p:{clarity:9}});
+    out.aHostIgnoresAGuestsRiver = SCENE_ID===beforeVenue && P.clarity!==9;
+    MP.role='off';
+
+    /* a bad code cannot open a peer */
+    MP.state='off'; MP.err='';
+    mpJoin('xy');
+    out.aShortCodeIsRefused = MP.state==='error' && !MP.peer;
+    MP.state='off'; MP.err='';
+
+    mpHide(); MP.last=null; MP.shown=null;
+    applyPreset(SHIPPED); resetCast();
+    return out;
+  })()`.replace(/SHIPPED/g,JSON.stringify(shipped)),sandbox);
+  console.log('a second angler',mp);
+  {
+    const bad=Object.entries(mp).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** SECOND ANGLER FAILURE:',bad.join(', '),'***');
   }
 }
 

@@ -25,9 +25,9 @@
   .cols h2{font-size:.66rem;letter-spacing:.26em;text-transform:uppercase;color:var(--copper);margin:0 0 .55rem}
   .cols p{margin:0 0 .4rem;font-size:.75rem;line-height:1.6;color:#c3ccca}
   .cols b{color:var(--mayfly);font-weight:700}
-#preview,#remoteBtn{background:#2a3a44;color:#dfe8ea;border:1px solid #46606c;border-radius:8px;
+#preview,#remoteBtn,#mpBtn,#mpGo{background:#2a3a44;color:#dfe8ea;border:1px solid #46606c;border-radius:8px;
   padding:12px 20px;font:600 15px/1 system-ui,sans-serif;margin-top:10px;cursor:pointer}
-#preview:active,#remoteBtn:active{background:#354b57}
+#preview:active,#remoteBtn:active,#mpBtn:active,#mpGo:active{background:#354b57}
 #remoteBox{display:none;max-width:34rem;margin-top:2px;padding:14px 16px;border-radius:8px;
   background:#16232a;border:1px solid #35505c}
 #remoteBox b{display:block;font:700 2.6rem/1 "Space Mono",monospace;color:#e0a45e;
@@ -35,6 +35,17 @@
 #remoteBox span{display:block;margin-top:8px;font:400 .78rem/1.6 system-ui,sans-serif;color:#a9b5b3}
 #remoteBox code{color:#dfe8ea;font-family:ui-monospace,monospace;word-break:break-all}
 #remoteBox i{color:#8fd0a8;font-style:normal}
+#mpBox{display:none;max-width:34rem;margin-top:2px;padding:14px 16px;border-radius:8px;
+  background:#16232a;border:1px solid #35505c}
+#mpBox b{display:block;font:700 2.6rem/1 "Space Mono",monospace;color:#8fd0a8;
+  letter-spacing:.22em}
+#mpBox span{display:block;margin-top:8px;font:400 .78rem/1.6 system-ui,sans-serif;color:#a9b5b3}
+#mpBox i{color:#8fd0a8;font-style:normal}
+#mpJoin{display:flex;gap:8px;align-items:center;max-width:34rem;margin-top:2px}
+#mpCode{width:7rem;padding:12px 14px;border-radius:8px;background:#101a1f;
+  color:#e0a45e;border:1px solid #46606c;font:700 1.3rem/1 "Space Mono",monospace;
+  letter-spacing:.18em;text-align:center;text-transform:uppercase}
+#mpGo{flex:1}
 #pvbar{position:fixed;left:0;right:0;bottom:0;display:none;gap:8px;padding:10px;
   justify-content:center;background:linear-gradient(transparent,rgba(0,0,0,0.55));z-index:60;
   flex-wrap:wrap}
@@ -138,6 +149,9 @@
 
   <button id="enter">Enter VR</button>
   <button id="preview">Look around (no headset)</button>
+  <button id="mpBtn">Fish with a friend &mdash; open a room for a second headset</button>
+  <div id="mpBox"></div>
+  <div id="mpJoin"><input id="mpCode" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false"><button id="mpGo">Join a friend&rsquo;s room</button></div>
   <button id="remoteBtn">Phone remote &mdash; change settings from another device</button>
   <div id="remoteBox"></div>
 
@@ -228,6 +242,7 @@ const MENU=[
   ['Stats scale','hudScale',0.40,3.00,0.05,'Size of the statistics window, which ships off — turn it on under MESSAGES, or with A on the right hand. It has its own drag handle and plus/minus buttons in its top corners, and unlike this panel they work with the menu SHUT: point the rod at the handle strip along the top of the stats window and hold the trigger to move it anywhere you like, including behind you. Nothing else on that window answers the pointer, so the trigger still reels.'],
   ['Panel scale','menuScale',0.40,3.00,0.05,'Size of this panel. The plus and minus buttons in its top right do the same thing, and the handle at the top left drags it around.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
+  ['Fish with a friend','!mp',0,0,0,'Push right to open a room a SECOND HEADSET can join, so you and somebody else are standing in the same river at the same time. A four-letter code appears along the top of this panel; on the other headset, open this same page on the flat screen and join with that code \u2014 four letters are easy there and miserable on a VR keyboard, so the other person joins before putting the headset on. You can also hand the room over in a text message as this page\u2019s address with #mp=CODE on the end.\n\nWhat you get: you can see them, watch them cast, and see where their fly lands and when they are into a fish. The river is the HOST\u2019s \u2014 the venue, the water and the feeding travel from whoever opened the room \u2014 and your rod, reel, line, flies and display stay yours. What is NOT shared yet is the trout: you each have your own fish, so a fish he is fighting is real on his line and not in your water. Push right again to close the room.'],
   ['Phone remote','!remote',0,0,0,'Push right to open a room a phone can join, so whoever is running the demo can change any setting on this list from outside the headset while somebody else fishes. The four-letter code appears along the top of this panel and in this strip. On the phone, open this page\u2019s address with remote.html on the end and type the code in. Push right again to close the room.'],
   ['— ROD MODEL —',null,0,0,0,''],
   ['Rod model','rodModel',0,1,1,'0 is the original position-based rod with an empirical stiffness curve. 1 is an XPBD beam whose compliance comes from the blank\u2019s real second moment of area and modulus, so stiffness and frequency both follow from physics instead of being tuned separately.'],
@@ -549,6 +564,19 @@ const VENUE_BASE={
   grade:1, current:1, gridCell:0.45, gridSpan:80, obstHeight:0.85, vortex:0.6,
   foam:0.15, foamLife:1.5, surfWave:0.65, waveShade:0.65, drift:1,
   clarity:1, sediment:0.06, specks:0.16, speckSize:0.051, speckRange:45,
+  /* THE WATER'S OWN COLOUR, DECLARED. Eight keys that every venue but one
+     sets — through the `...LOOK[...]` spread in its par — and that this list
+     did not name, so applyVenue never reset them. Cedar Run is the venue that
+     does not spread a look, and the consequence was measured: come to it from
+     Stairstep Falls and the reference reach — the river every constant in the
+     game was tuned on — arrives wearing deep blue, because the last venue's
+     colour was still sitting in P and nothing put it back. Found by a
+     multiplayer invariant (see 8c: venueOwned has to mean the same thing on
+     both headsets), and it has been wrong for far longer than that.
+     These are the factory values, which is the look Cedar Run is tuned as, so
+     this restores it and is a no-op for the eight venues that state one. */
+  watR:0, watG:0, watB:0, waterOpaque:0.35,
+  foamR:0.933, foamG:0.957, foamB:0.945, foamDirt:0,
   treeRange:38, takeRadius:0.7, maxSlip:0.32, lineRad:0.5, splashV:2.6,
   spookT:5, riseAggro:0.35, riseRate:0.55, feedChance:0.9,
   /* HOW LONG A DRIFT THE WATER CAN ACTUALLY GIVE YOU. Six metres is a run or
@@ -8406,6 +8434,7 @@ function runAction(key){
   else if(key==='!recenter'){recenterPanel(menu.mesh);recenterPanel(hud.mesh);if(recOpen)recenterPanel(rec.mesh);say('panels recentred');}
   else if(key==='!copy'){copySettings();say('settings copied');}
   else if(key==='!remote'){remoteStart();}
+  else if(key==='!mp'){mpHost();}
 }
 let menuOpen=false, menuSel=1;
 /* per-row range expansion, so no setting can ever be out of reach */
@@ -8497,6 +8526,14 @@ function drawMenu(){
   c.fillStyle='#7d8b8c';c.font='700 11px "Space Mono",monospace';
   c.fillText('POINT AND DRAG, OR USE THE RIGHT STICK: UP OFF THE TOP ROW IS THE TAB BAR, LEFT-RIGHT WALKS IT, DOWN GOES BACK IN. B CLOSES.',HANDLE.w+30,34);
   /* the phone's code, where it can be read without hunting for the row */
+  if(MP.state!=='off'){
+    c.font='700 15px "Space Mono",monospace';
+    c.fillStyle=MP.state==='error'?'#d07a5a':((MP.conn&&MP.conn.open)?'#8fd0a8':'#e0a45e');
+    c.textAlign='left';
+    c.fillText(MP.state==='ready'||MP.state==='joining'
+      ? 'FRIEND '+MP.code+((MP.conn&&MP.conn.open)?' \u2022 HERE':' \u2022 WAITING')
+      : 'FRIEND '+MP.state.toUpperCase(), 24, 34);
+  }
   if(REMOTE.state!=='off'){
     c.font='700 15px "Space Mono",monospace';
     c.fillStyle=REMOTE.state==='error'?'#d07a5a':(REMOTE.phone?'#8fd0a8':'#e0a45e');
@@ -8590,6 +8627,7 @@ function drawMenu(){
   c.fillText(sel[0],26,MH-64);
   c.font='400 13px "Space Mono",monospace';c.fillStyle='#a9b5b3';
   const body=(sel[1]==='!copy'&&copyState)?('Settings '+copyState+'. '+sel[5])
+            :(sel[1]==='!mp')?(mpStatus()+' '+sel[5])
             :(sel[1]==='!remote')?(remoteStatus()+' '+sel[5])
             :(sel[5]||'');
   const lines=wrapText(c,body,MW-80);
@@ -11208,6 +11246,10 @@ renderer.setAnimationLoop(()=>{
                  : mi>iS ? 'pool' : 'belly';
   }
 
+  /* the second angler: my head pose for him, then his rig eased toward
+     wherever his last packet put it */
+  mpFrame(dt);
+
   /* recorder */
   if(REC.recording) recPush();
   if(REC.play&&REC.frames.length>1){
@@ -11494,6 +11536,389 @@ function remoteData(d){
     return;
   }
   if(d.t==='get'){ REMOTE.last={}; remotePush(); return; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   8c. THE SECOND ANGLER
+
+   Two headsets, two people, one river. Stage one of that: you can see
+   each other and watch each other fish. Nobody shares a trout yet —
+   that needs authority migration and is deliberately not here.
+
+   Three things made this small enough to be worth doing now, and all
+   three already existed for other reasons:
+
+   · THE TRANSPORT. The phone remote (8b) already introduces two devices
+     through a PeerJS broker and then talks peer to peer over a WebRTC
+     data channel. `remoteLoadPeer` — two CDNs, because a demo that dies
+     because one of them blinked is still a demo that died — is reused
+     verbatim. The broker sees a four-letter room code and nothing else.
+
+   · THE RENDERER. The motion recorder already draws a second angler:
+     a full twelve-node rod with real blank flex, a reel, a line hand
+     and a line tube, all driven from RECORDED DATA rather than from the
+     local solver. That is exactly the shape of a remote player. This
+     builds its own set of those objects rather than borrowing the
+     ghost's, because you may well want to replay a recording while your
+     friend is standing next to you.
+
+   · THE SETTINGS SPLIT. `venueOwned()` already knows which of P belongs
+     to the river and which belongs to you, because the URL needed the
+     same answer. So the host's river travels — clarity, current, grade,
+     feeding, the venue itself — and rod, reel, line, flies and display
+     stay personal. Nobody's tackle is touched by joining.
+
+   WHAT IS SENT is one flat Float32Array of 199 numbers: the rod, the
+   head pose, the line hand, the rod-hand quaternion (which is what puts
+   the reel in the right place), four scalars, and the line resampled to
+   48 points. 796 bytes, twenty times a second, about 16 kB/s each way.
+   The line is resampled rather than sent node by node because a peer's
+   line does not need to resolve a single misbehaving node — the
+   recorder's 140 points are for diagnosis and 48 is plenty to watch a
+   loop unroll.
+
+   WHAT IS NOT SENT is the water. It does not need to be: each angler's
+   rod, line and fly are solved locally and transmitted as GEOMETRY, so
+   it does not matter that the two solvers disagree about where a vortex
+   is. The only state that would have to agree is the fish, and the fish
+   are still each player's own. That is the whole reason this stage is
+   cheap and the next one is not.
+   ════════════════════════════════════════════════════════════ */
+const MPL_N=48;                  /* line points sent for a peer */
+const MP_ROD=0, MP_HEAD=RN*3, MP_HAND=MP_HEAD+7, MP_QUAT=MP_HAND+4,
+      MP_INFO=MP_QUAT+4, MP_LINE=MP_INFO+4, MP_STRIDE=MP_LINE+MPL_N*3;
+const MP_HZ=20, MP_SMOOTH=13, MP_STALE=3000;
+const MP={peer:null, conn:null, code:'', role:'off', state:'off', err:'',
+          timer:null, beat:0, last:null, shown:null, rxT:0, rx:0, tx:0};
+
+/* ── his rod, his reel, his hands, his line ──────────────────────────── */
+const peerTube=new RodTube(RN,6);
+peerTube.mesh.visible=false; scene.add(peerTube.mesh);
+const peerLine=new DynTube(MPL_N,3);
+peerLine.mesh.material=new THREE.MeshStandardMaterial({color:0xf2ead6,roughness:0.45});
+peerLine.mesh.renderOrder=3; peerLine.mesh.visible=false; scene.add(peerLine.mesh);
+for(let j=0;j<MPL_N;j++) peerLine.rad[j]=0.0030;
+const peerHand=new THREE.Mesh(new THREE.SphereGeometry(0.038,10,8),
+  new THREE.MeshStandardMaterial({color:0xc9a882,roughness:0.75}));
+peerHand.visible=false; scene.add(peerHand);
+const peerReel=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.043,0.022,14),
+  new THREE.MeshStandardMaterial({color:0x6d747a,metalness:0.7,roughness:0.35}));
+peerReel.visible=false; scene.add(peerReel);
+/* A HEAD AND A BODY, because "see them" is the whole request and a rod
+   swinging on its own reads as a poltergeist. Nothing clever: a head at
+   his camera, a waders-coloured trunk hung under it and yawed the way he
+   is facing. It is recognisable as a person at thirty metres, which is
+   the distance that matters on a river. */
+const peerHead=new THREE.Mesh(new THREE.SphereGeometry(0.115,14,10),
+  new THREE.MeshStandardMaterial({color:0xc08f6a,roughness:0.8}));
+peerHead.visible=false; scene.add(peerHead);
+const peerBody=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.21,0.95,12),
+  new THREE.MeshStandardMaterial({color:0x4a5b4a,roughness:0.85}));
+peerBody.visible=false; scene.add(peerBody);
+/* and where his fly is, which is the one thing you most want to see on
+   somebody else's water. It brightens while he has a fish on. */
+const peerFly=new THREE.Mesh(new THREE.SphereGeometry(0.018,8,6),
+  new THREE.MeshStandardMaterial({color:0xe0c26a,roughness:0.6}));
+peerFly.visible=false; scene.add(peerFly);
+const _mpRod=new Float32Array(RN*3), _mpPath=new Float32Array(MPL_N*3);
+const _mpP=new THREE.Vector3(), _mpQ=new THREE.Quaternion(), _mpF=new THREE.Vector3();
+/* MY OWN HEAD, CAPTURED IN THE FRAME LOOP. The send runs on a timer, and in
+   WebXR the camera's world matrix is only meaningful inside a frame — read
+   off-frame it is stale at best and half-updated at worst. Everything else on
+   the wire is a plain array that is simply up to one frame old, which does not
+   matter; a head pose read from the wrong place would. */
+const _mpMyP=new THREE.Vector3(), _mpMyQ=new THREE.Quaternion();
+
+/* ── what goes on the wire ───────────────────────────────────────────── */
+function mpPack(){
+  const f=new Float32Array(MP_STRIDE);
+  f.set(rpos.subarray(0,RN*3),MP_ROD);
+  let o=MP_HEAD;
+  f[o]=_mpMyP.x; f[o+1]=_mpMyP.y; f[o+2]=_mpMyP.z;
+  f[o+3]=_mpMyQ.x; f[o+4]=_mpMyQ.y; f[o+5]=_mpMyQ.z; f[o+6]=_mpMyQ.w;
+  o=MP_HAND; f[o]=_lh.x; f[o+1]=_lh.y; f[o+2]=_lh.z; f[o+3]=handMode;
+  o=MP_QUAT; f[o]=_q.x; f[o+1]=_q.y; f[o+2]=_q.z; f[o+3]=_q.w;
+  o=MP_INFO; f[o]=lineOut; f[o+1]=hooked?1:0;
+             f[o+2]=hooked?hooked.len:0; f[o+3]=simTime;
+  /* dynPath was resampled this frame for the live line render and spans the
+     whole chain, fly first. Decimating it here rather than sending all 170
+     costs nothing and saves two thirds of the packet. */
+  o=MP_LINE;
+  for(let j=0;j<MPL_N;j++){
+    const k=Math.min(DYN_N-1,Math.round(j*(DYN_N-1)/(MPL_N-1)))*3;
+    f[o+j*3]=dynPath[k]; f[o+j*3+1]=dynPath[k+1]; f[o+j*3+2]=dynPath[k+2];
+  }
+  return f;
+}
+/* the host's river, and only the river. venueOwned is the same split
+   applyVenue and the URL both use, so there is one definition of what
+   belongs to the water and what belongs to the angler. */
+function mpRiver(){
+  const o={};
+  for(const k in P) if(venueOwned(k)) o[k]=P[k];
+  return {t:'river', venue:SCENE_ID, p:o};
+}
+function mpTakeRiver(d){
+  if(d.venue&&d.venue!==SCENE_ID&&SCENES[d.venue]){
+    /* ONE THING AT A TIME. The swap re-applies VENUE_BASE and the new venue's
+       own par on the frame the screen is black, which would overwrite
+       anything set here a moment before it — so let the venue land and take
+       the river off the next beat a second later. */
+    requestVenue(d.venue);
+    return;
+  }
+  if(!d.p) return;
+  /* AND THE RECEIVER ENFORCES THE SPLIT, not just the sender. mpRiver filters
+     to venueOwned on the way out, and that was the only check: a peer sending
+     `lineWt` — - a bug at the far end, an older build, anything — would have
+     rewritten this angler's tackle from across the internet. Same rule the
+     phone remote is built on, which is that a message is a REQUEST and the
+     thing that owns P decides. smoke.mjs caught this one.
+     Only if something actually moved, too: afterSettingsChange rebuilds the
+     bed and the obstacles, and this arrives once a second. */
+  let n=0;
+  for(const k in d.p){
+    const v=+d.p[k];
+    if(venueOwned(k)&&(k in P)&&Number.isFinite(v)&&P[k]!==v){ P[k]=v; n++; }
+  }
+  if(n) afterSettingsChange();
+}
+function mpUnpack(f){
+  if(!f||f.length<MP_STRIDE) return false;
+  if(!MP.last) MP.last=new Float32Array(MP_STRIDE);
+  MP.last.set(f.subarray(0,MP_STRIDE));
+  MP.rx++; MP.rxT=mpNow();
+  return true;
+}
+const mpNow=()=>(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
+
+/* ── drawing him ─────────────────────────────────────────────────────────
+   SMOOTHED, not snapped. Frames arrive twenty times a second and the
+   headset draws seventy-two, so showing the newest one as it lands would
+   judder. Every number is eased toward the latest at MP_SMOOTH per
+   second, which costs 199 lerps a frame and buys about eighty
+   milliseconds of lag — invisible on somebody else's backcast. */
+function mpHide(){
+  peerTube.mesh.visible=false; peerLine.mesh.visible=false;
+  peerHand.visible=false; peerReel.visible=false;
+  peerHead.visible=false; peerBody.visible=false; peerFly.visible=false;
+}
+/* Called once a frame: take my own head pose while it is legal to read, then
+   draw his. Nothing else in here costs anything when nobody is connected. */
+function mpFrame(dt){
+  camera.getWorldPosition(_mpMyP); camera.getWorldQuaternion(_mpMyQ);
+  mpShow(dt);
+}
+function mpShow(dt){
+  if(!MP.last||mpNow()-MP.rxT>MP_STALE){ if(peerHead.visible) mpHide(); return; }
+  if(!MP.shown) MP.shown=MP.last.slice(0);
+  const s=MP.shown, L=MP.last, a=Math.min(1,1-Math.exp(-dt*MP_SMOOTH));
+  for(let i=0;i<MP_STRIDE;i++) s[i]+=(L[i]-s[i])*a;
+  _mpRod.set(s.subarray(MP_ROD,MP_ROD+RN*3));
+  peerTube.update(_mpRod); peerTube.mesh.visible=true;
+  let o=MP_HEAD;
+  peerHead.position.set(s[o],s[o+1],s[o+2]);
+  /* lerping a quaternion componentwise is only valid for small steps, which
+     is all this ever takes between frames — but it does leave it off the
+     unit sphere, so it is normalised before anything is rotated by it */
+  _mpQ.set(s[o+3],s[o+4],s[o+5],s[o+6]).normalize();
+  peerHead.quaternion.copy(_mpQ);
+  _mpF.set(0,0,-1).applyQuaternion(_mpQ);
+  peerBody.position.set(s[o],s[o+1]-0.60,s[o+2]);
+  peerBody.rotation.y=Math.atan2(_mpF.x,_mpF.z);
+  peerHead.visible=peerBody.visible=true;
+  o=MP_HAND;
+  peerHand.position.set(s[o],s[o+1],s[o+2]);
+  /* his line hand goes bright while he is gripping, so you can see a haul */
+  peerHand.material.color.setHex(s[o+3]>1.5?0xffd23e:s[o+3]>0.5?0xe8c79a:0xc9a882);
+  peerHand.visible=true;
+  o=MP_QUAT;
+  _mpQ.set(s[o],s[o+1],s[o+2],s[o+3]).normalize();
+  peerReel.position.set(_mpRod[0],_mpRod[1],_mpRod[2])
+    .add(_mpP.copy(_reelOff).applyQuaternion(_mpQ));
+  peerReel.quaternion.copy(_mpQ).multiply(_qZ90);
+  peerReel.visible=true;
+  o=MP_LINE;
+  for(let j=0;j<MPL_N*3;j++) _mpPath[j]=s[o+j];
+  peerLine.update(_mpPath); peerLine.mesh.visible=true;
+  /* the fly is the first point of the chain, and it flares when he is on */
+  const on=s[MP_INFO+1]>0.5;
+  peerFly.position.set(_mpPath[0],_mpPath[1],_mpPath[2]);
+  peerFly.material.color.setHex(on?0xff7a3c:0xe0c26a);
+  peerFly.scale.setScalar(on?1.8:1.0);
+  peerFly.visible=true;
+}
+
+/* ── the channel ─────────────────────────────────────────────────────────
+   Reliable and ordered, which is the default and the same arrangement the
+   phone remote uses. For a pose stream an unreliable channel would be
+   strictly better — a dropped frame is worth nothing and head-of-line
+   blocking is worth less — and `{reliable:false}` is the one-word change
+   if latency spikes ever show up on a bad link. It is not the default here
+   because reliable is the path that is already proven in this file. */
+function mpStatus(){
+  if(MP.state==='off')     return 'Not connected to anybody.';
+  if(MP.state==='loading') return 'Fetching the connection library…';
+  if(MP.state==='opening') return 'Opening room '+MP.code+'…';
+  if(MP.state==='joining') return 'Looking for room '+MP.code+'…';
+  if(MP.state==='error')   return 'Could not connect: '+MP.err;
+  if(MP.conn&&MP.conn.open)
+    return 'Fishing with somebody. Room '+MP.code+'.';
+  return MP.role==='host'
+    ? 'Room '+MP.code+' is open. On the other headset, open this page and join with that code.'
+    : 'Waiting for room '+MP.code+'…';
+}
+function mpAttach(conn){
+  if(MP.conn&&MP.conn!==conn){ try{MP.conn.close();}catch(e){} }
+  MP.conn=conn;
+  conn.on('open',()=>{
+    if(MP.conn!==conn) return;
+    MP.state='ready';
+    if(MP.role==='host') mpSendObj(mpRiver());
+    mpTimerStart();
+    say('your friend is here');
+  });
+  conn.on('data',d=>{ try{ mpData(d); }catch(e){ console.error('mp:',e); } });
+  conn.on('close',()=>mpDrop(conn));
+  conn.on('error',()=>mpDrop(conn));
+}
+function mpDrop(conn){
+  if(MP.conn!==conn) return;
+  MP.conn=null; MP.last=null; MP.shown=null;
+  mpTimerStop(); mpHide();
+  if(MP.state!=='error') MP.state=MP.peer?'ready':'off';
+  say('your friend dropped out');
+}
+function mpData(d){
+  if(!d) return;
+  /* A POSE FRAME IS RAW BYTES; a control message is an object. PeerJS hands
+     binary back as an ArrayBuffer on every browser this runs on, but it is
+     allowed to hand back a Blob, and a Blob read is asynchronous — so that
+     case is converted and re-entered rather than silently dropping every
+     frame on some future browser. */
+  if(typeof Blob!=='undefined'&&d instanceof Blob){
+    if(d.arrayBuffer) d.arrayBuffer().then(b=>{try{mpData(b);}catch(e){}}).catch(()=>{});
+    return;
+  }
+  if(d instanceof ArrayBuffer){ mpUnpack(new Float32Array(d)); return; }
+  if(ArrayBuffer.isView(d)){
+    mpUnpack(new Float32Array(d.buffer,d.byteOffset,Math.floor(d.byteLength/4)));
+    return;
+  }
+  if(typeof d!=='object') return;
+  /* the river is the HOST's to describe, so a guest applies it and a host
+     ignores one arriving the other way */
+  if(d.t==='river'&&MP.role==='guest') mpTakeRiver(d);
+}
+function mpSendObj(o){
+  const c=MP.conn;
+  if(!c||!c.open) return;
+  try{ c.send(o); }catch(e){}
+}
+function mpSend(){
+  const c=MP.conn;
+  if(!c||!c.open) return;
+  /* a fresh array per send: PeerJS may serialise after this returns, and
+     one reused buffer mutated underneath it is a corrupt frame */
+  try{ c.send(mpPack().buffer); MP.tx++; }catch(e){}
+  if(MP.role==='host'&&(++MP.beat%MP_HZ)===0) mpSendObj(mpRiver());
+}
+/* A timer, not the frame loop — same reasoning as the phone remote: none of
+   this belongs in the solver's budget, and window timers keep running
+   inside an XR session. */
+function mpTimerStart(){
+  if(MP.timer!==null) return;
+  MP.timer=setInterval(()=>{ try{ mpSend(); }catch(e){} },Math.round(1000/MP_HZ));
+}
+function mpTimerStop(){
+  if(MP.timer!==null){ clearInterval(MP.timer); MP.timer=null; }
+}
+function mpStop(){
+  mpTimerStop();
+  try{ if(MP.conn) MP.conn.close(); }catch(e){}
+  try{ if(MP.peer) MP.peer.destroy(); }catch(e){}
+  MP.conn=null; MP.peer=null; MP.code=''; MP.role='off'; MP.state='off';
+  MP.last=null; MP.shown=null; MP.beat=0;
+  mpHide();
+  say('fishing alone again');
+}
+function mpHost(){
+  if(MP.peer){ mpStop(); return; }            /* the row is a toggle */
+  MP.role='host'; MP.state='loading'; MP.err='';
+  say('opening a room…');
+  remoteLoadPeer(()=>{
+    if(!window.Peer){
+      MP.state='error';
+      MP.err='the connection library did not load — this headset needs internet once';
+      return;
+    }
+    mpOpen(0);
+  });
+}
+function mpOpen(tries){
+  const code=remoteCodeGen();
+  MP.code=code; MP.state='opening';
+  const peer=new Peer('flycast-mp-'+code,{pingInterval:4000});
+  MP.peer=peer;
+  peer.on('open',()=>{
+    if(MP.peer!==peer) return;
+    MP.state='ready'; say('room open — code '+code);
+  });
+  setTimeout(()=>{
+    if(MP.peer===peer&&MP.state==='opening'){
+      MP.state='error';
+      MP.err='the room never finished opening — check this headset has internet';
+    }
+  },15000);
+  peer.on('error',e=>{
+    if(MP.peer!==peer) return;
+    const t=(e&&e.type)||'unknown';
+    if(t==='unavailable-id'&&tries<5){        /* code collision: take another */
+      try{peer.destroy();}catch(x){}
+      MP.peer=null; mpOpen(tries+1); return;
+    }
+    if(t==='peer-unavailable') return;
+    MP.state='error'; MP.err=t;
+  });
+  peer.on('connection',conn=>mpAttach(conn));
+}
+/* JOINING IS TYPED, WHICH MEANS IT IS TYPED OUTSIDE THE HEADSET. Four
+   letters are trivial on the flat page and miserable on a VR keyboard, so
+   the guest joins before putting the headset on — from the button on the
+   front page, or straight from the address bar with #mp=CODE, which is how
+   you hand somebody a room over a text message. */
+function mpJoin(code){
+  code=String(code||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);
+  if(code.length<4){ MP.state='error'; MP.err='that is not a four-letter code'; return; }
+  if(MP.peer) mpStop();
+  MP.role='guest'; MP.code=code; MP.state='loading'; MP.err='';
+  remoteLoadPeer(()=>{
+    if(!window.Peer){
+      MP.state='error';
+      MP.err='the connection library did not load — this headset needs internet once';
+      return;
+    }
+    MP.state='joining';
+    const peer=new Peer({pingInterval:4000});
+    MP.peer=peer;
+    peer.on('open',()=>{
+      if(MP.peer!==peer) return;
+      mpAttach(peer.connect('flycast-mp-'+code));
+    });
+    peer.on('error',e=>{
+      if(MP.peer!==peer) return;
+      const t=(e&&e.type)||'unknown';
+      MP.state='error';
+      MP.err=t==='peer-unavailable'
+        ? 'no room '+code+' — check the code, and that the other headset still has it open'
+        : t;
+    });
+    setTimeout(()=>{
+      if(MP.peer===peer&&MP.state==='joining'){
+        MP.state='error'; MP.err='no answer from room '+code;
+      }
+    },15000);
+  });
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -11816,6 +12241,48 @@ function previewUpdate(dt){
 
 const overlay=document.getElementById('overlay'),enterBtn=document.getElementById('enter'),hint=document.getElementById('hint');
 document.getElementById('preview').addEventListener('click',previewStart);
+
+/* ── fishing with a friend, from the flat page ───────────────────────────
+   The realistic order of events is: one of you opens a room here, where a
+   four-letter code is easy to read off a big screen, reads it down the
+   phone or pastes the #mp= link, and both then press Enter VR. The room
+   outlives the overlay, exactly as the phone remote's does. */
+(function mpOverlay(){
+  const btn=document.getElementById('mpBtn'), box=document.getElementById('mpBox');
+  const row=document.getElementById('mpJoin'), inp=document.getElementById('mpCode'),
+        go=document.getElementById('mpGo');
+  if(!btn||!box||!row||!inp||!go) return;
+  let poll=null;
+  function watch(){ if(!poll) poll=setInterval(draw,600); }
+  function draw(){
+    const live=MP.state!=='off';
+    box.style.display=live?'block':'none';
+    row.style.display=live?'none':'flex';
+    btn.textContent=live?'Stop fishing together'
+                        :'Fish with a friend \u2014 open a room for a second headset';
+    if(!live) return;
+    const joined=MP.conn&&MP.conn.open;
+    box.innerHTML = (MP.state==='ready'||MP.state==='joining')
+      ? '<b>'+MP.code+'</b><span>'+
+        (MP.role==='host'
+          ? 'On the other headset, open this same page and join with that code \u2014 or send them '+
+            '<code>'+location.href.split('#')[0]+'#mp='+MP.code+'</code>'
+          : 'Joining that room.')+
+        (joined?' <i>Connected \u2014 they are in the river with you.</i>'
+               :' <i>Waiting\u2026</i>')+'</span>'
+      : '<span>'+mpStatus()+'</span>';
+  }
+  btn.addEventListener('click',()=>{
+    if(MP.state==='off') mpHost(); else mpStop();
+    draw(); watch();
+  });
+  go.addEventListener('click',()=>{ mpJoin(inp.value); draw(); watch(); });
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ mpJoin(inp.value); draw(); watch(); } });
+  /* handed a room in a text message: #mp=ABCD joins it on load */
+  const m=/[#&]mp=([A-Za-z0-9]{4})/.exec(location.hash||'');
+  if(m){ inp.value=m[1].toUpperCase(); mpJoin(m[1]); draw(); watch(); }
+  draw();
+})();
 
 /* ── the phone remote, from the flat page ────────────────────────────────
    The realistic order of events at a demo is: open the room here, where a
