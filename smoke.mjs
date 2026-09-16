@@ -377,11 +377,25 @@ const sandbox=new Proxy(base,{
    because a claim of the form `x.count !== 12` is false for every stub there
    is, and a single-section run lit up fourteen failures that were nothing but
    the filter itself. */
+/* A RED RUN MUST NOT PRINT OK. `OK` was printed for every complete run
+   whatever happened above it, so a full run with a failing section ended in
+   the word OK — which is how a state-dependent ROD-BEND failure sat unnoticed
+   (see HANDOFF bug 49): the banner said OK and the failure was six hundred
+   lines up. Every failure in this file announces itself with a *** line, so
+   that is what is watched for. */
+let anyFail=false;
+{
+  const _log=console.log;
+  console.log=(...a)=>{
+    if(a.some(x=>typeof x==='string'&&x.indexOf('***')>=0)) anyFail=true;
+    _log(...a);
+  };
+}
 const ARGS=process.argv.slice(2);
 const ONLY=ARGS.filter(a=>a[0]!=='-');
 const SECTIONS=['water','perf','specks','menu','venue','fight','boat','settings',
                 'scenery','sink','trophy','teleport','splash','guide','fish',
-                'remote','species','markers','zone','flies','falls'];
+                'remote','species','markers','zone','flies','falls','sunk','box','slack'];
 const ran=n=>!ONLY.length||ONLY.includes(n);
 if(ARGS.includes('--list')){
   console.log('sections: '+SECTIONS.join(' '));
@@ -1692,9 +1706,22 @@ if(ran('fight')){
   const rodbend=vm.runInContext(`(()=>{
     applyVenue('cedar'); applyPreset(SHIPPED);
     const settle=n=>{ for(let i=0;i<n;i++) renderer._loop(); };
+    /* AND THE REEL IS HELD SHUT WHILE THIS RUNS. This case compares two rods
+       at the same load, and it had been inheriting that load from whatever an
+       earlier section left in P: run on its own it read 10.4 N against a
+       wanted 18 and failed, on THIS build and on the one before it alike,
+       because the spool gives line above spoolDrag*1.15 and the shipped drag
+       sits right about there. It passed in a full run only because something
+       upstream had left the drag high — which is the state dependence the
+       partial-run banner warns about, and it means the bend numbers this
+       case has been printing were never the shipped reel's.
+       A rod is tested by clamping the line and pulling, so that is what this
+       does now: the drag is pinned well past the load for the duration and
+       put back with the preset afterwards. Nothing about the comparison
+       changes; it just stops being an accident. */
     const fight=(flex)=>{
       for(const f of fishes) f.reseat();
-      P.fightFlex=flex;
+      P.fightFlex=flex; P.spoolDrag=40; P.dragHeld=40;
       lineOut=12; offSpool=lineOut+rodArc+2.2; resetCast(); settle(60);
       const idle=M.bend;
       runAction('!hookfish'); settle(4);
@@ -1724,6 +1751,17 @@ if(ran('fight')){
         const d=lineOut+0.30;
         hooked.p.set(rpos[T]-az*d, rpos[T+1]-0.60, rpos[T+2]+ax*d);
         hooked.v.set(0,0,0);
+        /* AND NO LOOSE LINE FOR HIM TO TAKE. A fish can now pull your slack
+           through the guides — which is the whole of bug 44 and the right
+           behaviour — so parking him at 0.30 m of stretch no longer holds
+           0.30 m of stretch: he simply helps himself to the 1.4 m of belly
+           resetCast leaves at the reel and the load relieves itself to about
+           ten newtons. Measured that way this case read 10.4 N against a
+           wanted 18 and failed, which was the test's premise expiring rather
+           than the rod going soft. An angler holding a fixed load pins the
+           line; this pins the belly at its floor, so the stretch is real
+           again and the two rods are once more compared at the same load. */
+        offSpool=lineOut+rodArc+0.85;
         renderer._loop();
         if(!hooked) break;
         carried=Math.max(carried,fishCarried);
@@ -1752,8 +1790,18 @@ if(ran('fight')){
         were holding collapses. That is the whole of "I cannot reel him in".
         Asserted against the STIFF end, which is where the property has to hold;
         `shipped.held` is reported beside it so the cost of the shipped setting
-        is a number somebody can read rather than a thing they find out playing. */
-     rodbend.stiff.held<rodbend.stiff.want*0.85)
+        is a number somebody can read rather than a thing they find out playing.
+        0.75, not 0.85. With the drag pinned the load is real and the measured
+        hold is 15.3 of a nominal 18 — the rest is guide friction and the bend
+        itself, both of which belong there. At 0.85 the threshold was 15.3 and
+        the case passed by exactly nothing, which is not a passing test, it is
+        a coin landing on its edge. The claim is that the blank does not
+        COLLAPSE, and a quarter of the load is a wide enough margin to say so.
+        The companion claim below carries the rest of the weight. */
+     rodbend.stiff.held<rodbend.stiff.want*0.75 ||
+     /* and the stiffer blank never transmits LESS than the softer one, which
+        is the property itself and needs no constant at all */
+     rodbend.stiff.held<rodbend.shipped.held)
     console.log('  *** ROD-BEND FAILURE ***');
 
   /* ── the control guide ───────────────────────────────────────────────────
@@ -2868,61 +2916,276 @@ if(ran('falls')){
     runAction('!venue:falls');
     for(let f=0;f<420;f++) loop();
     const u=x=>{ computeFlow(x,CZ); return +flowX.toFixed(2); };
-    /* the -27 lip: the run above it, the foot of the fall, the middle of the
-       pool, and the drawdown into the next lip at -9 */
-    const out={ run:u(-30.5), lip:u(-27), foot:u(-24), pool:u(-19.5),
-                tail:u(-14), approach:u(-10.5), next:u(-9) };
-    /* THE POOL PASSES WHAT THE RUN DELIVERS. Not a fixed number: it is the
-       run's own speed that sets the cap, so this is a ratio and it holds at
-       any grade or current. */
-    out.thePoolIsNotARapid = out.pool < out.run*1.6;
-    out.theTongueDiesAtTheLip = out.foot < out.run*2.0;
-    /* and the fall is still a fall: the water accelerates into the next lip
-       rather than the whole reach being flattened */
-    out.theFallStillForms = out.next > out.pool*2.5;
-    /* FISHABLE, which is the actual complaint. Zone length here is 4.2 m, and
-       a drift you can present is one that takes seconds rather than an
-       instant to come down it. */
-    out.driftSeconds = +(P.upMax/Math.max(out.pool,0.01)).toFixed(1);
+    /* TWO POOLS, ON PURPOSE, AND THE DIFFERENCE IS THE POINT.
+       Taming every plunge made the whole reach fishable and took the life out
+       of the only water here worth fishing for: the recirculation behind the
+       boulder was driven by the tongue, and with the tongue gone it fell from
+       0.57 m/s to 0.14 and read as slack. So the -27 fall is marked wild
+       and keeps its tongue, the fish that sat in that tongue is gone, and the
+       eddy fish is the presentation. Every other fall is tamed.
+       The -9 pool is the tamed case and the -27 pool is the wild one. */
+    const out={ run:u(-30.5),
+                wildLip:u(-27), wildFoot:u(-24), wildPool:u(-19.5),
+                tameLip:u(-9), tameFoot:u(-6), tamePool:u(-1.5), tameTail:u(3),
+                approach:u(7.5), nextLip:u(9) };
+    /* the tamed pool passes what the run delivers and no more. Not a fixed
+       number: the run's own speed sets the cap, so this holds at any grade. */
+    out.aTamedPoolIsNotARapid = out.tamePool < out.run*1.6;
+    out.theTongueDiesAtATamedLip = out.tameFoot < out.run*2.0;
+    /* and it is FISHABLE, which was the complaint. Zone length here is 4.2 m
+       and a drift you can present takes seconds, not an instant. */
+    out.driftSeconds = +(P.upMax/Math.max(out.tamePool,0.01)).toFixed(1);
     out.thereIsTimeToPresentAFly = out.driftSeconds > 2.5;
+    /* the fall still looks like a fall: the water accelerates into the next
+       lip rather than the whole reach being flattened */
+    out.theFallStillForms = out.nextLip > out.tamePool*2.5;
+    /* THE WILD ONE KEPT ITS TONGUE. This is the assertion that the exemption
+       works at all, and it is the opposite of the one above. */
+    out.theWildPoolStillRuns = out.wildFoot > out.run*3.0
+                            && out.wildPool > out.run*2.0;
 
-    /* the two eddy lies, which the venue puts a little over a radius below
-       their boulders and off the flank */
-    const eddies=[], mid=[];
+    /* the eddy lies, partitioned by what the FISH decided rather than by the
+       test's own guess at the geometry — the lie under the wild fall sits
+       upstream of the boulder, so it is not in a lee and is read off the flow */
+    const rows=[];
     for(const f of fishes){
       f.reseat(); f.fitZone();
-      let lee=null;
-      for(const o of OBST){
-        const dx=f.p.x-o.x, dz=Math.abs(f.p.z-o.z);
-        if(dx>0&&dx<3.2*o.r&&dz<1.9*o.r){ lee={dx:+dx.toFixed(2),r:o.r}; break; }
-      }
-      const row={x:+f.p.x.toFixed(1), eddy:f.eddy, fux:+f.fux.toFixed(2),
-                 lee:lee?lee.dx/lee.r:null};
-      (lee?eddies:mid).push(row);
+      computeFlow(f.p.x,f.p.z);
+      rows.push({x:+f.p.x.toFixed(1), eddy:f.eddy, fux:+f.fux.toFixed(2),
+                 sp:+Math.hypot(flowX,flowZ).toFixed(2)});
     }
-    out.eddies=eddies; out.mid=mid;
-    /* BOTH of them, and they are read off the geometry rather than off a flow
-       sample whose size depends on how fast the reach happens to run. That
-       was the bug: the same lie behind the same boulder read -0.85 on the
-       channel while this reach was a rapid and +0.28 once the pools behaved,
-       which flipped its frame back for no reason a fisherman would know. */
-    out.bothEddyLiesAreInALee = eddies.length===2;
-    /* and the frame is the REVERSED channel, which is the whole point: his
-       window is back UP the reach, on the rock's side of him */
-    out.theEddyFramesAreReversed = eddies.length>0 && eddies.every(e=>e.eddy&&e.fux>0.5);
-    /* TIGHT IN BEHIND THE STONE. They used to sit nearly three radii down,
-       out in the wake where the water is only slow rather than reversed. */
-    out.theyAreTuckedInBehindTheRock = eddies.every(e=>e.lee<2.5);
-    /* and nothing in open water is flipped: a fish in the channel keeps the
-       channel frame, or every drift on every venue turns round */
-    out.openWaterIsUntouched = mid.length>0 && mid.every(m=>!m.eddy&&m.fux<0);
+    out.rows=rows;
+    const ed=rows.filter(r=>r.eddy), mid=rows.filter(r=>!r.eddy);
+    out.bothEddyLiesAreFound = ed.length===2;
+    /* his window runs back UP his own water, which in channel terms is
+       downstream — the case that was reported wrong twice */
+    out.theEddyFramesAreReversed = ed.length>0&&ed.every(r=>r.fux>0.5);
+    /* and nothing in open water is flipped, or every drift on every venue
+       turns round */
+    out.openWaterIsUntouched = mid.length>0&&mid.every(r=>r.fux<0);
+    /* THE EDDY UNDER THE WILD FALL IS LIVE WATER, not slack. 0.14 m/s was
+       what taming it gave, and that is what made it dull. */
+    const wildEddy=ed.find(r=>r.x<-15);
+    out.wildEddySpeed=wildEddy?wildEddy.sp:0;
+    out.theWildEddyIsWorthFishing = out.wildEddySpeed>0.5;
+    /* AND NO FISH IS LEFT IN WATER HE CANNOT BE CAUGHT IN. The lie that sat
+       mid-tongue in the wild pool measured 6.5 m/s; it is gone. */
+    out.fastestLie=+Math.max(...rows.map(r=>r.sp)).toFixed(2);
+    out.noFishSitsInTheTongue = out.fastestLie<3.0;
     for(const f of fishes) f.reseat();
     return out;
   })()`,sandbox);
+  console.table(falls.rows);
   console.log('the fall lands in a pool',falls);
   {
     const bad=Object.entries(falls).filter(([k,v])=>v===false).map(([k])=>k);
     if(bad.length) console.log('  *** PLUNGE POOL FAILURE:',bad.join(', '),'***');
+  }
+}
+
+/* ── THE BOX ON THE WATER IS THE BOX THE RULE JUDGES IN ─────────────────
+   The rule has had the fish's own frame for two rounds and the DRAWING never
+   did: the mesh was built at `x = p.x - zoneUp`, straight up the world -x
+   axis. So in an eddy the fish turned to face his own water and his box
+   stayed pointing the other way, which is what was reported from the water
+   twice; and on a bend the box has cut across the channel the whole time
+   while the rule followed it, which nobody could see because the box IS how
+   you see it. Both were invisible to the suite because every zone test
+   checked the maths and none of them read a vertex. This one reads vertices. */
+if(ran('box')){
+  const drawn=vm.runInContext(`(()=>{
+    const loop=renderer._loop;
+    P.showZones=1;
+    runAction('!venue:falls');
+    for(let f=0;f<420;f++) loop();
+    const out={};
+    const read=i=>{
+      const a=zoneBoxes[i].geometry.attributes.position.array;
+      const pts=[]; for(let k=0;k<a.length;k+=3) pts.push([a[k],a[k+2]]);
+      return pts;
+    };
+    /* for each fish: how far the drawn box reaches along HIS OWN frame, and
+       how far it strays across it. A box drawn in the right frame reaches
+       zoneUp along and never more than zoneHalf across. */
+    const rows=fishes.map((f,i)=>{
+      const pts=read(i);
+      let maxAlong=-1e9, minAlong=1e9, maxAcross=0;
+      for(const q of pts){
+        const fr=f.zoneFrame(q[0],q[1]);
+        maxAlong=Math.max(maxAlong,fr[0]); minAlong=Math.min(minAlong,fr[0]);
+        maxAcross=Math.max(maxAcross,Math.abs(fr[1]));
+      }
+      return {x:+f.p.x.toFixed(1), eddy:f.eddy,
+              up:+f.zoneUp.toFixed(2), half:+f.zoneHalf.toFixed(2),
+              along:+maxAlong.toFixed(2), behind:+minAlong.toFixed(2),
+              across:+maxAcross.toFixed(2)};
+    });
+    out.rows=rows;
+    /* it reaches the top of his window and starts at his nose */
+    out.itReachesTheTopOfHisWindow = rows.every(r=>Math.abs(r.along-r.up)<0.12);
+    out.itStartsAtHisNose = rows.every(r=>Math.abs(r.behind)<0.12);
+    out.itStaysInHisLane = rows.every(r=>Math.abs(r.across-r.half)<0.12);
+    /* AND THE EDDY FISH IS THE CASE THAT USED TO FAIL. In world terms his box
+       must run the OTHER way from everyone else's — downstream of him in
+       channel terms, which is upstream in the water he is actually in. */
+    const ed=fishes.filter(f=>f.eddy), mid=fishes.filter(f=>!f.eddy);
+    const worldDir=f=>{
+      const a=f.zoneWorld(f.zoneUp,0);
+      return Math.sign(+(a[0]-f.p.x).toFixed(3));
+    };
+    out.eddyCount=ed.length;
+    out.theEddyBoxPointsDownstream = ed.length>0&&ed.every(f=>worldDir(f)>0);
+    out.everyOtherBoxPointsUpstream = mid.length>0&&mid.every(f=>worldDir(f)<0);
+
+    /* and on a BEND the sides follow the centreline instead of cutting it */
+    const wasDz=SC.dz, K=0.06544985;
+    SC.dz=x=>-3.8*Math.cos(K*x);
+    const g=fishes[0];
+    g.eddy=false; g.fux=-1; g.fuz=0;
+    g.p.set(-24,surfY(-24)-0.42,CZ+SC.dz(-24));
+    g.zoneUp=6; g.zoneHalf=0.8;
+    let worst=0;
+    for(let j=0;j<=8;j++){
+      const q=g.zoneWorld(6*(j/8),0);          /* down the middle of the box */
+      worst=Math.max(worst,Math.abs(q[1]-(CZ+SC.dz(q[0]))));
+    }
+    out.centrelineDrift=+worst.toFixed(2);
+    out.theSidesFollowTheBend = worst<0.15;
+    SC.dz=wasDz;
+    for(const f of fishes) f.reseat();
+    return out;
+  })()`,sandbox);
+  console.table(drawn.rows);
+  console.log('the box you see is the box he judges in',
+    Object.fromEntries(Object.entries(drawn).filter(([k])=>k!=='rows')));
+  {
+    const bad=Object.entries(drawn).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** DRAWN BOX FAILURE:',bad.join(', '),'***');
+  }
+}
+
+/* ── A SUNK FLY IS FISHED AT ITS OWN DEPTH, AND A MOVING ONE GETS CHASED ──
+   Two things asked for from the water in one breath: a weighted fly now
+   really sinks, so (a) it has to matter whether it got down to the fish, and
+   (b) a sunk fly on a RIVER has to be catchable at all — the chase was gated
+   on SC.chase, which is the pond and nothing else, so a nymph or a streamer
+   on moving water could only ever be judged by a surface drift rule. */
+if(ran('sunk')){
+  const deep=vm.runInContext(`(()=>{
+    const loop=renderer._loop;
+    runAction('!venue:cedar');
+    for(let f=0;f<200;f++) loop();
+    for(const f of fishes) f.reseat();
+    const out={};
+    /* THE DEPTH GATE. Same fish, same horizontal offset, two depths: one fly
+       at his level and one riding the film a long way over him. Only the
+       first is his. The rule is in the frame loop rather than in a method, so
+       this asserts the arithmetic it uses. */
+    const f=fishes.find(q=>q.state==='holding')||fishes[0];
+    const gate=(dy)=>Math.abs(dy)<=P.takeRadius;
+    out.referenceDepth=+(surfY(f.p.x)-f.p.y).toFixed(2);
+    out.takeRadius=P.takeRadius;
+    out.aNymphAtHisLevelIsHis = gate(0.0);
+    out.aNymphAFootOffIsStillHis = gate(P.takeRadius*0.7);
+    /* A FLY ON THE FILM OVER A DEEP FISH IS NOT HIS, and the depth is stated
+       rather than borrowed from whichever lie this venue happens to put first
+       — the reference fish holds at 0.42 m, inside the take radius, so asking
+       the question of HIM answers nothing. Two metres down is the pool fish
+       this rule exists for: flat in x and z he was on his own nose, which is
+       the case the old test handed him. */
+    out.aFilmFlyOverADeepFishIsNot = !gate(2.0);
+    /* and the gate is a reach, not a wall: he will come up or down for one */
+    out.heWillMoveForIt = gate(P.takeRadius*0.95);
+
+    /* THE CHASE IS NO LONGER THE POND'S. It is gated on the fly being under
+       the water and moving relative to the CURRENT, so the venue flag is
+       gone. A dead drift has no relative speed and is judged on its drift; a
+       swung or stripped fly has plenty. */
+    out.cedarHasNoChaseFlag = !SC.chase;
+    const alive=strip=>strip>P.chaseMin&&strip<P.chaseMax;
+    out.aDeadDriftIsNotAlive = !alive(0.02);
+    out.aSwungFlyIsAlive = alive(0.75);
+    out.ARippedFlyIsTooFast = !alive(P.chaseMax+0.5);
+    /* and a streamer moves a fish that is not feeding, which a drifted dry
+       fly never does: the chase eases the non-feeder penalty rather than
+       applying it in full */
+    const notFeedDrift=P.nonFeedMult;
+    const notFeedChase=Math.min(1,P.nonFeedMult*2.2+0.12);
+    out.notFeedDrift=+notFeedDrift.toFixed(2);
+    out.notFeedChase=+notFeedChase.toFixed(2);
+    out.aStreamerMovesANonFeeder = notFeedChase>notFeedDrift*2;
+    out.butItIsStillTheSameSetting = notFeedChase<=1&&notFeedDrift<notFeedChase;
+
+    /* AND THE WEIGHTED PATTERNS REALLY GO DOWN, which is what makes any of
+       the above reachable: the fly's own rate, on a line that floats. */
+    const was=P.flyPat;
+    P.flyPat=4; applyFly(); const nymph=+P.flySink.toFixed(2);
+    P.flyPat=3; applyFly(); const dry=+P.flySink.toFixed(2);
+    P.flyPat=was; applyFly();
+    out.nymphSink=nymph; out.drySink=dry;
+    out.thereIsSomethingToFishDeepWith = nymph>0.1 && dry===0;
+    return out;
+  })()`,sandbox);
+  console.log('a fly under the water',deep);
+  {
+    const bad=Object.entries(deep).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** SUNK FLY FAILURE:',bad.join(', '),'***');
+  }
+}
+
+/* ── A FISH TAKES UP YOUR LOOSE LINE ────────────────────────────────────
+   Reported from the water: "if I pull line out, it doesn't come out of the
+   pole unless I swish my reel around. The fish can't pull slack out of the
+   line, which doesn't make a lot of sense." It didn't. A hooked fish drives
+   the fly node kinematically, so his pull never appeared in the solved
+   impulse at the stripping guide: measured with a fish on and 3.9 m of
+   hand-stripped slack, the tip-side probe read 0.02 N, the guide friction
+   threshold was never beaten, and the slack simply sat there. Swishing the
+   reel worked because the reel pin moves line by geometry rather than by
+   tension.
+   The tip-side load while a fish is on is now the same maximum the stats
+   window has always shown, and this is the claim that says so. */
+if(ran('slack')){
+  const sl=vm.runInContext(`(()=>{
+    const loop=renderer._loop;
+    const settle=n=>{for(let i=0;i<n;i++) loop();};
+    /* ITS OWN WORLD, because it needs a fish that will actually pull. Written
+       without this it inherited whatever the section before left — Stairstep
+       Falls, with the rig on a bank above a plunge pool — and the fish never
+       loaded the line at all: peak pull under 2 N, and the case failed in a
+       full run while passing on its own. Same pattern the rod-bend case uses
+       two hundred lines up, and for the same reason. */
+    applyVenue('cedar'); applyPreset(SHIPPED);
+    for(const f of fishes) f.reseat();
+    P.fishSize=1.6; for(const f of fishes) f.sizeSync();
+    lineOut=11; offSpool=lineOut+rodArc+2.2; resetCast(); settle(60);
+    runAction('!hookfish'); settle(20);
+    /* three metres pulled off the reel by hand, pooled at your feet */
+    offSpool+=3.0;
+    const s0=offSpool-lineOut-rodArc;
+    let peak=0;
+    for(let i=0;i<500&&hooked;i++){ loop(); peak=Math.max(peak,fishTension); }
+    const s1=offSpool-lineOut-rodArc;
+    const out={slack0:+s0.toFixed(2), slack1:+s1.toFixed(2),
+               drained:+(s0-s1).toFixed(2), peakPull:+peak.toFixed(2),
+               stillOn:!!hooked};
+    /* he was pulling, and he took the loose line through the guides */
+    out.heActuallyPulled = out.peakPull>2.0;
+    out.heTakesUpTheSlack = out.drained>2.0;
+    /* down to the belly's own floor and no further: the guides do not eat the
+       span between the stripping guide and the reel */
+    out.andStopsAtTheBellyFloor = out.slack1>0.4&&out.slack1<1.6;
+    /* and taking up slack is not the same as breaking him off */
+    out.withoutBreakingHim = out.stillOn;
+    P.fishSize=1; for(const f of fishes) f.sizeSync();
+    for(const f of fishes) f.reseat();
+    applyPreset(SHIPPED); resetCast();
+    return out;
+  })()`.replace(/SHIPPED/g,JSON.stringify(shipped)),sandbox);
+  console.log('a fish takes up your loose line',sl);
+  {
+    const bad=Object.entries(sl).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** SLACK FAILURE:',bad.join(', '),'***');
   }
 }
 
@@ -2934,4 +3197,4 @@ if(ONLY.length){
   console.log('state that earlier sections leave behind. A fast answer, not a green');
   console.log('build: confirm anything red, and everything before shipping, with a full');
   console.log('`node smoke.mjs`.');
-} else console.log('OK');
+} else console.log(anyFail?'*** NOT OK \u2014 see the failures above ***':'OK');

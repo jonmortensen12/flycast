@@ -1506,6 +1506,131 @@ Recorded because each one was mis-diagnosed at least once.
    block restores venue defaults unless it sees that marker, which also repairs the URLs
    already in circulation.
 
+41. **The drift box on the water was never drawn in the fish's frame.** The rule got
+   the fish's own frame two rounds ago — down his lane on a bend, turned round in an eddy
+   — and the mesh has been built at `x = p.x - zoneUp` since the day it was first drawn:
+   straight up the world -x axis, with the sides at `p.z ± half` in world z. So an eddy
+   fish turned to face his own water and his box stayed pointing the other way (reported
+   twice), and on a bend the box has cut across the channel the whole time while the rule
+   followed it. Nobody could see the second one, because the box is how you see it.
+   Both were invisible to `smoke.mjs` because every zone case checked the arithmetic and
+   none of them read a vertex. `zoneWorld()` is the inverse of `zoneFrame()`, the drawing
+   walks his frame through it, and the new `box` section reads the vertex buffer back
+   through `zoneFrame` and asserts the box lands where the rule says it does.
+
+42. **One pool left wild, because taming all six killed the only interesting water.**
+   Bug 36 made Stairstep fishable and in doing so took the life out of the thing the reach
+   was worth fishing: the recirculation behind the boulder was driven by the tongue, and
+   with the tongue gone it fell from 0.57 m/s to 0.14 and read as slack rather than as an
+   eddy. `wild` on a drop exempts it from the plunge cap; the -27 fall carries it. Its
+   mid-tongue lie (6.5 m/s, no drift obtainable) is gone, and the eddy fish moved to the
+   TOP of the recirculation at -23.2, between the stone and the fall.
+   Mapping it with the tongue restored is what made that placement possible, and it also
+   corrected the mental model: the eddy is not a pocket behind the boulder, it is one cell
+   filling the whole flank of the pool, reversed at about a metre a second continuously
+   from the boulder's lee up to the foot of the fall. He sits at 4.6 off the centreline
+   rather than 4.2 on purpose — at 4.2 the boulder stands proud directly in his lane and
+   `fitZone` correctly cuts his window to nothing; 40 cm further out it is beside his lane
+   and LENGTHENS the box, which is the presentation that lie is for.
+
+43. **The film was a switch where it should have been a spring.** `rel` was
+   `sinking ? 1 : 0`, so any sink rate above a thousandth released the node from the
+   surface completely. Two reports, one cause. `Line sink` at 0.02 behaved exactly like
+   1.00 — the rate barely mattered, because what had changed was not how fast the node
+   settles but whether anything held it up at all. And the joint between a floating belly
+   and a sinking tippet was a corner rather than a curve, because one node was pinned flat
+   and the next was in free water, with a fish on or without one. Surface tension against
+   a node's own weight is a ratio: `rel = sr / REL_FULL`, and weight and buoyancy now both
+   act every frame instead of being the two arms of an `if`. At rel 0 and rel 1 it is
+   bit-for-bit what it was.
+
+44. **A fish could not pull your loose line.** A hooked fish drives the fly node
+   kinematically — `waterAndGround` hands node 0 to the fish body and returns — so his pull
+   never reached the solved impulse at the stripping guide. Measured with a fish on and
+   3.9 m of hand-stripped slack at the reel: the tip-side probe read 0.02 N, the guide
+   friction threshold was never beaten, and 3.9 m of line sat there. Swishing the reel
+   moved it because the reel pin moves line by geometry rather than by tension, which is
+   exactly what was reported. The tip-side load while a fish is on is now
+   `max(probeOut, fishTension)` — the same quantity the stats window has shown as THE
+   tension for as long as there has been a fight. Measured after: a 1.6x fish pulling at
+   7.9 N takes 3.1 m of the 3.9 through the guides and stops at the belly's own floor,
+   still hooked, and only then does the spool drag start giving.
+
+45. **A landed fish escaped the boat if you handled him.** Whether he rests at the margin
+   or in the boat was decided as a side effect of the look-clock running OUT — the branch
+   needed `showT > 0` to enter, and taking him in your hand set `showT = 0` directly. So a
+   fish you picked up never passed through it, `inBoat` was never set, and he fell through
+   to the margin his landing had picked: over the side and away to the bank. Reported with
+   the control test that proves it — untouched he goes to the seat, handled he swims off,
+   twice. Resting is now `pickRest()`, idempotent, called from both paths.
+
+46. **A jump was fourteen splashes a second.** `random() < dt*14` rolled every frame while
+   a hooked fish held at the surface, so the same noise voice fired about fourteen times a
+   second at 0.36 gain each. Those sum well past unity and clip at the master: the pop
+   reported on a jumping fish was not a wrong sound, it was one sound stacked on itself.
+   One splash per breach now, with its rings spawned together as spray.
+
+47. **The oar blade still did not join the shaft.** The round before put shaft and blade in
+   one frame and then gave each its own height and its own distance out: the shaft ran dead
+   level while the blade was dropped 0.34 below the oarlock, and the blade's origin was
+   pushed half a blade PAST the end of the shaft. So it hung 27 cm low and 23 cm short.
+   The oar now has a single axis carrying its own downward tilt, the shaft lies along it,
+   and the blade's throat is placed exactly at the shaft's far end — the two cannot be at
+   different heights or leave a gap however either is tuned. The spoon is also turned
+   through 180 degrees, which for a symmetric outline is just the dish sign.
+
+48. **Nymphing and the swung fly, which is the first new way to fish since the boat.**
+   Two things asked for in one breath once the weighted patterns really sank.
+   The take test was FLAT: distance to the fish in x and z only, so a dry fly riding the
+   film thirty centimetres from a trout two metres down counted as being on his nose. For a
+   floating fly that is right — he looks up through Snell's window and comes to the surface.
+   For a fly under the water it was wrong twice: it offered him flies he could not reach,
+   and it meant nothing about getting a nymph down to his level changed the outcome, so a
+   nymph was never worth fishing. A submerged fly is now measured in three dimensions, and
+   depth is the whole skill: cast far enough above him that it is at his level when it
+   arrives. He is told when it goes by over or under him, because otherwise a nymph fished
+   at the wrong depth is indistinguishable from one he refused.
+   And the chase was gated on `SC.chase` — a venue flag standing in for a fact about the
+   fly. Asked from the water: "if I have a sinking fly in a river where it actually sinks,
+   will the fish attack it like they do in the pond? Otherwise it's going to be nearly
+   impossible to catch fish with a sinking line on a river." Right on both counts. The gate
+   is on the fly now: submerged, and moving relative to the CURRENT. A dead-drifted nymph
+   on a river has almost no relative speed and goes to the drift rule; a fly swung across
+   the current or stripped back has plenty and reads as alive. The venue distinction falls
+   out instead of being declared.
+   A streamer also moves a fish that is NOT feeding, which no drifted dry fly ever will, so
+   the non-feeder penalty is eased on a chase (about 3x at the shipped 0.15) rather than
+   applied in full — still scaled by the same setting.
+   What this changes in play: deep fish, browns especially, become catchable. Their window
+   is huge and a clean drift over all of it is hard, and a nymph at their depth is the real
+   answer. Non-feeders become catchable on something moving. Neither is free — you now have
+   to get depth and speed right instead of only drift.
+
+49. **ROD-BEND had been inheriting the load it measures.** Found while checking bug 44 and
+   worth recording, because the test looked green and was not measuring what it claimed.
+   The case parks a fish at 0.30 m of stretch — 18 N at the shipped `Line stretch` — to
+   compare a soft blank against a stiff one at the same load. But the spool gives line
+   above `spoolDrag*1.15`, and the shipped drag sits right about there, so run on its own
+   the case read 10.4 N against a wanted 18 and failed — on the build before this one as
+   much as on this one. It passed in full runs only because a section upstream had left
+   the drag high, which is exactly the state dependence the partial-run banner warns
+   about; every bend figure it has printed was some other reel's.
+   A rod is tested by clamping the line and pulling, so it does that now: the drag is
+   pinned past the load for the duration and the belly pinned at its floor (a fish can
+   take loose line through the guides since bug 44, which would relieve the stretch on its
+   own). The threshold also came down from 0.85 to 0.75 of nominal, because at 0.85 it
+   passed by exactly 0.0 — the measured 15.3 of 18 is guide friction plus the bend, both
+   of which belong there — and a second claim was added that needs no constant: the
+   stiffer blank must never transmit less than the softer one.
+
+50. **A red `smoke.mjs` run printed OK.** Found while fixing bug 49, and it is the reason
+   that one went unnoticed. `OK` was printed at the end of every COMPLETE run, whatever had
+   happened above it — the only thing it ever meant was "no section filter was given". So a
+   full run with a failing section six hundred lines up still ended in the word OK, which is
+   the single most misleading thing a test harness can do. Every failure in this file
+   announces itself with a `***` line, so `console.log` is wrapped to notice one and the
+   banner now reads `*** NOT OK ***` when it has seen any.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock

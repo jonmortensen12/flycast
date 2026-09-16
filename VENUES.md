@@ -133,11 +133,30 @@ run delivers. The band lets go before the next lip so the fall still forms.
 Measured: 8 m/s at the lip, 1.28 at its foot, 0.77 through the pool — 5.5 seconds
 of drift against Zone length 4.2 — and 5.08 m/s at the next lip.
 
-**And the two eddy lies moved in behind their stones.** They sat nearly three
-radii below their boulders, which is out in the wake where the water is only slow
-rather than reversed; they are now at 1.7 radii and 0.8 m off the flank, which is
-where the flow actually turns back. `smoke.mjs falls` asserts both the pool
-speeds and the eddy frames.
+**But one pool is left wild, and that is the point of the reach.** Taming all
+six made Stairstep fishable and took the life out of the only water here worth
+fishing for: the recirculation behind the boulder in the second pool was driven
+by the tongue, and with the tongue gone it fell from 0.57 m/s to 0.14 and read
+as slack rather than as an eddy. So `wild: 1` on a drop exempts it from the
+plunge cap, and the -27 fall carries it. Measured now: 8 m/s at that lip, 7.8 at
+its foot, 6.2 through the pool — against 1.3 and 0.8 in every tamed pool, where
+a drift lasts 5.3 seconds.
+
+That pool's mid-tongue lie is **gone** — it measured 6.5 m/s and no drift could
+be got over him — and its eddy fish sits at the **top** of the recirculation, at
+x -23.2, between the stone and the fall.
+
+Mapping it with the tongue restored corrected the mental model as well. The eddy
+is not a pocket behind the boulder: it is one cell filling the whole flank of the
+pool, reversed at about a metre a second continuously from the boulder's lee up
+to the foot of the fall, entering at the downstream end and turning back into the
+tongue at the top. He is at 4.6 off the centreline rather than 4.2 on purpose —
+at 4.2 the boulder stands proud directly in his lane and `fitZone` correctly cuts
+his window to nothing; 40 cm further out it is beside his lane instead, so it
+LENGTHENS the box and becomes the thing the fly has to come round.
+
+`smoke.mjs falls` asserts both pools, the eddy frames, and that no lie is left in
+water faster than 3 m/s.
 
 ## Switching venues
 
@@ -213,8 +232,8 @@ no river uses:
 
 - **Cruising fish.** A lie with a `cr` entry becomes a beat rather than a
   holding spot. The fish never stops, so the cast goes where he is going.
-- **A sinking line.** Three numbers, one per part of the rig, on the
-  **SINK & FLOAT** tab: `flySink` for the fly (and the tippet it drags down with
+- **A sinking line.** Three numbers, one per part of the rig, at the top of the
+  **STILLWATER** tab: `flySink` for the fly (and the tippet it drags down with
   it, easing off along the tippet's length so there is no hinge at the fly),
   `tipSink` for the leader and tippet, `lineSink` for the belly. The pond ships
   `tipSink 0.32, lineSink 0.21`; every river ships zeros, where the dry-fly
@@ -222,14 +241,60 @@ no river uses:
   which meant a floating line with a weighted fly — the commonest nymph rig
   there is — could not be expressed. `flySink` is also set for you by the fly
   box: the pheasant tail arrives at 0.16 and the woolly bugger at 0.22.
-- **The chase.** A submerged fly moving through the water between `chaseMin`
-  and `chaseMax` reads as alive. A fish inside `chaseRadius` commits, swims at
+  The film lets go of a node BY DEGREES rather than all at once — surface
+  tension against its own weight is a ratio, not a threshold — so 0.02 really
+  is a line that floats and 1.00 really is one that goes, and the joint between
+  a floating belly and a sinking tippet is a curve instead of a corner.
+- **The chase.** This is no longer the pond's — see below. A submerged fly
+  moving through the water between `chaseMin` and `chaseMax` reads as alive. A fish inside `chaseRadius` commits, swims at
   where the fly *will be*, and eats it if he catches up. Too slow or stopped and
   he loses interest after `chaseGiveUp`; too fast and he gives up because he
   cannot get in front of it. The seven chase numbers are in the **STILLWATER** tab.
 
 The starting numbers are guesses. `Chase min 0.28` and `Chase max 1.60` are the
 two to play with first — they are the whole feel of the retrieve.
+
+## Fishing under the surface, on any reach
+
+Two ways to fish a sunk fly, and both work on moving water now. They arrived
+together, because the weighted patterns in the fly box only started really
+sinking in the round before this one and until then neither was reachable.
+
+**A dead-drifted nymph.** The take test used to be flat — distance to the fish
+in x and z only — so a dry fly riding the film thirty centimetres from a trout
+two metres down counted as being on his nose. For a floating fly that is right:
+he looks up through Snell's window and comes to the surface, and the rise is the
+point. For a fly *under* the water it was wrong twice over. It offered him flies
+he could not reach, and it meant nothing about getting a nymph down to his level
+changed the outcome, so a nymph was never worth fishing.
+
+A submerged fly is now measured in three dimensions, and **depth is the whole
+skill**: cast far enough above him that the fly is at his level by the time it
+arrives. Too shallow and it goes by over him; too deep and you are on the bottom.
+He tells you which, because otherwise a nymph fished at the wrong depth is
+indistinguishable from one he refused. The drift rule is unchanged — a nymph
+still has to come down his window without dragging.
+
+What this changes: **deep fish become catchable.** Browns hold deepest, their
+window is the biggest, and a clean drift over all of it is hard. A nymph at their
+depth is the real answer and now it is the answer the game gives.
+
+**A swung or stripped fly.** The chase used to be gated on `SC.chase`, which is
+the pond and nothing else — a venue flag standing in for a fact about the fly.
+The gate is on the fly now: submerged, and moving relative to the **current**.
+A dead-drifted nymph on a river has almost no relative speed and goes to the
+drift rule; a fly swung across the current or stripped back has plenty and reads
+as alive. The venue distinction falls out instead of being declared, and all
+seven chase numbers apply everywhere.
+
+A streamer also **moves a fish that is not feeding**, which no drifted dry fly
+ever will — that is most of the reason to fish one. So the non-feeder penalty is
+eased on a chase rather than applied at full strength: about three times more
+willing at the shipped `Non-feeder mult` of 0.15, still scaled by the same
+setting.
+
+Neither of these is a free win. You now have to get depth and speed right
+instead of only drift.
 
 ## The alder tunnel
 
