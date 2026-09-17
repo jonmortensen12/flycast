@@ -7,16 +7,16 @@ itch.io.
 
 ## What itch is good for here, and what it is not
 
-`STRATEGY.md` §1 is right that the shippable artifact already exists: this is a
-WebXR PWA and `index.html` is the product. itch will host that, for free, in
-minutes, on a page you can share. As a way to **put the cast in front of fly
-fishers and find out whether anyone cares**, before committing to Horizon Store
-review and a signing keystore you must never lose, it is close to ideal.
+`index.html` is the product and itch will host it, for free, in minutes, on a
+page you can share. As a way to **put the cast in front of fly fishers and find
+out whether anyone cares**, before committing to Horizon Store review and a
+signing keystore you must never lose, it is close to ideal.
 
-**It is not a way to sell it.** Every HTML5 game on itch is free to play —
-browser projects take payments as donations only, and there is no setting that
-restricts a web build to purchasers. To charge money the project must be
-**Downloadable**, and what the buyer receives is a file.
+**It is not a way to sell the browser build** — though that is not an itch
+failing. No storefront sells hosted browser play; the web has no purchase
+primitive and every store sells an *install*. On itch specifically, HTML5
+projects take donations only, and charging money means setting the project kind
+to **Downloadable**, where what the buyer receives is a file.
 
 For this game that is less of a problem than it sounds, because the file already
 has a name: the **Bubblewrap-packaged APK** from `STRATEGY.md` §1. Quest users
@@ -31,6 +31,39 @@ shape on itch is:
 That is a real product page, and it costs you nothing you were not already going
 to build. The Horizon Store remains the actual destination; itch is the place to
 learn whether the casting lands before you get there.
+
+## The APK is not as close as `STRATEGY.md` implies
+
+§1 says "it ships as a WebXR PWA. No port required" and that `index.html`
+already is the shippable artifact. The second half is very nearly true and the
+first half has a gap: **this is not a PWA yet.**
+
+Bubblewrap wraps a *Progressive Web App*, and that means, concretely:
+
+| Requirement | Status |
+|---|---|
+| Served over HTTPS | yes |
+| A web app manifest | **missing** — there is no `manifest.webmanifest` and `index.html` links none |
+| A registered service worker | **missing** — nothing calls `serviceWorker.register` |
+| `/.well-known/assetlinks.json` on the domain | **missing** |
+
+None of that is a port. It is a twenty-line manifest, a minimal service worker,
+one JSON file on the host, and the signing keystore §1 already warns you to keep
+safe. Call it half a day. But it is the real next step toward the Horizon Store,
+and it is worth knowing that the artifact is not currently sitting there ready
+to package.
+
+Worth updating §1 on one more point: **Meta maintains its own fork of
+Bubblewrap**, published as `@meta-quest/bubblewrap-cli`, which adds the Quest
+and Horizon Store support. Use that rather than Google's upstream.
+
+One consequence of the TWA model that matters for planning: **the packaged app
+loads from your hosted URL.** It is a downloadable that still needs the
+internet. That is fine for flycast — nothing here is a second device on the LAN
+— but it means the APK is a shortcut to the headset, not an offline build. A
+genuinely offline copy would use Capacitor, which bundles the assets into the
+app instead of pointing at a URL, at the cost of its own WebView and a fatter
+binary.
 
 ## Does WebXR work in an itch embed?
 
@@ -118,7 +151,7 @@ one-command updates, pricing and name-your-price behaviour, download keys,
 whether players need an account, how payouts work, pseudonymity, and what an LLC
 does and does not protect you from — all of it is platform-general and written
 up in detail in the family-smash repo's `ITCH.md`. The facts transfer unchanged.
-The flycast-specific deltas are the four sections above.
+The flycast-specific deltas are the five sections above.
 
 Two worth repeating because they change scheduling:
 

@@ -8,7 +8,11 @@ next in what order.
 
 ## 1. Platform
 
-**It ships as a WebXR PWA. No port required.** Meta's Horizon Store accepts immersive WebXR
+**It ships as a WebXR PWA. No port required** — but note that it is not actually a PWA yet:
+there is no web manifest, no registered service worker and no `assetlinks.json`, and Bubblewrap
+requires all three. That is half a day of work, not a port, but it is not zero. Meta also
+maintains its own Bubblewrap fork, `@meta-quest/bubblewrap-cli`, which is the one to use.
+The original claim, still true: Meta's Horizon Store accepts immersive WebXR
 apps packaged with Google's Bubblewrap into an Android App Bundle, and since Connect 2024
 those PWAs can take in-app payments through the Digital Goods API. So `index.html` already
 is the shippable artifact.
