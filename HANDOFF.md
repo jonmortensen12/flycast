@@ -1721,6 +1721,45 @@ Recorded because each one was mis-diagnosed at least once.
    the SHAPE of a rig is measured differentially — same node, same geometry, one rig
    against another — which cancels the catenary instead of fighting it.
 
+58. **The draw was locked inside the behaviour tree.** A fish somebody else was simulating
+   had its position streamed, eased and never drawn: `m.position.copy(this.p)` was the last
+   third of `update()`, and `update()` is precisely what does not run for a fish you do not
+   own. Everything about the feature reported as "we cannot see each other's fish" was this
+   one line's position in the file. Rendering is not behaviour and does not belong behind
+   it — `Trout.draw()` is now its own method and is called on both paths.
+
+59. **An authority check that only bound one side.** `fishMine()` returned true for the
+   host whatever it had granted away, so one trout was fought on one machine and went on
+   feeding in its lie on the other. An ownership rule that is not symmetric is not an
+   ownership rule; it is two simulations agreeing to disagree.
+
+60. **Netting counted as letting go.** The release that hands a fish back to the host fired
+   at the net rather than at the moment the fish goes back in the river, so the host
+   described the trout holding in its lie while the person who caught it was holding it.
+   The fish swam out of the net. The lifecycle has exactly one end — `reseat()` — and the
+   release belongs there.
+
+61. **A stub that took one type.** `Color.set()` in `smoke.mjs` handled numbers and
+   silently returned itself for anything else, and every one of the eight reel designs is
+   a `'#rrggbb'` string. So the reel frame, the reel seat and the handle knobs had been
+   invisible to the harness since the day they were written — `applyTackleColours` set
+   them on every change and nothing could observe it. Same failure shape as the `Color`
+   stub that answered `getHex()` with `0` (section 4c) — plausibly wrong rather than
+   obviously incomplete — one type signature later.
+
+62. **The rod root is not the hand, and two renderers forgot it.** `handTargets` puts
+   `handRig` at the controller and then pushes the rod's first node `BUTT_Z` (0.175 m)
+   further along the blank, because the butt cap is behind your fist. Your own reel and
+   cork are *children* of `handRig`, so the scene graph places them and they are always
+   right. A friend's rod and a ghost recording have no `handRig` — all they have is the rod
+   — and both added the handRig-space offset straight onto node 0. So the reel on every
+   recording and on every friend's rod floated exactly 17.5 cm behind the butt cap, and
+   nobody had noticed: a peer is usually across the river and the ghost is a magenta
+   silhouette. Found by asserting the peer placement against where the local reel actually
+   is, rather than by looking at it — `smoke.mjs gear` now measures both the reel and the
+   cork and holds them at zero. The constant moved to sit beside the offsets derived from
+   it, which is the structural half of the fix.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
@@ -1750,6 +1789,14 @@ loader, no headset — walks the node hierarchy, bakes the transforms and measur
 result. Today it checks that both of the trout's eyes stand proud of a head that is not
 symmetric; the point is that a model fault is a measurable fact, not a matter of
 squinting at it in the headset.
+
+**Never put a backtick in a `smoke.mjs` test comment.** Every section is a
+`vm.runInContext(\`...\`, sandbox)` template literal, so one backtick inside it closes
+the literal early and the whole file stops parsing — with a `SyntaxError` pointing at the
+top of the block rather than at the comment. This has now happened four times, always
+while writing a comment that names an identifier in the prose. Write the name plainly.
+And after editing this file, parse it (`node -e` with `vm.Script` over the source) before
+running it: the parse failure is instant and the run is ten minutes.
 
 **A test that reconstructs a value is a test that will lie to you.** The teleport
 check worked out where the head had landed from `camera.position` — which is LOCAL to
@@ -1886,13 +1933,17 @@ Known limitations, none of them hidden:
 Three things asked for after the first two headsets fished together.
 
 ### The body, and why no asset was needed
-Arms and legs are built, not downloaded, and that is the right call for three reasons.
-A headset gives **three tracked points** — the head and two hands — so a rigged model does
-not solve the hard part; the elbows, shoulders, hips, knees and feet all still have to be
-invented, and a realistic mesh makes an invented elbow look *worse*. The **import chain
-does not exist**: the importmap in `index.html` is one line, and a GLB means a loader, a
-second CDN and an asset, at which point the file stops being the whole shippable thing.
-And everything else here is already procedural.
+Arms and legs are built, not downloaded. A headset gives **three tracked points** — the
+head and two hands — so a rigged model does not solve the hard part; the elbows,
+shoulders, hips, knees and feet all still have to be invented, and a realistic mesh makes
+an invented elbow look *worse*. Everything else here is already procedural.
+
+**One reason originally given for this was wrong and is withdrawn:** that "the import chain
+does not exist". It does. `ASSET_SLOTS` dynamically imports `GLTFLoader` from the same CDN
+the importmap points at and already drops in trees, rocks, five species of fish, a reel, a
+grip, a net and a fly, all behind `P.assetOn`. Loading a file is a solved problem in this
+codebase and citing it as an obstacle was an error — see below for what the obstacle
+actually is.
 
 `ikJoint` is closed form, not a solver: given a shoulder, the tracked hand and two bone
 lengths, `l = (d² + a² − b²)/2d` along the axis with radius `r = √(a² − l²)`, and a hint
@@ -1908,6 +1959,47 @@ will occasionally settle an elbow on the wrong side, because three points is thr
 
 A hat brim is worth more than the arms at thirty metres — it is the one part that says
 which way somebody is facing across a river.
+
+### Could a downloaded fisherman replace it? What the research says
+
+Asked directly from the water: surely there are free character models that would map onto
+the outputs `anglerPose` already produces? Researched properly rather than asserted.
+
+**The models exist and the licences are fine.** Quaternius *Universal Base Characters* is
+six humanoids with a retargetable humanoid rig, glTF, CC0 — no attribution, commercial use
+fine, and low-poly enough for a Quest. Mixamo is royalty-free with no credit required and
+has the largest library plus an auto-rigger, but its terms forbid redistributing the
+character *files* as standalone assets, and this repo ships `assets/*.glb` as loose files
+in public — so CC0 is the safer class of licence for this project specifically. There is
+no purpose-made rigged *fly fisherman* under a free licence; you find generic humanoids
+and dress them, which is what the procedural hat and vest already do.
+
+**Bone naming is a solved problem too.** VRM defines a fixed humanoid skeleton (Hips,
+Spine, Chest, Neck, Head, Upper/Lower Arm, Hand, Upper/Lower Leg, Foot, Toes) precisely so
+that rigs with different internal hierarchies can be driven by one mapping; Mixamo has its
+own consistent `mixamorig:` convention. Either way the names are knowable in advance.
+
+**So the obstacle is neither the file nor the licence nor the names. It is two things:**
+
+1. `loadSlot` **destroys the rig.** It clones each mesh's geometry, applies
+   `matrixWorld`, and merges by footprint — correct and deliberate for a tree, and fatal
+   for a human, because no skeleton survives it. Using a skinned model means a second,
+   different load path that keeps `SkinnedMesh`, `Skeleton` and the bind pose intact.
+2. **What `ikJoint` outputs is not what a skeleton wants.** It produces *world-space joint
+   positions* — shoulder, elbow, hand. A skinned rig is posed by setting each bone's
+   *local rotation relative to its bind pose*, and the inverse bind matrix is the standard
+   trap here. The conversion is real but bounded: for each bone, take the target direction
+   in world space, bring it into the parent bone's space, and build the quaternion from the
+   bind-pose direction to it. Roughly twenty lines per chain, six chains. The elbow and
+   knee positions the IK already computes are exactly the inputs that conversion needs, so
+   the suspicion behind the question is right about the *maths* — it is the loader and the
+   bind-pose plumbing that are the work, not the solving.
+
+Judgement unchanged, with better reasons: a *static* humanoid is strictly worse than what
+is here (frozen in one pose while the real head and hands move inside it), and the skinned
+route is a day's work whose visible payoff is a nicer elbow. The cheap win that was
+identified and is still worth taking is **`attach`-kind slots for things that do not
+deform** — hat, vest, net — hung off the skeleton that already exists.
 
 ### Teaching
 Most of it already existed: the river travels host-to-guest, and that covers Take radius,
@@ -1948,14 +2040,77 @@ behaviour, no feeding, no rises — and eases them toward the host's picture, bu
 take test still runs locally because that has to be instant; what it does on a take is
 claim. The host arbitrates, and the loser is told to let go.
 
-**None of it runs unless you are a connected guest.** Fishing alone and hosting are the
-paths the game is tuned on, and `fishMine()` is true for every fish on both. A guest whose
-friend goes quiet takes its own river back rather than standing in a frozen one.
+**Fishing alone is untouched.** `fishMine()` is true for every fish when nothing is
+connected, and a guest whose friend goes quiet takes its own river back rather than
+standing in a frozen one.
 
 Still open here: the Boat Drift is world-space and that venue moves the hull and wraps
 laps, so poses will be wrong on it. And NAT traversal remains the one thing no test can
 answer — though two houses on two networks have now connected, which is the first real
 evidence it works.
+
+### 5d. Two-way fish, and the gear on his rod
+
+The first cut of the above was **one-way and half-drawn**, and both halves were reported
+from the water as the same question: can we show each other what we caught?
+
+**The frozen mesh.** Fish positions streamed at 10 Hz, `fishShow` eased `this.p` toward
+the target — and nothing drew it. The single line that copies a fish's position into its
+mesh, `m.position.copy(this.p)`, sat at the tail of `update()`, and `update()` is exactly
+what does not run for a fish somebody else owns. The numbers moved and the trout did not.
+Split out as `Trout.draw(dt,t)`: a fish anybody owns is now drawn by the same code, and
+`this.wire` is the only difference — it says the drawn heading, the hold orientation and
+the velocity came off the wire, because the behaviour tree that would produce them is
+running on the other machine. Everything shared (body wave, wet shine, tension post,
+breathing while landed) therefore cannot drift out of agreement between the two views.
+
+**The host was running fish it had given away.** `fishMine()` returned true for the host
+unconditionally. So a guest hooked a trout, fought it and landed it, while on the host the
+same trout held in its lie and went on feeding: two divergent simulations of one fish, and
+which one was real depended on whose headset you wore. The rule is symmetric now — you run
+what has not been given away — and it lives in one function.
+
+**Only the host spoke.** The fish stream was inside `if(MP.role==='host')`, so a guest's
+fish were invisible to the person hosting the water. Both ends send now, each describing
+only what it is thinking for; the rest carry a state of `-1`. That sentinel used to be six
+zeros, and zero is a real state (holding, at the origin) — it worked only because the
+receiver skipped those fish for an unrelated reason.
+
+**Netting handed the fish back.** `fishRelease` fired the moment the net closed, so the
+host resumed authority and described the trout holding in its lie while the guest had it in
+its hands. The fish swam out of your net. A landed fish stays yours; `reseat()` is the one
+place a fish stops being a catch and therefore the one place it stops being yours.
+
+**The bank is per angler.** `MAX_TROPHY` counted every landed fish including his, so your
+allowance culled his catch — and could not have worked anyway, because his machine keeps
+calling it landed and it would flip straight back. Each end culls only what it is thinking
+for, which is consistent on both by construction. A landed fish off the wire gets its card
+built locally from its own length and species, so nothing about the card is sent.
+
+You cannot pick up his fish. The grab would set `held` and the next packet would overwrite
+it — "got him", and the trout stays where he left it. Handing a fish across needs a
+handover of its own.
+
+**And his tackle is his tackle.** The rod's *bend* was always right, because every node is
+on the wire. Nothing you could *pick* was: a grey barrel for a reel, no cork at all, a
+cream line whatever he set, an amber pip for a fly. Five integers — `flyPat`, `reelHue`,
+`gripHue`, `lineHue`, `rodHue` — go as an object once a second and on connect, and the
+peer rod is dressed by the same builders yours is (`reelFace`, `corkBuild`, `FLIES[i][2]`).
+
+This is **not** teaching, deliberately. `teachPush` changes what your friend is *fishing*;
+this changes what you *see* of what he chose. Watching somebody tie on a bugger should not
+tie one on for you, and `gear` has its own test for exactly that.
+
+Two bugs fell out of building it, neither of them in the new code:
+
+- The stub `Color.set()` took numbers only and silently returned itself for a string — and
+  the eight reel designs are written as `'#rrggbb'`. So the reel frame, the seat and the
+  handle knobs had been untestable since they were written. The stub parses CSS hex now.
+- Giving the peer a reel worth looking at meant checking where it hangs, and it hung
+  `BUTT_Z` too far back — on the ghost recording too, and since the day either was
+  written. See bug 62. The lesson is the one this file keeps relearning: **an offset is
+  meaningless without the origin it is measured from**, and the way to catch that is to
+  assert the derived placement against the authoritative one rather than to look at it.
 
 ## 6. Open problems
 

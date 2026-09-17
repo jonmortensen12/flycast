@@ -183,7 +183,24 @@ const THREE={
      computes a colour is untestable in here. The hooked-fish tension ramp is
      exactly that code. */
   Color:class{constructor(c){this.r=1;this.g=1;this.b=1;if(typeof c==='number')this.setHex(c);}
-    set(c){if(typeof c==='number')this.setHex(c);return this;}
+    /* AND A CSS STRING IS A REAL COLOUR TOO. This took numbers only and
+       silently returned itself for anything else — and the eight reel designs
+       are written as '#rrggbb', which is how the reel frame, the seat and the
+       handle knobs came to be untestable in here: applyTackleColours set them
+       every time and the harness could never see it happen. Same stub shape
+       the comment above warns about, one type later. */
+    set(c){
+      if(typeof c==='number') return this.setHex(c);
+      if(typeof c==='string'){
+        const m=/^#?([0-9a-f]{6})$/i.exec(c.trim());
+        if(m) return this.setHex(parseInt(m[1],16));
+        const t=/^#?([0-9a-f]{3})$/i.exec(c.trim());
+        if(t){const h=t[1];
+          return this.setHex(parseInt(h[0]+h[0]+h[1]+h[1]+h[2]+h[2],16));}
+      }
+      if(c&&typeof c==='object'&&'r' in c) return this.copy(c);
+      return this;
+    }
     setHex(h){h=Math.floor(h)||0;this.r=((h>>16)&255)/255;this.g=((h>>8)&255)/255;this.b=(h&255)/255;return this;}
     setRGB(r,g,b){this.r=r;this.g=g;this.b=b;return this;}
     setHSL(h,s2,l){
@@ -405,7 +422,7 @@ const ARGS=process.argv.slice(2);
 const ONLY=ARGS.filter(a=>a[0]!=='-');
 const SECTIONS=['water','perf','specks','menu','venue','fight','boat','settings',
                 'scenery','sink','trophy','teleport','splash','guide','fish',
-                'remote','species','markers','zone','flies','falls','sunk','box','slack','mp','body','teach','share'];
+                'remote','species','markers','zone','flies','falls','sunk','box','slack','mp','body','teach','share','gear'];
 const ran=n=>!ONLY.length||ONLY.includes(n);
 if(ARGS.includes('--list')){
   console.log('sections: '+SECTIONS.join(' '));
@@ -3566,14 +3583,21 @@ if(ran('share')){
     MP.role='off'; MP.conn=null;
     out.aloneTheyAreAllMine = fishes.every((f,i)=>fishMine(i));
     out.aloneNothingIsRemote = !fishRemote();
+    out.aloneNothingIsLinked = !fishLinked();
 
-    /* 2. A HOST ALSO RUNS ALL OF THEM: it is the authority. */
+    /* 2. A HOST RUNS WHAT IT HAS NOT GIVEN AWAY — and NOT what it has.
+          This used to be unconditional, which is the bug: the host went on
+          simulating a fish the guest was fighting, so one trout lived two
+          lives and which one you saw depended on your headset. */
     MP.role='host'; MP.conn={open:true, send(){}};
     MP.fishSeen=mpNow();
-    out.aHostRunsThemAll = fishes.every((f,i)=>fishMine(i));
+    MP.own=[];
+    out.aHostRunsTheUnclaimed = fishes.every((f,i)=>fishMine(i));
+    MP.own[2]=2;
+    out.aHostStopsRunningWhatItGaveAway = !fishMine(2) && fishMine(0);
 
     /* 3. A CONNECTED GUEST RUNS ONLY WHAT IT HAS CLAIMED. */
-    MP.role='guest';
+    MP.role='guest'; MP.own=[];
     out.aGuestRunsNoneOfThem = fishes.every((f,i)=>!fishMine(i));
     MP.own[1]=1;
     out.exceptTheOneItHooked = fishMine(1) && !fishMine(0);
@@ -3584,35 +3608,87 @@ if(ran('share')){
     out.aSilentHostHandsThemBack = fishes.every((f,i)=>fishMine(i));
     MP.fishSeen=mpNow();
 
-    /* 5. THE PACKET describes every fish and skips the one they are fighting,
-          because sending it back at them would fight their own simulation. */
+    /* 5. THE PACKET describes what this end is thinking for, and marks the
+          rest with a state of -1. It used to push six zeros, and zero is a
+          real state (holding, at the origin) — it only ever worked because
+          the receiver skipped those fish for an unrelated reason. */
     MP.role='host'; MP.own=[]; MP.own[2]=2;
     const a=fishPack();
     out.packLen=a.length; out.fishCount=fishes.length;
-    out.itDescribesEveryFish = a.length===fishes.length*6;
-    out.itSkipsTheirFish = a[2*6+3]===0 && a[2*6]===0;
+    out.itDescribesEveryFish = a.length===fishes.length*FISH_ST;
+    out.theirFishIsMarkedNotZeroed = a[2*FISH_ST+3]===-1;
+    out.andOursIsDescribed = a[0*FISH_ST+3]>=0;
+    /* the hold orientation rides along, because his hands are not ours */
+    out.theHoldIsOnTheWire = a.length>=FISH_ST &&
+      Math.abs(Math.hypot(a[6],a[7],a[8],a[9])-1)<0.02;
 
-    /* 6. and it round-trips: what the host sends is where the guest puts them */
+    /* 6. A GUEST SENDS TOO. This was inside the host branch, so the whole
+          point of fishing together — look what I just caught — worked in
+          one direction only. */
+    MP.role='guest'; MP.own=[]; MP.own[0]=1; MP.fishSeen=mpNow();
+    const g=fishPack();
+    out.aGuestDescribesWhatItOwns = g[0*FISH_ST+3]>=0;
+    out.andNothingElse = g[1*FISH_ST+3]===-1;
+
+    /* 7. and it round-trips: what one end sends is where the other puts them */
     MP.role='guest'; MP.own=[]; MP.tx3=[];
-    const probe=[]; for(let i=0;i<fishes.length;i++) probe.push(3+i,0.5,-4-i,0,1,0.2);
+    const probe=[];
+    for(let i=0;i<fishes.length;i++) probe.push(3+i,0.5,-4-i,0,1,0.2,0,0,0,1);
     fishTake(probe);
-    out.theGuestTakesThePositions =
+    out.theFarEndPositionsLand =
       !!MP.tx3[0] && Math.abs(MP.tx3[0].x-3)<1e-6 && Math.abs(MP.tx3[1].z-(-5))<1e-6;
-    /* and easing moves them toward it rather than snapping */
-    const f0=fishes[0]; f0.p.set(0,0,0);
-    fishShow(1/72);
+    out.andTheyAreMarkedAsHis = fishes[0].wire===true;
+
+    /* 8. AND THE MESH ACTUALLY MOVES. This is the bug the whole rework is
+          about: the one line that copies a fish position into its mesh lived
+          at the tail of update(), and update() is exactly what does not run
+          for a fish somebody else owns. The numbers moved; the trout did not. */
+    const f0=fishes[0];
+    f0.p.set(0,0,0); f0.mesh.position.set(0,0,0);
+    fishShow(1/72,1.0);
     const step=Math.abs(f0.p.x-0);
     out.easedNotSnapped = step>0.001 && step<3*0.9;
+    out.theMeshFollowsTheFish =
+      Math.abs(f0.mesh.position.x-f0.p.x)<1e-6 && f0.mesh.position.x>0.001;
+    /* and a velocity is differenced out of it, so a fish running on somebody
+       else's line still points down its run */
+    out.aVelocityIsInferred = Math.abs(f0.v.x)>0.001;
 
-    /* 7. TWO PEOPLE, ONE TROUT. The host arbitrates; the loser is told to let
-          go rather than both fighting a fish that is in two places. */
+    /* 9. HIS CATCH GETS A CARD. A fish landed at the far end is a trout of a
+          size and a species over there, and reads as one here. */
+    MP.own=[]; MP.tx3=[];
+    const lab=[];
+    for(let i=0;i<fishes.length;i++) lab.push(2,0.4,-3,FISH_STATE.indexOf('landed'),0,0,0,0,0,1);
+    fishTake(lab);
+    out.hisLandedFishAreLanded = fishes[0].state==='landed';
+    out.andCarryTheirCard = !!(fishes[0].label && fishes[0].label.mesh.visible);
+    /* back to swimming takes the card away again */
+    const un=[];
+    for(let i=0;i<fishes.length;i++) un.push(2,0.4,-3,FISH_STATE.indexOf('holding'),0,0,0,0,0,1);
+    fishTake(un);
+    out.andLoseItWhenHeSwimsOff = !fishes[0].label.mesh.visible;
+
+    /* 10. AND YOU CANNOT PICK UP HIS FISH: held comes off the wire, so a local
+           grab would be a flag the next packet overwrites. */
+    const held=[];
+    for(let i=0;i<fishes.length;i++) held.push(2,0.4,-3,FISH_STATE.indexOf('landed'),2,0,0,0,0.3827,0.9239);
+    fishTake(held);
+    out.hisHeldFishIsHeld = fishes[0].held===true;
+    out.andTurnedByHisHand = Math.abs(fishes[0].wireQ.w-0.9239)<0.01;
+
+    /* 10b. AND HE DOES NOT STAY IN A HAND THAT LEFT. The held flag drives a
+            branch that pins the fish to _inspP — YOUR hand — so a friend
+            dropping out mid-admire used to hand back a trout that glued itself
+            to your fist and followed you up the river. */
+    out.hisFishWasHeld = fishes[0].held===true;
+    fishAllWake();
+    out.andIsNotAfterHeGoes = fishes[0].held===false && fishes[0].wire===false;
+
+    /* 11. TWO PEOPLE, ONE TROUT. The host arbitrates; the loser is told to let
+           go rather than both fighting a fish that is in two places. */
     const sent=[];
     MP.role='host'; MP.conn={open:true, send(o){sent.push(o);}};
     MP.own=[];
-    /* indices inside the reach of whatever venue this is: the first cut of
-       this case asked for fish 4 and 5 on a four-fish river, fishOwnMsg
-       correctly refused both as out of range, and three claims read as an
-       arbitration failure that was really an off-the-end index. */
     out.enoughFishToArbitrate = fishes.length>=2;
     const A=0, B=1;
     fishOwnMsg({t:'claim', i:A});
@@ -3623,23 +3699,185 @@ if(ran('share')){
     fishOwnMsg({t:'claim', i:B});
     out.aFishAlreadyOnIsRefused = MP.own[B]===1
       && sent.some(o=>o.t==='own'&&o.i===B&&o.v===1);
-    /* and letting go hands it back */
+    /* and letting go hands it back — and clears the flag, or the host would
+       go on drawing a fish it is now simulating */
+    fishes[A].wire=true;
     fishOwnMsg({t:'free', i:A});
     out.lettingGoHandsItBack = MP.own[A]===0;
+    out.andItStopsBeingDrawnOffTheWire = fishes[A].wire===false;
     /* an index off the end of the river is refused rather than growing it */
     const n0=fishes.length;
     fishOwnMsg({t:'claim', i:999});
     out.anImpossibleFishIsRefused = MP.own[999]===undefined && fishes.length===n0;
 
+    /* 12. A LANDED FISH STAYS YOURS. Releasing it at the net handed it back to
+           the host, which described it holding in its lie while the person who
+           netted it had it in their hands — so the fish swam out of the net. */
+    MP.role='guest'; MP.conn={open:true, send(o){sent.push(o);}};
+    MP.own=[]; MP.own[0]=1; sent.length=0;
+    fishes[0].land();
+    out.landingKeepsItYours = MP.own[0]===1
+      && !sent.some(o=>o.t==='free'&&o.i===0);
+    /* and putting it back in the river is what hands it over */
+    sent.length=0;
+    fishes[0].reseat();
+    out.reseatIsWhatHandsItBack = MP.own[0]===0
+      && sent.some(o=>o.t==='free'&&o.i===0);
+
+    /* 13. YOUR BANK IS YOURS. His parked fish must not be culled by your own
+           allowance — and could not be anyway, because his machine goes on
+           calling it landed and it would flip straight back. */
+    MP.own=[];
+    for(const f of fishes) f.reseat();
+    for(const f of fishes){ f.wire=true; f.state='landed'; }
+    const wasWire=fishes.map(f=>f.state);
+    fishes[0].wire=false;
+    fishes[0].land();
+    out.hisParkedFishSurviveYourCull =
+      fishes.filter((f,i)=>i>0 && f.state==='landed').length===wasWire.length-1;
+
     MP.role=wasRole; MP.conn=wasConn; MP.fishSeen=wasSeen;
-    MP.own=[]; MP.tx3=[];
+    MP.own=[]; MP.tx3=[]; MP.gear=null;
+    fishAllWake();
     for(const f of fishes) f.reseat();
     return out;
   })()`,sandbox);
-  console.log('one set of fish',sh);
+  console.log('one set of fish, both ends',sh);
   {
     const bad=Object.entries(sh).filter(([k,v])=>v===false).map(([k])=>k);
     if(bad.length) console.log('  *** SHARED FISH FAILURE:',bad.join(', '),'***');
+  }
+}
+
+/* ── WHAT HE CHOSE, ON HIS ROD ──────────────────────────────────
+   The rod bend was always right, because every node is on the wire. Nothing
+   you could PICK was: a grey barrel for a reel, no cork at all, a cream line
+   whatever he set and an amber pip for a fly. Five integers fix all of it,
+   and what this checks is that they arrive and are actually applied — a
+   setting that travels and changes nothing is the bug this whole row is. */
+if(ran('gear')){
+  const gr=vm.runInContext(`(()=>{
+    const out={};
+    const keep={}; for(const k of GEAR_ROWS) keep[k]=P[k];
+    const wasGear=MP.gear;
+
+    /* 1. the rows that travel are the ones you can pick, and nothing else */
+    out.rows=GEAR_ROWS.slice();
+    out.everyRowIsARealSetting = GEAR_ROWS.every(k=>k in P);
+    out.itIsFiveNumbers = GEAR_ROWS.length===5;
+
+    /* 2. it packs what is set, as integers */
+    P.flyPat=5; P.reelHue=2; P.gripHue=6; P.lineHue=7; P.rodHue=1;
+    const g=mpGear();
+    out.packed=g;
+    out.itSendsWhatIsSet = g.flyPat===5 && g.reelHue===2 && g.gripHue===6
+                        && g.lineHue===7 && g.rodHue===1;
+    out.itIsTaggedAsGear = g.t==='gear';
+
+    /* 3. and taking it dresses HIS rod without touching yours */
+    MP.gear=null;
+    const myFly=flyBuilt, myLineCol=lineTube.mesh.material.color.getHex();
+    const before={
+      fly:peerFlyBuilt,
+      rim:peerReelRim.color.getHex(),
+      cork:peerGrip.geometry.attributes.color.array[0],
+      line:peerLine.mesh.material.color.getHex(),
+    };
+    mpTakeGear({t:'gear', flyPat:5, reelHue:2, gripHue:6, lineHue:7, rodHue:1});
+    out.hisGearIsRemembered = !!MP.gear && MP.gear.flyPat===5;
+    out.hisFlyIsTheOneHeTiedOn = peerFlyBuilt===5;
+    out.hisFlyIsRealGeometry = peerFlyAnchor.children.length>0;
+    out.hisReelTookItsFrameMetal = peerReelRim.color.getHex()!==before.rim;
+    out.hisReelHasAFace = !!peerReelFace.map;
+    out.hisCorkIsHisPattern =
+      peerGrip.geometry.attributes.color.array[0]!==before.cork;
+    out.hisLineTookHisColour = peerLine.mesh.material.color.getHex()!==before.line;
+    out.andYoursIsUntouched = flyBuilt===myFly
+      && lineTube.mesh.material.color.getHex()===myLineCol;
+
+    /* 4. LINE COLOUR 0 MEANS LEAVE IT, on his rod as on yours — graphite is a
+          thing you choose for a reel, and a grey fly line is not a default. */
+    mpTakeGear({t:'gear', flyPat:5, reelHue:2, gripHue:6, lineHue:0, rodHue:1});
+    out.zeroIsTheShippedOrange =
+      peerLine.mesh.material.color.getHex()===cFly0.getHex();
+
+    /* 5. nonsense off the wire is clamped, not thrown */
+    let threw=false;
+    try{ mpTakeGear({t:'gear', flyPat:99, reelHue:-4, gripHue:1e9, lineHue:NaN, rodHue:'x'}); }
+    catch(e){ threw=true; }
+    out.rubbishDoesNotThrow = !threw;
+    out.andIsClampedIntoTheBox = peerFlyBuilt>=0 && peerFlyBuilt<FLIES.length;
+
+    /* 6. it is NOT teaching. teachPush changes what your friend is FISHING;
+          this only changes what you SEE of what he chose, and the two must
+          stay apart — watching somebody tie on a bugger should not tie one
+          on for you. */
+    const myPat=P.flyPat;
+    mpTakeGear({t:'gear', flyPat:0, reelHue:0, gripHue:0, lineHue:0, rodHue:0});
+    out.watchingHimDoesNotRetieYourFly = P.flyPat===myPat;
+
+    /* 7. AND IT IS ASSEMBLED AT THE RIGHT PLACE ON THE ROD. Every peer part is
+          positioned from rod node 0, and rod node 0 is NOT the hand: handTargets
+          puts handRig at the controller and then shifts the rod root BUTT_Z
+          further along, so an offset measured in handRig space has to have
+          BUTT_Z taken out of it before it hangs off node 0. Measured against
+          where the local reel and cork actually are. */
+    handTargets();
+    const q=new THREE.Quaternion().copy(_q);
+    const off=(v)=>new THREE.Vector3(v.x,v.y,v.z-BUTT_Z).applyQuaternion(q)
+      .add(new THREE.Vector3(rpos[0],rpos[1],rpos[2]));
+    const realReel=new THREE.Vector3(); reelLip.getWorldPosition(realReel);
+    const realCork=new THREE.Vector3(); corkTop.getWorldPosition(realCork);
+    const mineReel=off(reelLip.position), mineCork=off(corkTop.position);
+    out.reelOriginErr=+realReel.distanceTo(mineReel).toFixed(4);
+    out.corkOriginErr=+realCork.distanceTo(mineCork).toFixed(4);
+    out.theButtIsTakenOut = out.reelOriginErr<0.004 && out.corkOriginErr<0.004;
+    /* and what mpShow actually uses lands in the same place. It did not: the
+       peer reel and the ghost reel both added the handRig offset straight onto
+       node 0, which is BUTT_Z too far back — measured at 0.1750. */
+    const shownReel=new THREE.Vector3(rpos[0],rpos[1],rpos[2])
+      .add(new THREE.Vector3().copy(fromRodRoot(_reelOff.x,_reelOff.y,_reelOff.z))
+        .applyQuaternion(q));
+    out.peerReelErr=+realReel.distanceTo(shownReel).toFixed(4);
+    out.hisReelHangsWhereYoursDoes = out.peerReelErr<0.004;
+    /* the cork too: its geometry carries its own run up the blank, so its
+       origin is handRig's, which from the rod is node 0 less the butt */
+    const realGrip=new THREE.Vector3(); gripAnchor.getWorldPosition(realGrip);
+    const shownGrip=new THREE.Vector3(rpos[0],rpos[1],rpos[2])
+      .add(new THREE.Vector3().copy(fromRodRoot(0,0,0)).applyQuaternion(q));
+    out.peerGripErr=+realGrip.distanceTo(shownGrip).toFixed(4);
+    out.hisCorkIsWhereHisHandIs = out.peerGripErr<0.004;
+    /* and the butt really is the offset, so the number above is not an accident */
+    out.buttZ=BUTT_Z;
+    out.theOffsetIsTheButt = Math.abs(BUTT_Z-0.175)<1e-9;
+
+    /* 8. AND CHANGING FLIES IS SAID OUT LOUD, because what he is fishing is a
+          real question on a river and you cannot read it off his rod at thirty
+          metres. Only the fly: his reel design is worth seeing, not saying. */
+    MP.gear=null;
+    const said=[];
+    const realSay=say;
+    try{
+      say=(m)=>{ said.push(String(m)); };
+      mpTakeGear({t:'gear', flyPat:3, reelHue:0, gripHue:0, lineHue:0, rodHue:0});
+      out.theJoinIsQuiet = said.length===0;
+      mpTakeGear({t:'gear', flyPat:5, reelHue:0, gripHue:0, lineHue:0, rodHue:0});
+      out.said=said.slice();
+      out.aFlyChangeIsAnnounced = said.some(m=>/woolly bugger/i.test(m));
+      said.length=0;
+      mpTakeGear({t:'gear', flyPat:5, reelHue:4, gripHue:2, lineHue:3, rodHue:1});
+      out.aReelChangeIsNot = said.length===0;
+    } finally { say=realSay; }
+
+    for(const k of GEAR_ROWS) P[k]=keep[k];
+    applyTackleColours(); applyFly();
+    MP.gear=wasGear;
+    return out;
+  })()`,sandbox);
+  console.log('his tackle, on his rod',gr);
+  {
+    const bad=Object.entries(gr).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** GEAR FAILURE:',bad.join(', '),'***');
   }
 }
 

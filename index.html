@@ -6166,6 +6166,11 @@ class Trout{
     this.strikePrev=new THREE.Vector3();this.broke=false;this.strikeHead=0;
     this.risePitch=0;this.riseRoll=0;this.riseMark=0;
     this.held=false;this.inspect=new THREE.Quaternion();
+    /* SOMEBODY ELSE IS THINKING FOR THIS FISH. Set by fishTake for a fish the
+       far end owns: his heading and his hold arrive finished, because the
+       behaviour tree that would have produced them is running on his machine,
+       not this one. */
+    this.wire=false;this.wireHead=0;this.wireQ=new THREE.Quaternion();
     /* where a landed fish is parked, the way it is heading to get there, and
        the card that goes under it */
     /* where he is held up for you, where he goes afterwards, and the clock
@@ -6590,7 +6595,14 @@ class Trout{
     this.showLabel();
     /* Keep the shallows from silting up with everything you have caught. The
        oldest goes first, and one in your hands is never the one taken away. */
-    const parked=fishes.filter(f=>f.state==='landed').sort((a,b)=>a.trophy-b.trophy);
+    /* YOUR BANK IS YOURS. A fish resting in the margin because your friend
+       landed it is in state 'landed' here too, and culling it would be
+       culling somebody else's catch — it would also not work, because his
+       machine goes on describing it as landed and it would flip straight
+       back. So each angler keeps his own allowance and culls only what he
+       caught, which is consistent on both machines because each one counts
+       exactly the fish it is thinking for. */
+    const parked=fishes.filter(f=>f.state==='landed'&&!f.wire).sort((a,b)=>a.trophy-b.trophy);
     while(parked.length>MAX_TROPHY){
       const old=parked.find(f=>!f.held);
       if(!old) break;
@@ -7077,6 +7089,25 @@ class Trout{
         this.p.y+=(ty-this.p.y)*Math.min(1,dt*3);
       }
     }
+    this.draw(dt,t);
+  }
+  /* ── WHAT A FISH LOOKS LIKE ──────────────────────────────────────
+     This was the tail of update() and could only ever run for a fish THIS
+     machine was thinking for — which is how a fish your friend was fighting
+     came to be a mesh frozen in the water. The far end streamed his position
+     ten times a second, fishShow eased `this.p` toward it, and nothing ever
+     copied `this.p` into the mesh, because the one line that does that lived
+     down here behind the whole behaviour tree. So the numbers moved and the
+     trout did not.
+
+     Splitting it out is the fix and the feature at once: a fish somebody else
+     owns is drawn by exactly the same code as one of your own, and `this.wire`
+     is the only thing that changes — it says "your heading, your hold and your
+     velocity came off the wire, do not recompute them from a behaviour tree
+     that is not running." Everything else — the body wave, the wet shine, the
+     tension post, the breathing while he is landed — is shared, so it cannot
+     drift out of agreement with what you see of your own fish.               */
+  draw(dt,t){
     const m=this.mesh;
     m.visible=this.state!=='spooked';
     m.position.copy(this.p);
@@ -7087,13 +7118,19 @@ class Trout{
          being rested in the margin actually does. It used to spin on the spot
          so both flanks came round on their own — worth losing, because you can
          now walk round it instead. */
-      if(this.held) m.quaternion.copy(_inspQ).multiply(this.inspect);
+      /* HIS HANDS, NOT YOURS. A fish being held up on the far bank is turned
+         by the far end's head and the offset it caught at the grab, so the
+         finished quaternion comes over the wire rather than being rebuilt
+         here from a camera that is not the one holding him. */
+      if(this.held&&this.wire) m.quaternion.copy(this.wireQ);
+      else if(this.held) m.quaternion.copy(_inspQ).multiply(this.inspect);
       else{
         /* Held up for you he stays broadside, so what you get is the flank and
            the markings rather than a nose. On the way to the bank the nose
            follows the way he is swimming, easing round into the current over
            the last metre. */
-        const yaw=this.showT>0
+        const yaw=this.wire?this.wireHead
+          : this.showT>0
           ? this.presentHead+Math.sin(t*0.5+this.lie.x)*0.10
           : (()=>{const away=Math.max(0,Math.min(1,this.p.distanceTo(this.bank)/0.90));
                   return (this.bankHead||0)*away
@@ -7132,7 +7169,8 @@ class Trout{
        timer, and that is the direction he points. On a straight reach it is
        (-1,0), which is a heading of zero — so every venue that was right
        stays bit-for-bit right. */
-    const hd=this.state==='hooked'?Math.atan2(this.v.z,-this.v.x):
+    const hd=this.wire?this.wireHead:
+             this.state==='hooked'?Math.atan2(this.v.z,-this.v.x):
              this.state==='striking'?(this.strikeHead||0):
              (this.state==='chasing'||this.cr)?(this.cruHead||0):
              Math.atan2(-(this.fuz||0),-(this.fux||-1));
@@ -7253,6 +7291,10 @@ class Trout{
     if(this.state==='landed'&&this.label) this.showLabel();
   }
   reseat(){
+    /* back in the river, so back to whoever is hosting it — this is the one
+       place a fish stops being a catch, and therefore the one place it stops
+       being yours. A no-op when you are fishing alone. */
+    fishRelease(fishes.indexOf(this));
     this.state='holding';this.stamina=1;this.timer=0;this.evaluated=false;
     this.released=false;this.inBoat=false;this.rested=false;
     this.badT=0;this.trophy=0;this.showT=0;this.zoneReset();
@@ -7293,7 +7335,9 @@ let fishHeld=null;
 let jumpSplashT=0;      /* re-arm timer for the splash a jumping fish makes */
 /* How many caught fish may be resting in the margin at once. A venue is four
    or five fish deep, so this is the line between a bank you can go back and
-   look at and a river you have emptied into it. */
+   look at and a river you have emptied into it.
+   PER ANGLER, not per river: fishing with somebody, each of you keeps this
+   many of your own — see land(). */
 const MAX_TROPHY=2;
 let trophySeq=0;
 
@@ -7533,8 +7577,25 @@ const _ghostLinePath=new Float32Array(GLINE_N*3);
 const ghostReelMat=new THREE.MeshBasicMaterial({color:0xff3ec8,transparent:true,opacity:0.55,depthWrite:false});
 const ghostReel=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.043,0.022,14),ghostReelMat);
 ghostReel.visible=false;scene.add(ghostReel);
+/* WHERE THE ROD ROOT IS, AND WHY IT IS NOT THE HAND. handTargets puts handRig
+   at the controller and then pushes the rod's first node BUTT_Z further along
+   the blank, because the butt is behind your fist. Declared here rather than
+   beside the controller binding it used to sit next to, so that it is next to
+   the offsets derived from it — which is where it was needed and was not. */
+const BUTT_Z=0.175,NEXT_Z=BUTT_Z-ROD_SEG;
 const _reelOff=new THREE.Vector3(0,-0.076,0.20);
 const _reelOffW=new THREE.Vector3();
+/* ── THE SAME POINTS, MEASURED FROM ROD NODE 0 ────────────────────────
+   Your own reel and cork are CHILDREN of handRig, so they are placed by the
+   scene graph and are always right. A friend's rod and a ghost recording have
+   no handRig — all they have is the rod, and the rod's node 0 is the butt.
+   Both of them added the handRig-space offset straight onto node 0, which is
+   BUTT_Z too far back: the reel on every recording and on every friend's rod
+   floated 17.5 cm behind the butt cap, and nobody had noticed because a peer
+   is usually across the river and the ghost is a magenta silhouette. Measured
+   at exactly 0.175 by smoke.mjs gear, which now asserts it stays at zero. */
+const _rodLoc=new THREE.Vector3();
+function fromRodRoot(x,y,z){ return _rodLoc.set(x,y,z-BUTT_Z); }
 const _ghostQ=new THREE.Quaternion();
 const _qZ90=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),Math.PI/2);
 
@@ -7644,7 +7705,7 @@ function recShow(i){
   _ghostQ.set(f[o],f[o+1],f[o+2],f[o+3]);
   o=R_LINE;
   ghostReel.position.set(_ghostRod[0],_ghostRod[1],_ghostRod[2])
-    .add(_reelOff.clone().applyQuaternion(_ghostQ));
+    .add(fromRodRoot(_reelOff.x,_reelOff.y,_reelOff.z).applyQuaternion(_ghostQ));
   ghostReel.quaternion.copy(_ghostQ).multiply(_qZ90);   /* the reel's own local twist */
   ghostReel.visible=true;
   for(let j=0;j<GLINE_N;j++){
@@ -7906,6 +7967,11 @@ let reelHandParts=null;
 let reelFrameMat=null, seatMat=null, reelFaceMat=null, corkMat=null;
 /* set where the grip is built; repaints the ring stack for a new pattern */
 let gripRebuild=null;
+/* AND ONE FOR SOMEBODY ELSE'S ROD. gripRebuild swaps YOUR cork in place;
+   a peer needs the geometry for an arbitrary pattern without touching yours,
+   so the same ring stack is exposed as a plain builder. One definition of
+   what cork looks like, two rods wearing it. */
+let corkBuild=null;
 const knobMats=[];
 /* WHAT COLOUR EVERYTHING IS. Four rows, one function, called on a change and
    once at startup — so a preset, a URL and the phone all land here too rather
@@ -8064,10 +8130,11 @@ let reelFaceTex=reelFace(REELS[0][1]);
       mat:new THREE.Matrix4().makeTranslation(0,y,0),
       col:CORKS[0][1](t,corkA,corkB)});
   }
+  const corkPat=i=>CORKS[Math.max(0,Math.min(CORKS.length-1,Math.round(i)))][1];
   gripRebuild=(i)=>{
-    const pat=CORKS[Math.max(0,Math.min(CORKS.length-1,Math.round(i)))][1];
-    const old=grip.geometry; grip.geometry=buildCork(pat); old.dispose();
+    const old=grip.geometry; grip.geometry=buildCork(corkPat(i)); old.dispose();
   };
+  corkBuild=(i)=>buildCork(corkPat(i));
   const corkGeo=mergeGeos(corkParts);
   corkGeo.rotateX(Math.PI/2);
   const grip=new THREE.Mesh(corkGeo,
@@ -9207,7 +9274,6 @@ function bind(i,g){
 }
 bind(0,gA);bind(1,gB);
 
-const BUTT_Z=0.175,NEXT_Z=BUTT_Z-ROD_SEG;
 const _off=new THREE.Vector3(),_q=new THREE.Quaternion();
 const mouse={x:0,y:-0.35};
 addEventListener('mousemove',e=>{mouse.x=(e.clientX/innerWidth-0.5)*2.4;mouse.y=(e.clientY/innerHeight-0.5)*2.0-0.35;});
@@ -10306,6 +10372,7 @@ function boatStep(dt,fwd,ax){
      states, carried every frame, on the same rule. */
   const dy=boatFloorY()-wasY;
   for(const f of fishes){
+    if(f.wire) continue;               /* the far end says where he is, in world space */
     if(f.state!=='hooked'&&f.state!=='landed'&&!f.held) continue;
     f.p.x+=dx; f.p.y+=dy; f.p.z+=dz;
     f.present.x+=dx; f.present.y+=dy; f.present.z+=dz;
@@ -10406,6 +10473,7 @@ function loopCarry(dx,dy){
      his lie is not: he stays where he lives, which is what makes the next lap
      a second pass at the same six fish rather than a new river. */
   for(const f of fishes){
+    if(f.wire) continue;               /* not ours to move: see fishShow */
     if(f.state!=='hooked'&&f.state!=='landed'&&!f.held) continue;
     f.p.x+=dx; f.p.y+=dy;
     f.present.x+=dx; f.present.y+=dy;
@@ -10430,6 +10498,7 @@ function loopCarry(dx,dy){
 function loopFish(refX){
   const L=SC.loop; if(!L) return;
   for(const f of fishes){
+    if(f.wire) continue;               /* his lie is his to migrate, not ours */
     if(f.state==='hooked'||f.state==='landed'||f.held) continue;
     const d=f.lie.x-refX;
     let dx=0;
@@ -10633,6 +10702,12 @@ renderer.setAnimationLoop(()=>{
     if(!fishHeld&&handMode===2){
       for(const f of fishes){
         if(f.state!=='landed') continue;
+        /* HIS CATCH IS HIS TO HOLD. A fish resting on the bank because your
+           friend landed it is drawn from his machine, so taking hold of it
+           here would set a flag the next packet overwrites: you would be told
+           "got him" while the trout stayed exactly where he left it. Handing
+           a fish across would need a handover of its own, which is not this. */
+        if(f.wire) continue;
         if(_lh.distanceTo(f.p)>0.34) continue;
         fishHeld=f;f.held=true;
         /* offset = hand^-1 * fish, so the current relative pose is preserved */
@@ -11028,7 +11103,14 @@ renderer.setAnimationLoop(()=>{
       const d=Math.hypot(fx-_netP.x,fy-_netP.y,fz-_netP.z);
       if(d<P.netRadius){
         const f=hooked;
-        fishRelease(fishes.indexOf(f));
+        /* NETTING IS NOT LETTING GO. This released the fish back to nobody the
+           moment it hit the net — so the host started thinking for it again
+           and described it holding in its lie, while the guest that had just
+           netted it was holding the same trout in its hands. One of the two
+           had to lose, and it was always the person who caught it: the fish
+           snapped out of your net and swam back to its rock.
+           A landed fish stays yours. It goes back to the river in reseat(),
+           which is the one place a fish stops being a catch. */
         hooked=null;fishTension=0;fishCarried=0;rebuildMasses();pulse(0.6);
         f.land();
         say('netted a '+f.sp.label+' \u2014 '+f.lengthIn().toFixed(1)+' in, '+f.weightText(),f);
@@ -11043,7 +11125,7 @@ renderer.setAnimationLoop(()=>{
      wherever the host last said it was — see fishShow. Alone or hosting,
      fishMine is true for all of them and this is the loop it always was. */
   for(let i=0;i<fishes.length;i++) if(fishMine(i)) fishes[i].update(dt,t);
-  fishShow(dt);
+  fishShow(dt,t);
 
   /* ---- sound ---- */
   if(SND.ok){
@@ -11677,10 +11759,16 @@ function remoteData(d){
      model does not solve the hard part, it makes it harder: the elbows,
      shoulders, hips, knees and feet all still have to be invented, and a
      realistic mesh makes an invented elbow look worse than a plain one does.
-   · THE IMPORT CHAIN DOES NOT EXIST. The importmap in this file is one line.
-     A GLB means a loader, a second CDN and an asset, and index.html stops
-     being the whole shippable thing, which is the property the project is
-     built on.
+   · THE LOADER IS NOT THE HARD PART, AND SAYING IT WAS WAS WRONG. This line
+     used to read "the import chain does not exist", which is false about this
+     very file: ASSET_SLOTS already dynamically imports GLTFLoader and drops
+     in trees, rocks, five species of fish, a reel, a grip, a net and a fly.
+     The real obstacle is what kind of model a person is. loadSlot bakes each
+     mesh's world matrix and flattens it to static geometry — correct for a
+     tree, fatal for a human, because a skeleton does not survive it. A
+     humanoid worth having is a SKINNED mesh whose whole value is that it
+     bends, so using one means keeping its skeleton and driving its bones,
+     which is a different job from loading a file (see HANDOFF 5c).
    · Everything else here is procedural — the boat is lofted from fourteen
      stations, the oar blade is a generated mesh, the trout is built in code.
 
@@ -11857,7 +11945,9 @@ const MP={peer:null, conn:null, code:'', role:'off', state:'off', err:'',
           voiceWanted:false, voiceOn:false, voiceErr:'',
           /* shared fish: 0 nobody, 1 ours, 2 theirs — and when the host last
              described the river to us */
-          own:[], tx3:[], fishSeen:0};
+          own:[], tx3:[], fishSeen:0,
+          /* what tackle he is holding: the five appearance rows, as sent */
+          gear:null};
 
 /* ── his rod, his reel, his hands, his line ──────────────────────────── */
 const peerTube=new RodTube(RN,6);
@@ -11869,9 +11959,32 @@ for(let j=0;j<MPL_N;j++) peerLine.rad[j]=0.0030;
 const peerHand=new THREE.Mesh(new THREE.SphereGeometry(0.038,10,8),
   new THREE.MeshStandardMaterial({color:0xc9a882,roughness:0.75}));
 peerHand.visible=false; scene.add(peerHand);
-const peerReel=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.043,0.022,14),
-  new THREE.MeshStandardMaterial({color:0x6d747a,metalness:0.7,roughness:0.35}));
-peerReel.visible=false; scene.add(peerReel);
+/* HIS REEL IS HIS REEL. This was a bare grey cylinder, which meant the eight
+   reel designs were something only you could ever see — you picked claret,
+   your friend picked sand, and on each other's rods you both had the same
+   grey barrel. It is now the same three pieces yours is built from: a
+   machined rim and two painted face discs, with the face redrawn from HIS
+   entry in REELS by the same reelFace that paints yours. Three draw calls,
+   no geometry, and the whole design reads across the river. */
+const peerReel=new THREE.Group(); peerReel.visible=false; scene.add(peerReel);
+const peerReelFace=new THREE.MeshStandardMaterial({map:reelFace(REELS[0][1]),
+  roughness:0.30,metalness:0.60,transparent:true});
+const peerReelRim=new THREE.MeshStandardMaterial({color:0xb4bcc0,roughness:0.26,metalness:0.85});
+{
+  const cage=new THREE.Mesh(new THREE.CylinderGeometry(0.0435,0.0435,0.020,20),peerReelRim);
+  cage.rotation.z=Math.PI/2;
+  const fA=new THREE.Mesh(new THREE.CircleGeometry(0.0435,20),peerReelFace);
+  fA.rotation.y=Math.PI/2; fA.position.x=0.0104;
+  const fB=new THREE.Mesh(new THREE.CircleGeometry(0.0435,20),peerReelFace);
+  fB.rotation.y=-Math.PI/2; fB.position.x=-0.0104;
+  peerReel.add(cage,fA,fB);
+}
+/* AND HIS CORK, which he did not have at all: the peer rod was a blank with a
+   reel hanging off it and nothing to hold. corkBuild hands back the same ring
+   stack yours is made of, for whichever of the eight patterns he picked. */
+const peerGrip=new THREE.Mesh(corkBuild(0),
+  new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.93}));
+peerGrip.visible=false; scene.add(peerGrip);
 /* A WHOLE ANGLER, because "see them" is the whole request and a rod swinging
    on its own reads as a poltergeist. This was a head and a trunk for one
    round; it is now the full rig from anglerMake — hat, vest, waders, arms and
@@ -11883,9 +11996,93 @@ const myMan=anglerMake();
 const _myRH=new THREE.Vector3(), _myLH=new THREE.Vector3();
 /* and where his fly is, which is the one thing you most want to see on
    somebody else's water. It brightens while he has a fish on. */
-const peerFly=new THREE.Mesh(new THREE.SphereGeometry(0.018,8,6),
-  new THREE.MeshStandardMaterial({color:0xe0c26a,roughness:0.6}));
-peerFly.visible=false; scene.add(peerFly);
+/* THE FLY HE IS ACTUALLY FISHING, not an amber pip. Every pattern in the box
+   is a builder in FLIES, so his is built by the same call that builds yours
+   and scaled by the same size its own entry declares. Left unrotated, which
+   is exactly what the local fly does — a fly is 2 cm and matching the two
+   matters more than aiming either one down the tippet. */
+const peerFly=new THREE.Group(); peerFly.visible=false; scene.add(peerFly);
+const peerFlyAnchor=new THREE.Group(); peerFly.add(peerFlyAnchor);
+/* ringed while he is on, because a fly you cannot pick out of the water is
+   the one moment you most want to see on somebody else's line. This replaces
+   colouring and inflating the pip, which no longer exists. */
+const peerFlyRing=new THREE.Mesh(new THREE.TorusGeometry(0.030,0.0035,6,16),
+  new THREE.MeshBasicMaterial({color:0xff7a3c,transparent:true,opacity:0.85,depthWrite:false}));
+peerFlyRing.rotation.x=-Math.PI/2; peerFlyRing.visible=false; peerFly.add(peerFlyRing);
+/* ── WHAT HE CHOSE, ON HIS ROD ───────────────────────────────────
+   The rod's BEND was always right — every node is on the wire, so a stiffer
+   or longer rod already moved differently. Everything you could pick in the
+   tackle menu was not: his reel was a grey barrel, his cork did not exist,
+   his line was cream whatever he set, and his fly was an amber pip. Five
+   rows fix all of it, and they are five integers.
+
+   NOT IN THE POSE PACKET. These change when somebody opens a menu, not
+   seventy-two times a second, so they go as an object once a second and once
+   on connect — the same shape the river and the teaching rows already use.
+   Both ends send: this is not the host describing the world, it is two people
+   describing themselves.
+
+   AND IT IS NOT TEACHING. teachPush changes what your friend is FISHING;
+   this only changes what you SEE of what he chose. The two are deliberately
+   separate — watching somebody tie on a bugger should not tie one on for you.  */
+const GEAR_ROWS=['flyPat','reelHue','gripHue','lineHue','rodHue'];
+function mpGear(){
+  const o={t:'gear'};
+  for(const k of GEAR_ROWS) o[k]=Math.round(P[k]||0);
+  return o;
+}
+let peerFlyBuilt=-1;
+function mpTakeGear(d){
+  const first=!MP.gear;
+  const g=MP.gear||{};
+  let any=false, flyWas=g.flyPat;
+  for(const k of GEAR_ROWS){
+    const v=Math.round(d[k]||0);
+    if(g[k]!==v){ g[k]=v; any=true; }
+  }
+  MP.gear=g;
+  if(!any) return;
+  peerGearShow();
+  /* THE ONE ROW WORTH SAYING OUT LOUD. What he is fishing is a real question
+     on a river and you can no longer read it off his rod at thirty metres —
+     his reel design and his cork are only worth seeing, not announcing. Not
+     on the first packet: that arrives in the middle of connecting, alongside
+     everything else the join already says. */
+  if(!first&&g.flyPat!==flyWas){
+    const i=Math.max(0,Math.min(FLIES.length-1,g.flyPat|0));
+    say('your friend tied on '+FLIES[i][0].toLowerCase());
+  }
+}
+/* one place that dresses the peer rod, so a fresh connection and a mid-session
+   menu change land in exactly the same code */
+function peerGearShow(){
+  const g=MP.gear; if(!g) return;
+  /* the blank, at his hue */
+  {const H=TACKLE_HUES[Math.max(0,Math.min(7,g.rodHue|0))];
+   peerTube.recolour(H[1],H[2]);}
+  /* the reel: his face repainted, his frame metal on the rim */
+  {const D=REELS[Math.max(0,Math.min(REELS.length-1,g.reelHue|0))][1];
+   if(peerReelFace.map) peerReelFace.map.dispose();
+   peerReelFace.map=reelFace(D); peerReelFace.needsUpdate=true;
+   peerReelRim.color.set(D[1]);}
+  /* the cork: his ring pattern, rebuilt rather than tinted */
+  {const old=peerGrip.geometry; peerGrip.geometry=corkBuild(g.gripHue|0); old.dispose();}
+  /* the fly line. Same rule the local one uses, including 0 meaning "leave it
+     the orange it shipped" rather than turning it grey. */
+  {const H=TACKLE_HUES[Math.max(0,Math.min(7,g.lineHue|0))];
+   if((g.lineHue|0)===0) peerLine.mesh.material.color.copy(cFly0);
+   else peerLine.mesh.material.color.setHSL(H[1],Math.min(0.95,H[2]+0.25),0.56);}
+  /* and the fly itself, built by its own builder */
+  {const i=Math.max(0,Math.min(FLIES.length-1,g.flyPat|0));
+   if(i!==peerFlyBuilt){
+     peerFlyBuilt=i;
+     while(peerFlyAnchor.children.length){
+       const c=peerFlyAnchor.children.pop(); disposeTree(c);
+     }
+     peerFlyAnchor.add(FLIES[i][2]());
+     peerFlyAnchor.scale.setScalar(FLIES[i][1].size);
+   }}
+}
 const _mpRod=new Float32Array(RN*3), _mpPath=new Float32Array(MPL_N*3);
 const _mpRH=new THREE.Vector3(), _mpLH=new THREE.Vector3();
 const _mpP=new THREE.Vector3(), _mpQ=new THREE.Quaternion(), _mpF=new THREE.Vector3();
@@ -11969,7 +12166,7 @@ const mpNow=()=>(typeof performance!=='undefined'&&performance.now)?performance.
    milliseconds of lag — invisible on somebody else's backcast. */
 function mpHide(){
   peerTube.mesh.visible=false; peerLine.mesh.visible=false;
-  peerHand.visible=false; peerReel.visible=false;
+  peerHand.visible=false; peerReel.visible=false; peerGrip.visible=false;
   peerMan.g.visible=false; peerFly.visible=false;
 }
 /* Called once a frame: take my own head pose while it is legal to read, then
@@ -12012,17 +12209,22 @@ function mpShow(dt){
   o=MP_QUAT;
   _mpQ.set(s[o],s[o+1],s[o+2],s[o+3]).normalize();
   peerReel.position.set(_mpRod[0],_mpRod[1],_mpRod[2])
-    .add(_mpP.copy(_reelOff).applyQuaternion(_mpQ));
+    .add(_mpP.copy(fromRodRoot(_reelOff.x,_reelOff.y,_reelOff.z)).applyQuaternion(_mpQ));
   peerReel.quaternion.copy(_mpQ).multiply(_qZ90);
   peerReel.visible=true;
+  /* the cork's geometry already carries its own run up the blank, so its
+     origin IS handRig's — which from the rod is node 0 less the butt */
+  peerGrip.position.set(_mpRod[0],_mpRod[1],_mpRod[2])
+    .add(_mpP.copy(fromRodRoot(0,0,0)).applyQuaternion(_mpQ));
+  peerGrip.quaternion.copy(_mpQ);
+  peerGrip.visible=true;
   o=MP_LINE;
   for(let j=0;j<MPL_N*3;j++) _mpPath[j]=s[o+j];
   peerLine.update(_mpPath); peerLine.mesh.visible=true;
   /* the fly is the first point of the chain, and it flares when he is on */
   const on=s[MP_INFO+1]>0.5;
   peerFly.position.set(_mpPath[0],_mpPath[1],_mpPath[2]);
-  peerFly.material.color.setHex(on?0xff7a3c:0xe0c26a);
-  peerFly.scale.setScalar(on?1.8:1.0);
+  peerFlyRing.visible=on;
   peerFly.visible=true;
 }
 
@@ -12056,6 +12258,9 @@ function mpAttach(conn){
        the row before connecting does not have to touch it again */
     MP.taught={};
     mpSendObj({t:'follow', on:P.teachFollow>0.5});
+    /* dress his rod before the first pose frame lands, so it is never briefly
+       the grey barrel it used to be forever */
+    mpSendObj(mpGear());
     mpTimerStart();
     voiceTry();
     say('your friend is here');
@@ -12068,7 +12273,10 @@ function mpDrop(conn){
   if(MP.conn!==conn) return;
   MP.conn=null; MP.last=null; MP.shown=null;
   MP.follower=false; MP.taught={}; MP.theirDrift=[0,0,0];
-  MP.own=[]; MP.tx3=[]; MP.fishSeen=0;
+  MP.own=[]; MP.tx3=[]; MP.fishSeen=0; MP.gear=null;
+  /* every fish is ours to think for again — otherwise the ones he was
+     holding stay frozen where the last packet left them, forever */
+  fishAllWake();
   voiceDrop();
   mpTimerStop(); mpHide();
   if(MP.state!=='error') MP.state=MP.peer?'ready':'off';
@@ -12106,8 +12314,10 @@ function mpData(d){
     return;
   }
   if(d.t==='teach') teachTake(d);
+  /* what he is holding, which both ends send about themselves */
+  if(d.t==='gear') mpTakeGear(d);
   /* the fish, and who is allowed to move which */
-  if(d.t==='fish'&&MP.role==='guest') fishTake(d.a);
+  if(d.t==='fish') fishTake(d.a);
   if(d.t==='claim'||d.t==='free'||d.t==='own') fishOwnMsg(d);
 }
 function mpSendObj(o){
@@ -12123,8 +12333,14 @@ function mpSend(){
   try{ c.send(mpPack().buffer); MP.tx++; }catch(e){}
   if(MP.role==='host'){
     if((++MP.beat%MP_HZ)===0) mpSendObj(mpRiver());
-    if((MP.beat%Math.round(MP_HZ/FISH_HZ))===0) mpSendObj({t:'fish', a:fishPack()});
-  }
+  } else ++MP.beat;
+  /* THE FISH, FROM WHICHEVER END YOU ARE. This was inside the host branch,
+     so a guest's fish were invisible to the person hosting the water — which
+     is the half of "show me what you caught" that was missing. Each end
+     describes only what it is thinking for; fishPack marks the rest. */
+  if((MP.beat%Math.round(MP_HZ/FISH_HZ))===0) mpSendObj({t:'fish', a:fishPack()});
+  /* the tackle rows, from whichever end you are, once a second */
+  if((MP.beat%MP_HZ)===7) mpSendObj(mpGear());
   /* and anything the teacher has changed since the last tick */
   teachPush(false);
 }
@@ -12145,7 +12361,10 @@ function mpStop(){
   MP.conn=null; MP.peer=null; MP.code=''; MP.role='off'; MP.state='off';
   MP.last=null; MP.shown=null; MP.beat=0;
   MP.follower=false; MP.taught={}; MP.theirDrift=[0,0,0];
-  MP.own=[]; MP.tx3=[]; MP.fishSeen=0;
+  MP.own=[]; MP.tx3=[]; MP.fishSeen=0; MP.gear=null;
+  /* every fish is ours to think for again — otherwise the ones he was
+     holding stay frozen where the last packet left them, forever */
+  fishAllWake();
   voiceOff();
   mpHide();
   say('fishing alone again');
@@ -12255,67 +12474,138 @@ function mpJoin(code){
    NONE OF THIS RUNS UNLESS YOU ARE A CONNECTED GUEST. Fishing alone, and
    hosting, are the paths the whole game is tuned on and they are untouched.  */
 const FISH_HZ=10;
+/* A GUEST HAS NOT SEEN THE RIVER until the host has described it once: before
+   that it is still fishing its own copy, which is right, and this is the gate
+   that says so. */
 const fishRemote=()=>MP.role==='guest'&&MP.conn&&MP.conn.open&&MP.fishSeen>0;
-/* who is entitled to simulate fish `i` right now */
+const fishLinked=()=>!!(MP.conn&&MP.conn.open);
+/* ── WHO IS THINKING FOR WHICH FISH ────────────────────────────────
+   This returned true for the host unconditionally, which meant a fish it had
+   just handed to a guest went on living a second life at home: the guest
+   fought it and landed it while the host watched the same trout hold in its
+   lie and go on feeding. Two divergent simulations of one fish, and the
+   version you saw depended on which headset you were wearing.
+   The rule is the same for both ends now — you run what has not been given
+   away — and it is the ONLY place that decides it. */
 function fishMine(i){
-  if(!fishRemote()) return true;                 /* alone, or the host: all of them */
-  return MP.own[i]===1;                          /* a guest owns only what it claimed */
+  if(!fishLinked()) return true;                 /* alone: all of them */
+  if(MP.role==='host') return MP.own[i]!==2;     /* everything but what we granted */
+  return fishRemote()?MP.own[i]===1:true;        /* a guest, once it has heard the river */
 }
-/* the host's picture of the river, as a flat array: six numbers a fish */
+/* ── WHAT I CAN TELL YOU ABOUT THE FISH ──────────────────────────
+   Ten numbers a fish, and BOTH ENDS SEND IT. It used to be the host alone,
+   which is why the whole point of fishing together — look what I just caught
+   — did not work in the one direction that mattered: a guest's fish were
+   invisible to the person hosting the water.
+   A fish I am not thinking for gets a state of -1, which means "not mine to
+   describe" and is skipped at the other end. That used to be six zeros, and
+   zero is a valid state (holding at the origin); it only worked because the
+   receiver happened to skip those fish for a different reason.
+   The QUATERNION is here for one case: a fish held up in somebody's hands is
+   turned by their head and the twist they caught at the grab, and neither of
+   those exists on this machine. The heading is the one that is DRAWN rather
+   than the cruise heading — one number that is right in every state instead
+   of one that is right while he is cruising. */
 function fishPack(){
   const a=[];
   for(let i=0;i<fishes.length;i++){
-    const f=fishes[i];
-    /* a fish the far end is fighting is THEIRS — do not send it back at them */
-    if(MP.own[i]===2){ a.push(0,0,0,0,0,0); continue; }
+    if(!fishMine(i)){ a.push(0,0,0,-1,0,0,0,0,0,1); continue; }
+    const f=fishes[i], q=f.mesh.quaternion;
     a.push(+f.p.x.toFixed(2),+f.p.y.toFixed(2),+f.p.z.toFixed(2),
            FISH_STATE.indexOf(f.state),
            (f.feeding?1:0)+(f.held?2:0)+(f.inBoat?4:0),
-           +(f.cruHead||0).toFixed(2));
+           +f.mesh.rotation.y.toFixed(2),
+           +q.x.toFixed(3),+q.y.toFixed(3),+q.z.toFixed(3),+q.w.toFixed(3));
   }
   return a;
 }
+const FISH_ST=10;                                /* numbers per fish on the wire */
 const FISH_STATE=['holding','striking','hooked','chasing','spooked','landed'];
 function fishTake(a){
   if(!a||!a.length) return;
   MP.fishSeen=mpNow();
-  for(let i=0;i<fishes.length&&i*6+5<a.length;i++){
-    if(MP.own[i]===1) continue;                  /* mine to run, not theirs to tell */
-    const f=fishes[i], o=i*6;
+  for(let i=0;i<fishes.length&&i*FISH_ST+FISH_ST-1<a.length;i++){
+    if(fishMine(i)) continue;                    /* mine to run, not theirs to tell */
+    const f=fishes[i], o=i*FISH_ST;
     if(a[o+3]<0) continue;                       /* a fish they are not describing */
     MP.tx3[i]=MP.tx3[i]||new THREE.Vector3();
     MP.tx3[i].set(a[o],a[o+1],a[o+2]);
+    /* HIS BEHAVIOUR TREE IS NOT RUNNING HERE, so the drawn heading, the hold
+       and the velocity all come from him. */
+    f.wire=true;
     const st=FISH_STATE[a[o+3]];
-    if(st&&f.state!==st&&st!=='hooked') f.state=st;
+    /* 'hooked' IS allowed through now. It used to be filtered out, which was
+       right while only the host ever spoke — nobody could be told about a
+       fight but the person having it. It is the whole thing you want to see
+       on somebody else's line, and for a fish this machine is not simulating
+       the state only ever reaches the draw path. */
+    if(st&&f.state!==st){
+      f.state=st;
+      /* a fish that has just been landed at the far end gets his card, so what
+         is resting in the margin over there reads as a trout of a size and a
+         species rather than an anonymous fish. Both machines build the same
+         card from his own length and species, so there is nothing to send. */
+      if(st==='landed') f.showLabel(); else f.hideLabel();
+    }
     const fl=a[o+4]|0;
     f.feeding=!!(fl&1);
-    f.cruHead=a[o+5];
+    f.held=!!(fl&2);
+    f.inBoat=!!(fl&4);
+    f.wireHead=a[o+5];
+    f.wireQ.set(a[o+6],a[o+7],a[o+8],a[o+9]).normalize();
   }
 }
-/* eased, not snapped — ten packets a second against seventy-two frames */
-function fishShow(dt){
-  if(!fishRemote()) return;
-  const k=Math.min(1,1-Math.exp(-dt*9));
+/* ── AND DRAWING THE ONES SOMEBODY ELSE OWNS ───────────────────────
+   This eased `f.p` toward the wire and stopped, which drew nothing: the one
+   line that copies a fish's position into its mesh lived at the tail of
+   update(), and update() is exactly what does not run for a fish somebody
+   else owns. So the fish were in the right place and the meshes were frozen
+   where they last happened to be. See Trout.draw.
+   The velocity is DIFFERENCED from the eased position rather than sent: it is
+   only read to point a hooked fish along its run and pitch it into a dive,
+   and the position stream already contains that. */
+const _fishV=new THREE.Vector3();
+function fishShow(dt,t){
+  if(!fishLinked()) return;
+  const k=Math.min(1,1-Math.exp(-dt*9)), inv=dt>1e-4?1/dt:0;
   for(let i=0;i<fishes.length;i++){
-    if(MP.own[i]===1) continue;
-    const t=MP.tx3[i];
-    if(!t) continue;
+    if(fishMine(i)) continue;
+    const tx=MP.tx3[i];
+    if(!tx) continue;
     const f=fishes[i];
-    f.p.x+=(t.x-f.p.x)*k; f.p.y+=(t.y-f.p.y)*k; f.p.z+=(t.z-f.p.z)*k;
+    _fishV.set(tx.x-f.p.x,tx.y-f.p.y,tx.z-f.p.z).multiplyScalar(k);
+    f.p.add(_fishV);
+    f.v.copy(_fishV).multiplyScalar(inv);
+    f.draw(dt,t);
   }
 }
 /* CLAIMING. The take test runs on both machines because it has to be instant;
    the host arbitrates, because two people can in principle cover the same
    fish at the same moment. A guest hooks optimistically and is told to let go
    if it lost the race — which is the right way round: the rare case pays. */
+/* OURS TO THINK FOR AGAIN. A fish that has been drawn off the wire has a
+   behaviour tree that has not run for however long the far end held it, so
+   the flag has to come off in ONE place — every route back to local control
+   ends here rather than each remembering to clear it. */
+function fishWake(i){
+  const f=fishes[i]; if(!f) return;
+  f.wire=false; f.v.set(0,0,0);
+  /* AND NOBODY IS HOLDING HIM. `held` arrives off the wire, and the branch it
+     drives pins the fish to `_inspP` — YOUR hand. So a friend who dropped out
+     mid-admire handed back a trout that then glued itself to your fist and
+     followed you up the river. The only hand in this headset is fishHeld, so
+     if that is not him, he is not in a hand. */
+  if(f.held&&fishHeld!==f) f.held=false;
+}
+function fishAllWake(){ for(let i=0;i<fishes.length;i++) fishWake(i); }
 function fishClaim(i){
   if(!MP.conn||!MP.conn.open) return true;       /* alone: it is yours */
   if(MP.role==='host'){
     if(MP.own[i]===2) return false;              /* they already have it */
-    MP.own[i]=1; mpSendObj({t:'own', i, v:0});
+    MP.own[i]=1; fishWake(i); mpSendObj({t:'own', i, v:0});
     return true;
   }
-  MP.own[i]=1; mpSendObj({t:'claim', i});
+  MP.own[i]=1; fishWake(i); mpSendObj({t:'claim', i});
   return true;
 }
 function fishRelease(i){
@@ -12334,10 +12624,12 @@ function fishOwnMsg(d){
     MP.own[i]=2; mpSendObj({t:'own', i, v:2});
     return;
   }
-  if(d.t==='free'){ if(MP.own[i]===2) MP.own[i]=0; return; }
+  /* he has let go, so it is the host's water again and the host's fish to
+     think for — which now means clearing the wire flag, not just the tally */
+  if(d.t==='free'){ if(MP.own[i]===2){ MP.own[i]=0; fishWake(i); } return; }
   if(d.t==='own'){
     /* the host's word. v:2 means it is ours, anything else means let go. */
-    if(d.v===2) MP.own[i]=1;
+    if(d.v===2){ MP.own[i]=1; fishWake(i); }
     else if(MP.own[i]===1){
       MP.own[i]=0;
       if(hooked===fishes[i]){

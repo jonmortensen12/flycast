@@ -225,6 +225,29 @@ the URL carries `all=1`, which repairs the links already in circulation.
 `Copy settings` is the one path that passes `all=1` and the complete tuning,
 because that is the button for handing someone the river you set up.
 
+### Three ways a setting can reach another person, and why they are separate
+
+The same ownership split decides all three, so they belong next to each other:
+
+| | what travels | direction | changes their fishing? |
+|---|---|---|---|
+| `mpRiver` | everything `venueOwned()` — the water itself | host → guest | yes, they are standing in your river |
+| `teachPush` | the personal half: fly, fish power, chase numbers, tippet… | teacher → learner, and the **learner** opts in | yes, that is the point |
+| `gear` | `flyPat`, `reelHue`, `gripHue`, `lineHue`, `rodHue` | both ways, always | **no** |
+
+`gear` is display-only and that is deliberate. It exists because the eight reel
+designs, the eight cork patterns, the eight line colours and the six flies were
+things only *you* could ever see: on each other's rods you both had a grey
+barrel, no cork, a cream line and an amber pip. Watching somebody tie on a
+bugger should not tie one on for you — that is what `Follow my friend` is for,
+and it is opt-in for exactly that reason. The two paths share the rows and
+nothing else; `smoke.mjs gear` asserts that taking a gear packet leaves your own
+`P.flyPat` alone.
+
+Note that `SEEDED` does not apply here. The sink rows are seeded so a guest owns
+its own line; appearance rows are personal, never in `VENUE_BASE`, and so they
+persist across a venue switch untouched by any of this.
+
 ## The pond
 
 `SCENES.pond` sets `cruise`, `chase` and `holdDeep`, which turn on three things
