@@ -190,6 +190,15 @@ is interesting; treat revenue as a surprise.
 players do not demand it. The competition sells scenery and calm. A domain expert with an
 ergonomics background building the thing a fly fisher actually wants is a defensible moat.
 
+**The trainer does not need a store at all.** A storefront that sells licence keys
+(Polar, Payhip — both have a verify API) in front of a Cloudflare Worker that checks one
+sells a *hosted URL*, which is what a fly shop or a casting instructor actually wants: no
+sideloading, no headset-specific build, works the moment they open it. It costs roughly 5-11%
+all-in against Meta's 30%, and it is the only channel on this page that does not require the
+Horizon Store's review, the PWA gap above, or a keystore you must never lose. The
+architecture is written up in the family-smash repo's `SELLING.md`; the flycast version is
+simpler, because there is no second device and no television remote to type on.
+
 **The angle worth pursuing if money mattered:** do not sell it as a game. Fly casting is
 *taught*, expensively, and cannot be practised indoors in winter. A casting trainer with real
 rod loading, drag-free drift scoring and instrumented feedback is a different product with a
