@@ -405,7 +405,7 @@ const ARGS=process.argv.slice(2);
 const ONLY=ARGS.filter(a=>a[0]!=='-');
 const SECTIONS=['water','perf','specks','menu','venue','fight','boat','settings',
                 'scenery','sink','trophy','teleport','splash','guide','fish',
-                'remote','species','markers','zone','flies','falls','sunk','box','slack','mp'];
+                'remote','species','markers','zone','flies','falls','sunk','box','slack','mp','body','teach','share'];
 const ran=n=>!ONLY.length||ONLY.includes(n);
 if(ARGS.includes('--list')){
   console.log('sections: '+SECTIONS.join(' '));
@@ -1096,70 +1096,140 @@ if(ran('scenery')){
 }
 if(ran('sink')){
   const sink=vm.runInContext(`(()=>{
-    const was={f:P.flySink,t:P.tipSink,l:P.lineSink,pat:P.flyPat};
-    /* THREE MATERIALS, THREE NUMBERS. This case used to drive the whole rig
-       off flySink alone, because that is all there was: the leader sank at
-       it and the belly at two thirds of it, hard-wired. The one rig a nymph
-       fisherman actually uses - a FLOATING line with a weighted fly - could
-       not be expressed, and it was asked for by name from the water. So the
-       claims are now about which part of the rig each number moves. */
-    /* pick a node inside the tippet, one further up the leader, and one out
-       in the fly line */
+    /* SIMULATED, NOT INSPECTED. Every previous version of this case called
+       sinkRate() and asserted what the function returned. That is why a
+       switch shipped twice: the rate was right both times and the line still
+       would not sink, because the film was writing POSITIONS 432 times a
+       second and nothing here ever looked at where a node ended up.
+
+       It then took three goes to measure it honestly, and the two failures
+       are worth recording because both looked like physics and were neither.
+       Laying the rig with resetCast and a settle put it on the BANK — the
+       guide rules draw line in when nothing is casting, lineOut fell from 9 m
+       to 4, and the depth being reported was the height of a field. Placing
+       the nodes on open water and pinning the length fixed that and left a
+       second one: nine metres of line hanging from a rod tip a metre above
+       the water is a catenary, and its shape is decided by tautness and the
+       rod, so a node four metres along can be LIFTED as the far end sinks.
+
+       So there are two kinds of claim here now.
+       · The rate itself is a per-node promise, so it is measured on one node
+         in open water, driven through exactly the substep the solver runs.
+         No rod, no span, no geometry to argue with.
+       · Anything about the SHAPE of a rig needs the whole line, so those are
+         measured DIFFERENTIALLY — the same node in the same geometry, one rig
+         against another — which cancels the catenary instead of fighting it. */
+    const loop=renderer._loop;
+    /* PUT THE WORLD BACK. These sections share one river and this one needs
+       the pond — deep still water, where a sink rate is the only thing moving
+       a node. Leaving it there threw the teleport case two hundred lines
+       later on OBST[0], because the pond has no boulders. A section that
+       moves the world owns putting it back. */
+    const was={f:P.flySink,t:P.tipSink,l:P.lineSink,pat:P.flyPat,venue:SCENE_ID};
+    applyVenue('pond'); applyPreset(SHIPPED);
+    P.flySink=0; P.tipSink=0; P.lineSink=0;
+    const settle=n=>{for(let i=0;i<n;i++) loop();};
+    settle(30);
+    const out={};
+
+    /* ── ONE NODE, THE REAL FUNCTION ─────────────────────────────────────
+       Put it on the film in the middle of the pond and run the game's own
+       substep on it: gravity, air drag, waterAndGround, integrate. This is
+       what the dial promises, so this is what is checked. */
+    const drop=(i,sec)=>{
+      const p=i*3, x=0, z=CZ;
+      pos[p]=x; pos[p+2]=z; pos[p+1]=filmY(x,z,simTime)+0.010;
+      vel[p]=0; vel[p+1]=0; vel[p+2]=0;
+      const h=1/(72*6), n=Math.round(sec*72*6);
+      for(let k=0;k<n;k++){
+        vel[p+1]-=9.81*h;
+        airDrag(i,h);
+        waterAndGround(i,h,simTime);
+        pos[p]+=vel[p]*h; pos[p+1]+=vel[p+1]*h; pos[p+2]+=vel[p+2]*h;
+      }
+      return {d:+(filmY(pos[p],pos[p+2],simTime)-pos[p+1]).toFixed(3),
+              v:+vel[p+1].toFixed(3)};
+    };
+    /* a node in the tippet, one up the leader, one out in the belly */
     let iTip=-1,iLead=-1,iBelly=-1;
     for(let i=0;i<nAct;i++){
       const a=sArc(i);
-      if(iTip<0&&a>P.tippetLen*0.3&&a<P.tippetLen*0.6) iTip=i;
-      if(iLead<0&&a>leaderTot*0.5) iLead=i;
-      if(iBelly<0&&a>leaderTot+1.0) iBelly=i;
+      if(iTip<0&&a>P.tippetLen*0.4) iTip=i;
+      if(iLead<0&&a>leaderTot*0.6) iLead=i;
+      if(iBelly<0&&a>leaderTot+1.2) iBelly=i;
     }
-    const rate=i=>+sinkRate(i).toFixed(3);
-    const all=()=>{let m=0;for(let i=0;i<nAct;i++)m=Math.max(m,sinkRate(i));return +m.toFixed(4);};
-    const out={leader:+leaderTot.toFixed(2), tippet:+P.tippetLen.toFixed(2),
-               nodes:{tip:iTip,lead:iLead,belly:iBelly}};
+    out.nodes={tip:iTip,lead:iLead,belly:iBelly};
+    const belly=(l,sec)=>{P.flySink=0;P.tipSink=0;P.lineSink=l;return drop(iBelly,sec);};
 
-    /* 1. a dry-fly reach: nothing anywhere on the line has any sink at all */
-    P.flySink=0; P.tipSink=0; P.lineSink=0;
-    out.dryAny=all();
-    out.aDryReachIsUntouched = out.dryAny===0;
+    /* 1. A FLOATING LINE FLOATS, and not by failing to sink: 0 on the dial is
+          buoyant, so a node held under comes back UP. */
+    const float0=belly(0,3);
+    out.float0=float0;
+    out.aFloatingLineStaysUp = float0.d<0.02 && float0.v>=-0.001;
 
-    /* 2. A FLOATING LINE WITH A SINKING FLY, which is the point of the split.
-       The fly goes down at its own rate and drags the tippet after it, easing
-       off along the tippet so there is no hinge at the fly - and the fly line
-       does not sink at all. */
-    P.flySink=0.32; P.tipSink=0; P.lineSink=0;
-    out.floatLine={fly:rate(0), tip:rate(iTip), lead:rate(iLead), belly:rate(iBelly)};
-    out.theFlyGoesDownOnItsOwn = out.floatLine.fly>0.3;
-    out.itTakesTheTippetWithIt = out.floatLine.tip>0.05
-                                 && out.floatLine.tip<out.floatLine.fly;
-    out.andTheLineStaysUp = out.floatLine.lead===0 && out.floatLine.belly===0;
+    /* 2. AND THE DIAL IS A DIAL, NOT A SWITCH. The whole point of the rework.
+          0.28 used to pin the line ten millimetres down and 0.30 dropped it
+          forever, with nothing in between. Each setting now has to end up
+          measurably deeper than the one below it, AND settle at the rate it
+          was asked for. */
+    const a=belly(0.03,3), b=belly(0.10,3), c=belly(0.20,3);
+    out.at003=a; out.at010=b; out.at020=c;
+    out.itIsGradedNotSwitched = a.d>0.03 && b.d>a.d*2 && c.d>b.d*1.6;
+    /* terminal velocity is the number on the dial, within a few percent */
+    const err=(g,r)=>Math.abs(-g.v-r)/r;
+    out.rateErr=[+err(a,0.03).toFixed(3),+err(b,0.10).toFixed(3),+err(c,0.20).toFixed(3)];
+    out.theRateIsTheRate = out.rateErr.every(e=>e<0.15);
 
-    /* 3. a sinking leader on a floating line: all the nylon goes, the belly
-       stays on top where you can still mend it */
-    P.flySink=0; P.tipSink=0.32; P.lineSink=0;
-    out.sinkLeader={tip:rate(iTip), lead:rate(iLead), belly:rate(iBelly)};
-    out.aSinkingLeaderTakesAllTheNylon = out.sinkLeader.tip===0.32
-                                         && out.sinkLeader.lead===0.32;
-    out.andLeavesTheBellyOnTop = out.sinkLeader.belly===0;
+    /* 3. the nylon and the belly are separate dials */
+    P.flySink=0; P.tipSink=0.08; P.lineSink=0;
+    const nyl=drop(iLead,3), bel=drop(iBelly,3);
+    out.sinkLeader={lead:nyl.d, belly:bel.d};
+    out.aSinkingLeaderTakesTheNylonDown = nyl.d>0.10;
+    out.andLeavesTheBellyFloating = bel.d<0.02;
 
-    /* 4. the Beaver Pond's own rig, which is what the venue ships and has to
-       behave exactly as it did when one number drove both: leader 0.32, belly
-       0.21, and the leader beating the belly down is what makes the curve */
-    P.flySink=0; P.tipSink=0.32; P.lineSink=0.21;
-    out.pond={lead:rate(iLead), belly:rate(iBelly)};
-    out.theLeaderOutsinksTheBelly = out.pond.lead>out.pond.belly*1.2;
-    /* NO WAITING. The old front needed leaderTot/(flySink*2.2) seconds - about
-       five at these numbers - before the far end of the leader was released.
-       Every node is live on the first frame now. */
-    out.itStartsAtOnce = rate(0)>0 && out.pond.lead>0 && out.pond.belly>0;
-    /* the rate is a RATE, not an acceleration: it must not depend on how long
-       the node has been under, which is what the old constant shove did */
-    out.itIsATerminalRate = Math.abs(sinkRate(iLead)-sinkRate(iLead))<1e-12
-                            && out.pond.lead<=P.tipSink+1e-9;
+    /* ── AND THE SHAPE OF A RIG, MEASURED AGAINST ANOTHER RIG ────────────
+       The catenary is common to both, so the difference is the tackle. */
+    const LOUT=9;
+    const pin=()=>{ lineOut=LOUT; offSpool=LOUT+rodArc+2.2; };
+    const soak=n=>{ for(let i=0;i<n;i++){ pin(); loop(); } };
+    const rig=(f,t,l,sec)=>{
+      P.flySink=f; P.tipSink=t; P.lineSink=l;
+      for(const q of fishes) q.reseat();
+      resetCast(); pin(); settle(10); pin();
+      const T=(RN-1)*3, away=Math.sign(CZ-rpos[T+2])||-1;
+      for(let i=0;i<nAct;i++){
+        const arc=sArc(i);
+        if(arc>LOUT) break;
+        const d=LOUT-arc, q=i*3;
+        const x=rpos[T], z=rpos[T+2]+away*d;
+        pos[q]=x; pos[q+2]=z; pos[q+1]=filmY(x,z,simTime)+0.010;
+        vel[q]=0; vel[q+1]=0; vel[q+2]=0;
+      }
+      soak(Math.round(sec*72));
+      const at=i=>+(filmY(pos[i*3],pos[i*3+2],simTime)-pos[i*3+1]).toFixed(3);
+      return {fly:at(0), tip:at(iTip), lead:at(iLead), belly:at(iBelly)};
+    };
+    const dry=rig(0,0,0,4);
+    out.dry=dry;
+    /* a dry rig is on the surface from end to end, which is the path the game
+       is tuned on and the one absolute claim the geometry does allow */
+    out.aDryRigStaysOnTop = dry.fly<0.05&&dry.tip<0.05&&dry.lead<0.05&&dry.belly<0.05;
 
-    /* 5. AND THE FLY BOX CARRIES ITS OWN WEIGHT. the spec's own sink was declared for the
-       nymph and the bugger when FLIES was written and never read by applyFly,
-       so the two weighted patterns in the box fished exactly like the four
-       dries. Changing pattern has to set it. */
+    /* 4. A WEIGHTED FLY ON A FLOATING LEADER TAKES THE TIPPET WITH IT, and it
+          does it through the CONSTRAINT CHAIN rather than through a taper
+          term written into sinkRate. This is the woolly-bugger case reported
+          from the water. Differential: how much deeper than the dry rig. */
+    const bug=rig(0.22,0,0,4);
+    out.bugger=bug;
+    out.buggerVsDry={fly:+(bug.fly-dry.fly).toFixed(3), tip:+(bug.tip-dry.tip).toFixed(3),
+                     lead:+(bug.lead-dry.lead).toFixed(3), belly:+(bug.belly-dry.belly).toFixed(3)};
+    out.theWeightedFlyGoesDown = out.buggerVsDry.fly>0.06;
+    out.itTakesTheTippetWithIt = out.buggerVsDry.tip>0.03;
+    /* and it fades out up the leader instead of stopping at one node: the
+       tippet is pulled down more than the leader above it */
+    out.itFadesOutUpTheLeader = out.buggerVsDry.tip>out.buggerVsDry.lead;
+
+    /* 5. THE FLY BOX CARRIES ITS OWN WEIGHT */
     P.flySink=0; P.tipSink=0; P.lineSink=0;
     const bySink={};
     for(let i=0;i<FLIES.length;i++){ P.flyPat=i; applyFly(); bySink[FLIES[i][0]]=+P.flySink.toFixed(3); }
@@ -1168,10 +1238,20 @@ if(ran('sink')){
                      && bySink['Stimulator']===0 && bySink['Elk hair caddis']===0;
     out.theWeightedOnesSink = bySink['Pheasant tail']>0.1 && bySink['Woolly bugger']>0.1;
 
+    /* 6. and the dials cover real tackle rather than running to a stone: the
+          fastest sinking fly lines made are about 0.18 m/s. */
+    const row=k=>MENU.find(r=>r[1]===k);
+    out.lineTop=row('lineSink')[3]; out.tipTop=row('tipSink')[3];
+    out.theDialsAreRealTackle = out.lineTop<=0.30 && out.tipTop<=0.20;
+
     P.flySink=was.f; P.tipSink=was.t; P.lineSink=was.l;
     P.flyPat=was.pat; applyFly();
+    applyVenue(was.venue); applyPreset(SHIPPED);
+    for(const q of fishes) q.reseat();
+    resetCast(); settle(20);
+    out.worldPutBack = SCENE_ID===was.venue && OBST.length>0;
     return out;
-  })()`,sandbox);
+  })()`.replace(/SHIPPED/g,JSON.stringify(shipped)),sandbox);
   console.log('a line sinks because it is heavy',sink);
   {
     const bad=Object.entries(sink).filter(([k,v])=>v===false).map(([k])=>k);
@@ -3245,8 +3325,7 @@ if(ran('mp')){
     /* DRAW, and let the smoothing settle */
     for(let i=0;i<300;i++) mpShow(1/72);
     out.heIsDrawn = peerTube.mesh.visible && peerLine.mesh.visible
-                 && peerHead.visible && peerBody.visible
-                 && peerFly.visible && peerHand.visible && peerReel.visible;
+                 && peerMan.g.visible && peerFly.visible && peerReel.visible;
     /* he was packed from MY rig, so he must converge onto it */
     out.rodErr=+Math.max(Math.abs(_mpRod[0]-rpos[0]),
                          Math.abs(_mpRod[RN*3-1]-rpos[RN*3-1])).toFixed(4);
@@ -3257,15 +3336,36 @@ if(ran('mp')){
     out.hisFlyArrivesWhereMineIs = out.flyErr<0.02;
     /* and his head is at a head height rather than at the origin, which is
        what a dropped pose looks like */
-    out.headY=+peerHead.position.y.toFixed(2);
-    out.heHasAHeadAndItIsUp = peerHead.position.y>0.8;
-    out.hisBodyHangsUnderIt = peerBody.position.y < peerHead.position.y-0.3;
+    out.headY=+peerMan.head.position.y.toFixed(2);
+    out.heHasAHeadAndItIsUp = peerMan.head.position.y>0.8;
+    out.hisBodyHangsUnderIt = peerMan.chest.position.y < peerMan.head.position.y-0.15;
+    /* AND HIS ROD HAND IS ON THE GRIP — rod node 0, already on the wire, so
+       the arm that matters most costs nothing extra to place. Unless the grip
+       is further from his shoulder than his arm is long, in which case the
+       arm goes to full stretch pointing at it rather than turning to rubber,
+       and this checks whichever of those two the geometry calls for. In a
+       headset it is always the first; in this harness the camera stub and the
+       rod stub are placed independently, so it can be either. */
+    {
+      const sh=peerMan.sh[0];
+      const dx=_mpRod[0]-sh.x, dy=_mpRod[1]-sh.y, dz=_mpRod[2]-sh.z;
+      const d=Math.hypot(dx,dy,dz)||1e-9, reach=(ARM_UP+ARM_LO)*0.995;
+      const k=d<=reach?1:reach/d;
+      /* a NUMBER, not a boolean: the failure collector below reads every
+         false value as a failed claim, and a diagnostic that happens to be
+         boolean reads as one too. It cost a red run to learn that. */
+      out.gripDist=+d.toFixed(2); out.gripReach=+reach.toFixed(2);
+      out.hisHandReachesForTheGrip =
+        Math.hypot(peerMan.hands[0].position.x-(sh.x+dx*k),
+                   peerMan.hands[0].position.y-(sh.y+dy*k),
+                   peerMan.hands[0].position.z-(sh.z+dz*k))<0.02;
+    }
 
     /* STALE. A friend whose headset went to sleep must stop being drawn
        rather than standing in the river forever. */
     MP.rxT-=MP_STALE+500;
     mpShow(1/72);
-    out.aSilentFriendStopsBeingDrawn = !peerTube.mesh.visible && !peerHead.visible;
+    out.aSilentFriendStopsBeingDrawn = !peerTube.mesh.visible && !peerMan.g.visible;
 
     /* THE RIVER TRAVELS AND THE TACKLE DOES NOT. Same split the URL uses,
        so there is one definition of what belongs to the water. */
@@ -3278,6 +3378,13 @@ if(ran('mp')){
     out.itLeavesMyTackleAlone = keys.indexOf('lineWt')<0 && keys.indexOf('tippet')<0
                              && keys.indexOf('nodeLen')<0 && keys.indexOf('flyPat')<0
                              && keys.indexOf('hudScale')<0;
+    /* AND YOUR LINE IS YOURS. The sink rates are seeded by the venue and
+       owned by you from then on, so they must NOT travel from the host — a
+       guest who could not change their own line was the design error that
+       made SEEDED exist. */
+    out.myLineIsMine = keys.indexOf('lineSink')<0 && keys.indexOf('tipSink')<0
+                    && keys.indexOf('flySink')<0;
+    out.butTheVenueStillSeedsIt = ('lineSink' in VENUE_BASE)&&('tipSink' in VENUE_BASE);
     out.everyKeyIsTheRivers = keys.every(k=>venueOwned(k));
     /* and applying one does not reach into the tackle even if it is told to */
     const wasWt=P.lineWt, wasClar=P.clarity;
@@ -3322,6 +3429,217 @@ if(ran('mp')){
   {
     const bad=Object.entries(mp).filter(([k,v])=>v===false).map(([k])=>k);
     if(bad.length) console.log('  *** SECOND ANGLER FAILURE:',bad.join(', '),'***');
+  }
+}
+
+/* ── AN ANGLER YOU CAN SEE ──────────────────────────────────────────────
+   Arms and legs from three tracked points, in closed form. What can go wrong
+   without a headset is the arithmetic: a limb that comes apart when the hand
+   is further away than the arm is long, an elbow that ends up behind the
+   shoulder, a body that pitches over when you look up at a tree. */
+if(ran('body')){
+  const bod=vm.runInContext(`(()=>{
+    const out={};
+    const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+    const A=peerMan;
+    const Q=new THREE.Quaternion();
+    const len=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
+    /* facing down the -z axis, hands out in front */
+    anglerPose(A,0,1.60,0, Q, V(0.35,1.25,-0.40), V(-0.30,1.20,-0.35), 0.0);
+    out.drawn=A.g.visible;
+    /* THE BONES ARE THE LENGTHS THEY SAY THEY ARE. An IK chain that stretches
+       is one that will come apart on screen the first time somebody reaches. */
+    out.armUp=+len(A.sh[0],A.el[0]).toFixed(3);
+    out.armLo=+len(A.el[0],V(0.35,1.25,-0.40)).toFixed(3);
+    out.theArmKeepsItsBones = Math.abs(out.armUp-ARM_UP)<0.005
+                           && Math.abs(out.armLo-ARM_LO)<0.005;
+    out.legUp=+len(A.hip[0],A.kn[0]).toFixed(3);
+    out.legLo=+len(A.kn[0],A.ft[0]).toFixed(3);
+    out.theLegKeepsItsBones = Math.abs(out.legUp-LEG_UP)<0.005
+                           && Math.abs(out.legLo-LEG_LO)<0.005;
+    /* the elbow goes DOWN and OUTWARD. Without the outward part both arms
+       fold straight back and it reads as a bird rather than a person. */
+    out.elbowBelowShoulder = A.el[0].y < A.sh[0].y;
+    out.elbowsGoOutward = A.el[0].x > A.sh[0].x-0.02 && A.el[1].x < A.sh[1].x+0.02;
+    out.kneesGoForward = A.kn[0].z < A.hip[0].z;
+    /* and the feet are on what they were told to stand on */
+    out.feetOnTheSole = Math.abs(A.ft[0].y)<1e-6 && Math.abs(A.ft[1].y)<1e-6;
+    /* BEYOND REACH IT STRAIGHTENS rather than tearing: a hand two metres from
+       the shoulder cannot be reached, and the arm has to cope. */
+    anglerPose(A,0,1.60,0, Q, V(2.0,1.6,-2.0), V(-0.30,1.20,-0.35), 0.0);
+    /* the MESH is what stretches — segPose scales the forearm to span
+       elbow-to-hand — so that is what is measured, not the joint solution */
+    out.stretched=+(A.arms[0].up.scale.y+A.arms[0].lo.scale.y).toFixed(3);
+    out.beyondReachItStraightens = out.stretched<(ARM_UP+ARM_LO)*1.02
+                                && Number.isFinite(A.el[0].x);
+    /* HANDS ON TOP OF EACH OTHER is the degenerate case an IK solver divides
+       by zero on. It has to survive it. */
+    anglerPose(A,0,1.60,0, Q, V(0,1.60,0), V(0,1.60,0), 0.0);
+    out.coincidentIsSurvived = Number.isFinite(A.el[0].x)&&Number.isFinite(A.el[0].y)
+                            && Number.isFinite(A.kn[0].z);
+    /* THE BODY DOES NOT PITCH WHEN YOU LOOK UP. The trunk takes the head's
+       yaw only, or an angler watching a bird lies down in the river. */
+    const up=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),0.9);
+    anglerPose(A,0,1.60,0, up, V(0.35,1.25,-0.40), V(-0.30,1.20,-0.35), 0.0);
+    out.chestTilt=+Math.abs(A.chest.quaternion.x).toFixed(3);
+    out.theBodyStaysUpright = out.chestTilt<0.02;
+    A.g.visible=false;
+    /* and your own body ships OFF, for the reason in the menu row */
+    out.ownBodyShipsOff = SHIPPED.ownBody===0;
+    return out;
+  })()`.replace(/SHIPPED/g,JSON.stringify(shipped)),sandbox);
+  console.log('an angler you can see',bod);
+  {
+    const bad=Object.entries(bod).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** ANGLER FAILURE:',bad.join(', '),'***');
+  }
+}
+
+/* ── TEACHING, AND WHAT IT IS NOT ALLOWED TO TOUCH ──────────────────────
+   The whole risk here is a setting moving on somebody who did not ask. */
+if(ran('teach')){
+  const th=vm.runInContext(`(()=>{
+    const out={};
+    const keys=Object.keys(teachPack());
+    out.count=keys.length;
+    /* it carries the tackle and the fish's character */
+    out.itCarriesTheFly = keys.indexOf('flyPat')>=0;
+    out.itCarriesTheTackle = keys.indexOf('tippet')>=0 && keys.indexOf('lineWt')>=0;
+    out.itCarriesTheFishesCharacter = keys.indexOf('fishPower')>=0
+      && keys.indexOf('fishSize')>=0 && keys.indexOf('nonFeedMult')>=0
+      && keys.indexOf('spookLine')>=0 && keys.indexOf('chaseMin')>=0;
+    /* it does NOT carry the river — that travels from the host already and
+       would arrive twice, by two rules, with two owners */
+    out.itLeavesTheRiverAlone = keys.every(k=>!venueOwned(k));
+    /* nor your view, nor your line, nor the follow switch itself — a setting
+       that could turn its own following on is a setting that cannot be
+       turned off from this end */
+    out.itLeavesMyViewAlone = keys.indexOf('showStats')<0 && keys.indexOf('hudScale')<0
+      && keys.indexOf('showZones')<0 && keys.indexOf('ownBody')<0
+      && keys.indexOf('volume')<0;
+    out.itLeavesMyLineAlone = keys.indexOf('lineSink')<0 && keys.indexOf('tipSink')<0;
+    out.itCannotTurnItselfOn = keys.indexOf('teachFollow')<0;
+
+    /* AND NOTHING ARRIVES UNLESS YOU ASKED. The switch is the whole contract. */
+    const wasFollow=P.teachFollow, wasTip=P.tippet, wasPat=P.flyPat;
+    P.teachFollow=0; P.tippet=wasTip;
+    teachTake({t:'teach', p:{tippet:wasTip+9}});
+    out.nothingArrivesUnasked = P.tippet===wasTip;
+    P.teachFollow=1;
+    teachTake({t:'teach', p:{tippet:wasTip+9}});
+    out.andItArrivesWhenYouAsk = P.tippet===wasTip+9;
+    /* even while following, the river and the view are refused */
+    const wasClar=P.clarity, wasHud=P.hudScale;
+    teachTake({t:'teach', p:{clarity:wasClar+2, hudScale:wasHud+0.5, teachFollow:0}});
+    out.theRiverIsStillRefused = P.clarity===wasClar;
+    out.theViewIsStillRefused = P.hudScale===wasHud;
+    out.followSurvivesIt = P.teachFollow===1;
+    P.tippet=wasTip; P.flyPat=wasPat; P.teachFollow=wasFollow; applyFly();
+    onSettingChanged('tippet');
+
+    /* THE COACHING PAYLOAD: cover, slip and which seam, off the learner's
+       own rule rather than a second copy of it. */
+    const d=teachWatched();
+    out.driftIsThreeNumbers = Array.isArray(d)&&d.length===3&&d.every(Number.isFinite);
+    out.seamNamesAreKnown = TEACH_WHY.indexOf('rock')>0 && TEACH_WHY.indexOf('window')===0;
+    return out;
+  })()`,sandbox);
+  console.log('teaching',th);
+  {
+    const bad=Object.entries(th).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** TEACHING FAILURE:',bad.join(', '),'***');
+  }
+}
+
+/* ── ONE SET OF FISH, AND WHO IS ALLOWED TO MOVE THEM ───────────────────
+   Authority migration. The failure that matters is two people fighting the
+   same trout, and the one that matters more is a guest quietly not
+   simulating its own river when nobody is connected at all. */
+if(ran('share')){
+  const sh=vm.runInContext(`(()=>{
+    const out={};
+    const wasRole=MP.role, wasConn=MP.conn, wasSeen=MP.fishSeen;
+    MP.own=[]; MP.tx3=[]; MP.fishSeen=0;
+
+    /* 1. ALONE, EVERY FISH IS YOURS. This is the path the whole game runs on
+          and the one that must not notice any of this exists. */
+    MP.role='off'; MP.conn=null;
+    out.aloneTheyAreAllMine = fishes.every((f,i)=>fishMine(i));
+    out.aloneNothingIsRemote = !fishRemote();
+
+    /* 2. A HOST ALSO RUNS ALL OF THEM: it is the authority. */
+    MP.role='host'; MP.conn={open:true, send(){}};
+    MP.fishSeen=mpNow();
+    out.aHostRunsThemAll = fishes.every((f,i)=>fishMine(i));
+
+    /* 3. A CONNECTED GUEST RUNS ONLY WHAT IT HAS CLAIMED. */
+    MP.role='guest';
+    out.aGuestRunsNoneOfThem = fishes.every((f,i)=>!fishMine(i));
+    MP.own[1]=1;
+    out.exceptTheOneItHooked = fishMine(1) && !fishMine(0);
+
+    /* 4. AND A GUEST WHOSE FRIEND HAS GONE QUIET GOES BACK TO RUNNING ITS
+          OWN RIVER, rather than standing in a frozen one forever. */
+    MP.fishSeen=0;
+    out.aSilentHostHandsThemBack = fishes.every((f,i)=>fishMine(i));
+    MP.fishSeen=mpNow();
+
+    /* 5. THE PACKET describes every fish and skips the one they are fighting,
+          because sending it back at them would fight their own simulation. */
+    MP.role='host'; MP.own=[]; MP.own[2]=2;
+    const a=fishPack();
+    out.packLen=a.length; out.fishCount=fishes.length;
+    out.itDescribesEveryFish = a.length===fishes.length*6;
+    out.itSkipsTheirFish = a[2*6+3]===0 && a[2*6]===0;
+
+    /* 6. and it round-trips: what the host sends is where the guest puts them */
+    MP.role='guest'; MP.own=[]; MP.tx3=[];
+    const probe=[]; for(let i=0;i<fishes.length;i++) probe.push(3+i,0.5,-4-i,0,1,0.2);
+    fishTake(probe);
+    out.theGuestTakesThePositions =
+      !!MP.tx3[0] && Math.abs(MP.tx3[0].x-3)<1e-6 && Math.abs(MP.tx3[1].z-(-5))<1e-6;
+    /* and easing moves them toward it rather than snapping */
+    const f0=fishes[0]; f0.p.set(0,0,0);
+    fishShow(1/72);
+    const step=Math.abs(f0.p.x-0);
+    out.easedNotSnapped = step>0.001 && step<3*0.9;
+
+    /* 7. TWO PEOPLE, ONE TROUT. The host arbitrates; the loser is told to let
+          go rather than both fighting a fish that is in two places. */
+    const sent=[];
+    MP.role='host'; MP.conn={open:true, send(o){sent.push(o);}};
+    MP.own=[];
+    /* indices inside the reach of whatever venue this is: the first cut of
+       this case asked for fish 4 and 5 on a four-fish river, fishOwnMsg
+       correctly refused both as out of range, and three claims read as an
+       arbitration failure that was really an off-the-end index. */
+    out.enoughFishToArbitrate = fishes.length>=2;
+    const A=0, B=1;
+    fishOwnMsg({t:'claim', i:A});
+    out.anUnclaimedFishIsGranted = MP.own[A]===2
+      && sent.some(o=>o.t==='own'&&o.i===A&&o.v===2);
+    /* now the host is on it itself and the guest asks for the same one */
+    MP.own[B]=1; sent.length=0;
+    fishOwnMsg({t:'claim', i:B});
+    out.aFishAlreadyOnIsRefused = MP.own[B]===1
+      && sent.some(o=>o.t==='own'&&o.i===B&&o.v===1);
+    /* and letting go hands it back */
+    fishOwnMsg({t:'free', i:A});
+    out.lettingGoHandsItBack = MP.own[A]===0;
+    /* an index off the end of the river is refused rather than growing it */
+    const n0=fishes.length;
+    fishOwnMsg({t:'claim', i:999});
+    out.anImpossibleFishIsRefused = MP.own[999]===undefined && fishes.length===n0;
+
+    MP.role=wasRole; MP.conn=wasConn; MP.fishSeen=wasSeen;
+    MP.own=[]; MP.tx3=[];
+    for(const f of fishes) f.reseat();
+    return out;
+  })()`,sandbox);
+  console.log('one set of fish',sh);
+  {
+    const bad=Object.entries(sh).filter(([k,v])=>v===false).map(([k])=>k);
+    if(bad.length) console.log('  *** SHARED FISH FAILURE:',bad.join(', '),'***');
   }
 }
 

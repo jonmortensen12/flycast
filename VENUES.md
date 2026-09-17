@@ -233,7 +233,9 @@ no river uses:
 - **Cruising fish.** A lie with a `cr` entry becomes a beat rather than a
   holding spot. The fish never stops, so the cast goes where he is going.
 - **A sinking line.** Three numbers, one per part of the rig, at the top of the
-  **STILLWATER** tab: `flySink` for the fly (and the tippet it drags down with
+  **STILLWATER** tab. They are **seeded by the venue and then yours** (see
+  `SEEDED`) — arriving here hands you a sinking leader, and after that nobody
+  else touches it, including whoever you are fishing with: `flySink` for the fly (and the tippet it drags down with
   it, easing off along the tippet's length so there is no hinge at the fly),
   `tipSink` for the leader and tippet, `lineSink` for the belly. The pond ships
   `tipSink 0.32, lineSink 0.21`; every river ships zeros, where the dry-fly
@@ -241,10 +243,16 @@ no river uses:
   which meant a floating line with a weighted fly — the commonest nymph rig
   there is — could not be expressed. `flySink` is also set for you by the fly
   box: the pheasant tail arrives at 0.16 and the woolly bugger at 0.22.
-  The film lets go of a node BY DEGREES rather than all at once — surface
-  tension against its own weight is a ratio, not a threshold — so 0.02 really
-  is a line that floats and 1.00 really is one that goes, and the joint between
-  a floating belly and a sinking tippet is a curve instead of a corner.
+  A node in the water sits at a **terminal velocity** — the number on the dial,
+  at any depth, measured to within 1.5% — because the water drag is referenced
+  to that rate rather than to a standstill, and the gravity the integrator
+  applied is handed back so it is not counted twice. There is no threshold
+  anywhere in it: 0.03 is an intermediate that sinks slowly and 0.20 is a
+  fast sinker, and everything between behaves like everything between.
+  The ranges are real tackle now (0–0.25 for the line, 0–0.12 for nylon), and
+  0 means BUOYANT rather than neutral — a floating line rises, which is what
+  the coating is for. Nylon is all but neutral, so a weighted fly takes the
+  tippet down with it through the constraint chain.
 - **The chase.** This is no longer the pond's — see below. A submerged fly
   moving through the water between `chaseMin` and `chaseMax` reads as alive. A fish inside `chaseRadius` commits, swims at
   where the fly *will be*, and eats it if he catches up. Too slow or stopped and

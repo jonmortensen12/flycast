@@ -46,6 +46,10 @@
   color:#e0a45e;border:1px solid #46606c;font:700 1.3rem/1 "Space Mono",monospace;
   letter-spacing:.18em;text-align:center;text-transform:uppercase}
 #mpGo{flex:1}
+#mpVoice{display:flex;align-items:center;gap:8px;max-width:34rem;margin-top:2px;
+  font:400 .82rem/1.5 system-ui,sans-serif;color:#a9b5b3;cursor:pointer}
+#mpVoice input{width:18px;height:18px;accent-color:#8fd0a8}
+#mpVoice span{color:#7d8b8c}
 #pvbar{position:fixed;left:0;right:0;bottom:0;display:none;gap:8px;padding:10px;
   justify-content:center;background:linear-gradient(transparent,rgba(0,0,0,0.55));z-index:60;
   flex-wrap:wrap}
@@ -152,6 +156,7 @@
   <button id="mpBtn">Fish with a friend &mdash; open a room for a second headset</button>
   <div id="mpBox"></div>
   <div id="mpJoin"><input id="mpCode" maxlength="4" placeholder="CODE" autocomplete="off" spellcheck="false"><button id="mpGo">Join a friend&rsquo;s room</button></div>
+  <label id="mpVoice"><input type="checkbox" id="mpMic"> Talk to them &mdash; use my microphone <span>(ask here: a headset cannot answer a permission prompt)</span></label>
   <button id="remoteBtn">Phone remote &mdash; change settings from another device</button>
   <div id="remoteBox"></div>
 
@@ -191,7 +196,7 @@ const P = {
   flyDrag:0.10,
   reelSpeed:2.6, reelPower:34, lineStretch:60, spoolDrag:9, spoolDead:0.05, buoyancy:1, stick:1, tippet:40,
   guideMu:0.15, slipInertia:0.06, dragHeld:1, routeOn:0, handSlide:8, reelSlack:0.1, lineVis:0.8, flySize:1.8, haptics:1,
-  flyPat:3, rodHue:0, reelHue:0, lineHue:0, gripHue:0,
+  flyPat:3, rodHue:0, reelHue:0, lineHue:0, gripHue:0, ownBody:0, teachFollow:0,
   moveSpeed:1.6, netRadius:0.3, invertY:0, reelHand:0, handGuide:1,
   teleport:0, tpRange:9, snapTurn:30,
   volume:0.7, volReel:1, volSplash:1, volRiver:0.55, volLine:1,
@@ -242,6 +247,7 @@ const MENU=[
   ['Stats scale','hudScale',0.40,3.00,0.05,'Size of the statistics window, which ships off — turn it on under MESSAGES, or with A on the right hand. It has its own drag handle and plus/minus buttons in its top corners, and unlike this panel they work with the menu SHUT: point the rod at the handle strip along the top of the stats window and hold the trigger to move it anywhere you like, including behind you. Nothing else on that window answers the pointer, so the trigger still reels.'],
   ['Panel scale','menuScale',0.40,3.00,0.05,'Size of this panel. The plus and minus buttons in its top right do the same thing, and the handle at the top left drags it around.'],
   ['Copy settings','!copy',0,0,0,'Push right to copy every setting to the clipboard and write it into the page URL. Paste that anywhere to share or restore it.'],
+  ['Follow my friend','teachFollow',0,1,1,'Let whoever you are fishing with set YOUR tackle and YOUR fish, live, so they can teach you. With this on, their fly, tippet, fish size, fish power, non-feeder odds, chase numbers and the lined toggle all arrive as they change them \u2014 so "watch, I\u2019ll put a bugger on and turn these fish on, and you\u2019ll see a take" simply happens. It is OFF until you turn it on, and it is you who turns it on: nothing about your rod ever changes because somebody else moved a slider. It does not touch your view \u2014 stats, zones, markers, volumes and your own body stay yours \u2014 and the river already comes from whoever opened the room whether this is on or not. Turn it off and you keep whatever you were last given.'],
   ['Fish with a friend','!mp',0,0,0,'Push right to open a room a SECOND HEADSET can join, so you and somebody else are standing in the same river at the same time. A four-letter code appears along the top of this panel; on the other headset, open this same page on the flat screen and join with that code \u2014 four letters are easy there and miserable on a VR keyboard, so the other person joins before putting the headset on. You can also hand the room over in a text message as this page\u2019s address with #mp=CODE on the end.\n\nWhat you get: you can see them, watch them cast, and see where their fly lands and when they are into a fish. The river is the HOST\u2019s \u2014 the venue, the water and the feeding travel from whoever opened the room \u2014 and your rod, reel, line, flies and display stay yours. What is NOT shared yet is the trout: you each have your own fish, so a fish he is fighting is real on his line and not in your water. Push right again to close the room.'],
   ['Phone remote','!remote',0,0,0,'Push right to open a room a phone can join, so whoever is running the demo can change any setting on this list from outside the headset while somebody else fishes. The four-letter code appears along the top of this panel and in this strip. On the phone, open this page\u2019s address with remote.html on the end and type the code in. Push right again to close the room.'],
   ['— ROD MODEL —',null,0,0,0,''],
@@ -305,6 +311,7 @@ const MENU=[
   ['Reel hand','reelHand',0,1,1,'Which side of the reel the handle is on. 0 is left-hand wind, the usual setup for a right-handed caster, and puts the handle on the side facing you. 1 is right-hand wind. Takes effect immediately.'],
   ['Net radius','netRadius',0.15,0.80,0.05,'How close a hooked fish must be to the net hoop to be landed.'],
   ['Stick menu','stickNav',0,1,1,'Whether the right stick walks the settings panel while it is open. Up and down pick a row and run on into the next tab at either end, left and right move the value by its own step, clicking the stick is the next tab, and A pushes an action row or steps a slider\u2019s range. Pointing at the panel still works and still wins: while the ray is on it the pointer owns the selection, and the stick takes over the moment you look away. 0 leaves the menu to the pointer alone.'],
+  ['Show my own body','ownBody',0,1,1,'Draw waders, a vest, a hat and both arms on YOU, not just on your friend. It ships OFF and that is a considered default rather than laziness: a headset tracks three points \u2014 your head and your two hands \u2014 and everything between them is inferred, so an elbow will occasionally settle on the wrong side of where your real one is. At ten metres, on somebody else, you will never notice; looking straight down at your own arm you sometimes will. Turn it on for the presence, off if a wrong elbow bothers you more than a missing one. Your friend is drawn with a body either way.'],
   ['Controller labels','handGuide',0,1,1,'Draws a ghost of each controller over your hands with a callout on every button that does something, so somebody who has just put the headset on can read what to press instead of being told. The words follow the settings: with teleport off the stick says WALK, and with a fish on it says the stick wades. 0 turns it off \u2014 do that and Save as my default if you would rather fish without them.'],
   ['— MESSAGES —',null,0,0,0,''],
   ['Show stats window','showStats',0,1,1,'Whether the statistics window is drawn at all. It ships OFF: it is a tuning instrument, not part of fishing, and everything it used to be the only place to read — what a fish just did, why one refused you — now floats in front of you instead. Turn it on when you are chasing numbers. Right hand A does the same thing with the menu shut.'],
@@ -430,9 +437,17 @@ const MENU=[
      of numbers are read together. Asked for from the water — "there's not so
      many menus." */
   ['\u2014 STILLWATER \u2014',null,0,0,0,''],
-  ['Fly sink m/s','flySink',0.00,1.20,0.02,'Terminal sink rate of the FLY, and of the tippet it drags down with it. At 0 the fly rides the film and is a dry fly. Above 0 it goes down at this rate and the tippet follows it in a curve, easing off over the tippet\u2019s length, so the line above is not hinged flat at the fly — which is what a bead-head actually does on a floating line. Each fly pattern sets this for you when you change flies: the pheasant tail arrives at 0.16 and the woolly bugger at 0.22 because both are weighted, and the four dries arrive at 0. Move it afterwards to hand-tune one, but changing pattern will overwrite it again.'],
-  ['Tippet sink m/s','tipSink',0.00,1.20,0.02,'Terminal sink rate of the LEADER AND TIPPET — all the nylon between the fly line and the fly. This is what a sinking leader gives you: the fly line stays on top where you can see it, mend it and pick it up, and everything below the join goes down. At 0 the nylon floats too. The Beaver Pond ships at 0.32; every river ships at 0.'],
-  ['Line sink m/s','lineSink',0.00,1.20,0.02,'Terminal sink rate of the FLY LINE itself — the thick belly out past the leader. At 0 this is a floating line, which is what almost every trout rig is and what every river here ships: it lies on the surface, can be mended, and lifts off cleanly. Above 0 it is a sinking or intermediate line, the whole cast settles, and the line gets very hard to pick back up. The Beaver Pond ships at 0.21.'],
+  /* REAL TACKLE, NOT A STONE. These ran to 1.20 m/s, which is about 47
+     inches a second: not a fly line, a sinker. Measured tackle is an order
+     of magnitude slower — an intermediate line is around 0.03 m/s, a Type 3
+     about 0.08, and the fastest sinking lines made are 0.15 to 0.18. So the
+     whole useful range sat in the bottom eighth of the dial, which is half
+     of why the old model read as a switch: the interesting part was two
+     clicks wide. Flies get their own wider range because a bead-head really
+     does go down faster than any line. */
+  ['Fly sink m/s','flySink',0.00,0.60,0.01,'Terminal sink rate of the FLY. At 0 it rides the film and is a dry fly. Above 0 it goes down at this rate and the SOLVER carries that weight up the tippet, so the leader follows it into a curve whose depth is the fly’s weight against the leader’s buoyancy — which is what a bead-head does on a floating leader. Each pattern sets this when you change flies: the pheasant tail arrives at 0.16 and the woolly bugger at 0.22 because both are weighted, and the four dries at 0. Move it afterwards to hand-tune one; changing pattern overwrites it again.'],
+  ['Tippet sink m/s','tipSink',0.00,0.12,0.005,'Terminal sink rate of the LEADER AND TIPPET — all the nylon between the fly line and the fly. This is what a sinking leader gives you: the fly line stays on top where you can see it, mend it and pick it up, and everything below the join goes down. Nylon is only a little denser than water, so the real range is small: a couple of centimetres a second is a leader that sinks properly. At 0 the nylon is buoyant and floats. The Beaver Pond ships 0.08; every river ships 0.'],
+  ['Line sink m/s','lineSink',0.00,0.25,0.005,'Terminal sink rate of the FLY LINE itself — the thick belly out past the leader. At 0 this is a FLOATING line, which is not a line that fails to sink but one that is genuinely less dense than water: it rises to the surface, lies on it, can be mended and lifts off cleanly. That is what almost every trout rig is and what every river here ships. Above 0 it is an intermediate or a sinker and the whole cast settles at that rate, at any depth — 0.03 is an intermediate, 0.08 a Type 3, 0.15 about as fast as real line goes. A sunk line is very hard to pick back up, which is the cost of fishing one.'],
   ['Cruise speed','cruiseSpeed',0.10,3.00,0.10,'How fast a stillwater fish works its beat. Cruisers have no lie to hold, so this is what you are leading when you cast in front of one.'],
   ['Chase min m/s','chaseMin',0.00,1.50,0.05,'How fast the fly must move through the water before a fish reads it as alive. Below this he ignores it, and a fly you stop moving is one he loses interest in. This is now every reach and not just the pond: it is measured against the CURRENT, so a nymph dead-drifting down a river has almost none of it and is judged on its drift instead, while a fly swung across the current or stripped back is alive and gets chased. That is what makes a sunk fly worth fishing on moving water \u2014 and a chase will move a fish that is not feeding, which no drifted dry fly ever will.'],
   ['Chase max m/s','chaseMax',0.30,4.00,0.10,'How fast the fly can move and still be catchable. Strip harder than this and he cannot get in front of it, and he breaks off the chase.'],
@@ -1006,14 +1021,15 @@ float scDep(float x,float zr){
        grade:1, current:0.35, gridCell:0.50, gridSpan:56, vortex:0.05,
        foam:0.0, specks:0.08, speckSize:0.040, speckRange:22, drift:1,
        clarity:1.25, sediment:0.10, surfWave:0.25, waveShade:0.35,
-       /* THE POND SHIPS A SINKING LINE, not a sinking fly. This used to be
-          one number that drove the whole rig, so it could not express the
-          thing asked for from the water — "a floating line with a fly that
-          sinks" — nor its opposite. It is now the leader and the belly that
-          are dense here, and the fly's own weight comes from whatever is
-          tied on (see FLIES). Same water as before: 0.32 on the leader and
-          0.21 on the fly line is exactly what the old single number did. */
-       tipSink:0.32, lineSink:0.21,
+       /* A FLOATING LINE WITH A SINKING LEADER, which is both a real and very
+          common stillwater rig AND — it turns out — what this pond has
+          actually been fishing all along. Under the old clamp the leader's
+          0.32 was past the release threshold and sank freely while the
+          belly's 0.21 sat pinned a couple of millimetres under the surface,
+          so the observed behaviour was leader down, line on top. Reported as
+          "works okay", and it was: just not for the reason the numbers said.
+          Stated honestly now, at a rate real nylon actually sinks at. */
+       tipSink:0.08, lineSink:0,
        takeRadius:0.5, riseRate:0.30, feedChance:0.95, riseAggro:0.55,
        treeRange:44, spookT:6}
 };
@@ -2467,7 +2483,24 @@ const RIDE=0.010, BREAK=2.6;
    the waterline is whatever the solver makes of a line that is heavy below
    and held above. The curve is emergent rather than authored, which is the
    only way it was ever going to stop looking authored. */
-const SINK_EASE=4.0;         /* how fast a node reaches its terminal sink */
+/* WHAT A FLOATING LINE ACTUALLY IS. Not "a line that fails to sink" — that is
+   a neutral line, and it hangs wherever you left it. A floating fly line is
+   LESS DENSE THAN WATER: it is coated with microballoons and it genuinely
+   rises. So 0 on the dial means buoyant, and `sinkRate` returns a signed
+   number with this as the rise. It is a rate, so it composes over substeps
+   and the line comes back to the surface on a curve rather than a corner.
+
+   BUT NYLON IS NOT A FLY LINE. Leader and tippet are about 1.14 times the
+   density of water — they are very slightly HEAVIER, and what holds a dry
+   leader up is surface tension and a rub of grease, not buoyancy. Giving the
+   nylon the fly line's rise made the leader a balloon: measured, a woolly
+   bugger sinking at 0.22 dragged a node 39 cm up the tippet down by eleven
+   millimetres, because 39 cm of nylon rising at 0.12 could out-pull it. That
+   is the woolly-bugger complaint from the water, and it was this constant.
+   All but neutral is the honest number, and a weighted fly then takes the
+   tippet with it the way it does on the water. */
+const FLOAT_RISE=0.12;       /* fly line: coated, and it really does float */
+const NYLON_RISE=0.02;       /* leader and tippet: all but neutral */
 /* THREE MATERIALS, THREE NUMBERS. This was one setting, `Fly sink`, with the
    leader hard-wired to sink at it and the fly line at two thirds of it — so
    the one rig a nymph fisherman actually uses, a FLOATING line with a weighted
@@ -2484,11 +2517,22 @@ const SINK_EASE=4.0;         /* how fast a node reaches its terminal sink */
    removed. So the fly's rate bleeds off along the tippet and the material
    rate takes over from there, and whichever is greater wins. */
 function sinkRate(i){
+  /* A RIG WITH NOTHING DENSE ANYWHERE IS THE DRY-FLY CASE, and 0 here means
+     "the path this game was tuned on", not "neutral". Every river ships that
+     way and is left bit-for-bit alone. */
   if(P.flySink<=0.001&&P.tipSink<=0.001&&P.lineSink<=0.001) return 0;
   const a=sArc(i);
   const mat=Math.max(0,a<=leaderTot?P.tipSink:P.lineSink);
-  const pull=Math.max(0,P.flySink)*Math.max(0,1-a/Math.max(0.2,P.tippetLen));
-  return Math.max(mat,pull);
+  /* AND THE FLY'S WEIGHT IS FELT AT THE FLY. It used to be smeared up the
+     tippet by a taper term, and that existed only because the film clamp
+     would not let the SOLVER do the job: node 1 was pinned flat while node 0
+     sank, so the weight had to be faked onto its neighbours to avoid a hinge.
+     With the clamp gone the constraint chain carries it properly — a
+     bead-head pulls the tippet into a curve whose depth is its weight against
+     the leader's buoyancy, which is what happens on the water and is not
+     something this file should be authoring. */
+  const sr=Math.max(mat,i===0?Math.max(0,P.flySink):0);
+  return sr>0.001?sr:-(a<=leaderTot?NYLON_RISE:FLOAT_RISE);
 }
 function waterAndGround(i,h,t){
   const p=i*3,x=pos[p],z=pos[p+2];
@@ -2514,91 +2558,94 @@ function waterAndGround(i,h,t){
      rate of its own and the film has no hold on it at all — no front, no
      order, no waiting: it starts the instant the water has it. */
   const sr=sinkRate(i);
-  const sinking=sr>0.001;
-  /* HOW MUCH OF IT THE FILM STILL OWNS, BY DEGREES. `rel` was a switch:
-     any sink rate at all above a thousandth and the surface let go of the
-     node completely. Two things followed and both were reported. `Line sink`
-     at 0.02 behaved exactly like 1.00 — the rate barely mattered, because
-     what had changed was not how fast the node settles but whether anything
-     was holding it up at all. And the joint between a floating belly and a
-     sinking tippet was a corner rather than a curve, because one node was
-     pinned flat to the water and the next was in free water.
-     Surface tension against a node's own weight is a ratio, not a threshold:
-     a fat floating line wins it, a thin dense tippet loses it, and something
-     nearly neutral is half held. REL_FULL is the sink rate at which the film
-     has lost the argument entirely, so 0.02 is a line that really does float
-     and 1.00 is one that really does go. */
-  const REL_FULL=0.30;
-  const rel=Math.max(0,Math.min(1,sr/REL_FULL));
+  /* THREE KINDS OF NODE, and each gets one rule.
+     dense  — denser than water. It sinks at its own terminal rate, at ANY
+              depth, and nothing pulls it back up.
+     buoy   — less dense. It rises at its own rate until the film stops it.
+     dry    — the rig has nothing dense on it at all, and this is the path the
+              whole game was tuned on. Untouched.
+
+     WHY THIS HAD TO CHANGE. The film used to hold a node by writing its
+     POSITION: `pos += (target - pos) * hold`, with `hold` graded from 1 down
+     to 0 as the sink rate rose. That looked like a gradient and was a switch,
+     because waterAndGround runs inside the substep loop — six times a frame,
+     432 times a second. A hold of 0.067 is not "6.7% held"; applied 432 times
+     a second it pins a node at a depth of `sr*h/hold`, which at Line sink
+     0.28 is ten millimetres. So 0.28 sat the whole line one centimetre under
+     the surface and 0.30 — where hold reached exactly zero — dropped it
+     forever. Reported as exactly that: a switch between two clicks of the
+     dial, with nothing in between.
+
+     WHERE THE SINK ACTUALLY COMES FROM, which took measuring to find. Two
+     things already write this node's vertical velocity every substep, and
+     between them they decide everything: the integrator applies gravity
+     (-9.81*h), and the water drag at the bottom of this function damps the
+     vertical velocity toward ZERO. Solve those two against each other and
+     the equilibrium is about 1.2 m/s of sink — which is why the old model
+     needed a position clamp at all, and why a velocity ease at 4/s bolted on
+     top of them did nothing: measured, a node asked to RISE at 0.12 fell at
+     0.41.
+     So the sink is not a fourth term. Terminal velocity already has gravity
+     in it — that is what terminal means, weight balanced by drag — so the
+     gravity this substep applied is handed back, and the water drag is
+     re-referenced from zero to this node's own terminal rate. Then the drag
+     IS the mechanism: it carries the node to `vSink` with a time constant of
+     about a tenth of a second and holds it there exactly. One term decides
+     the vertical, the rate is the rate at any depth, and the shape at the
+     waterline is whatever the solver makes of it. */
+  const dense=sr>0.001, buoy=sr<-0.001;
+  /* A TIGHT LINE TO A FISH IS A STRAIGHT LINE. A line under load is not
+     floating, it is being pulled through the surface, so both the film's hold
+     and a buoyant node's rise give way to how hard it is being pulled. Slack
+     line still lies on the water, which is the point. */
+  const tight=hooked?Math.max(0,Math.min(1,fishTension/6)):0;
+  const vSink=(dense||buoy)?-sr*(1-tight):0;
   if(above<0){
-    /* Tippet is 0.15 mm nylon, denser than water — it should slice through the
-       film, not sit on it. Hard-clamping every node was why a hooked fish showed
-       a dead vertical line: the leader was nailed to the surface and the whole
-       transition happened across one segment. */
-    /* THE FILM LETS GO BY DEGREES, IN POSITION AS WELL AS IN SPEED. `rel`
-       already graded how hard a node is pulled DOWN across the feather, but
-       everything the film still owned was hard-clamped flat onto it —
-       `pos = target`, exactly, with the downward velocity zeroed. So the
-       whole bend from surface to depth had to happen inside the one node
-       where rel crossed 0.02, and a sinking line on the pond read as a length
-       of rope lying flat on the water with a sharp corner in it. Reported as
-       "what's under the water looks realistic, the transition doesn't".
-       The hold is now 1 - rel: full where the film has the line, easing off
-       through the feather, gone where the fly has pulled it under. At rel 0
-       this is bit-for-bit the old hard clamp, so every dry-fly venue — where
-       flySink is 0 and rel is 0 for every node — is untouched. */
-    /* A TIGHT LINE TO A FISH IS A STRAIGHT LINE. The film used to let go of
-       the last 1.2 m of tippet and clamp everything beyond it flat, so a fish
-       holding deep gave you a line that ran along the surface and then turned
-       a corner to reach him — reported twice, once fighting a deep fish and
-       once stripping a sinking line back on the pond, and it is the same
-       clamp both times.
-       A line under load is not floating, it is being pulled through the
-       surface, so the hold is released by how hard it is being pulled: at a
-       few newtons the film has stopped owning it entirely and the geometry
-       between the tiptop and the fish is whatever the solver says, which is
-       straight. Slack line still lies on the water, which is the whole point
-       of the clamp and is left alone. */
-    const tight=hooked?Math.max(0,Math.min(1,fishTension/6)):0;
-    const hold=Math.max(0,Math.min(1,1-rel))*(1-tight);
-    /* WEIGHT AND BUOYANCY BOTH, rather than one or the other. These used to be
-       the two arms of an if: a node was either sinking or floating. Now the
-       node always eases toward the rate its own material settles at, and the
-       film always pulls back on it by whatever share of it the film still
-       owns. At rel 0 the sink term is absent and this is bit-for-bit the old
-       floating branch; at rel 1 the hold is zero and it is bit-for-bit the
-       old sinking branch. Everything between is the curve that was missing. */
-    if(sinking){
-      /* EVERY node the same way, the fly included. It used to be a hard drive
-         for node 0 and a constant -1.2*h*rel shove for the rest, which is an
-         acceleration and not a sink rate — line kept accelerating downward
-         for as long as it was under, so the belly outran the leader. Each
-         node now eases toward the speed its own material settles at. */
-      vel[p+1]+=(-sr-vel[p+1])*Math.min(1,h*SINK_EASE);
-    } else if(hooked&&sArc(i)<P.tippetLen*1.3) vel[p+1]-=1.2*h;
-    if(hold>0.001&&!(hooked&&sArc(i)<P.tippetLen*1.3&&!sinking)){
-      pos[p+1]+=(target-pos[p+1])*hold;
-      if(vel[p+1]<0) vel[p+1]*=(1-hold);
+    if(dense||buoy){
+      /* gravity back, so the drag below is the only thing left deciding it */
+      vel[p+1]+=9.81*h;
+    } else {
+      /* THE DRY-FLY PATH, bit-for-bit what it was. */
+      if(hooked&&sArc(i)<P.tippetLen*1.3) vel[p+1]-=1.2*h;
+      const hold=1-tight;
+      if(hold>0.001&&!(hooked&&sArc(i)<P.tippetLen*1.3)){
+        pos[p+1]+=(target-pos[p+1])*hold;
+        if(vel[p+1]<0) vel[p+1]*=(1-hold);
+      }
     }
   }
   else if(vel[p+1]<BREAK){
     vel[p+1]-=P.stick*26*h*(1-above/0.10);
     if(vel[p+1]<0&&pos[p+1]<=target+0.002) vel[p+1]=0;
   }
-  /* Partly released line is partly held up, which is the whole point: the
-     float falls off along the feather instead of at one node, so the line
-     leaves the surface on a curve rather than over a cliff. */
-  if(rel<0.999) vel[p+1]+=(target-pos[p+1])*40*P.buoyancy*h*(1-rel);
-  /* and it stops at the bed, or a sinking fly leaves the world */
-  if(sinking&&pos[p+1]<gy+0.012){pos[p+1]=gy+0.012;if(vel[p+1]<0)vel[p+1]=0;}
+  /* THE SPRING BELONGS TO THE DRY PATH ONLY. At 40 per second it is stiff
+     enough to hold a node flat against the surface on its own, which is the
+     second reason the last round's gradient never appeared. A node that is
+     genuinely buoyant comes back up on its own rise — a rate, which bends —
+     and a dense one is not coming back up at all. */
+  if(!dense&&!buoy) vel[p+1]+=(target-pos[p+1])*40*P.buoyancy*h;
+  /* AND A NODE THE NEW MODEL OWNS STOPS AT THE BED. This was gated on the
+     node sinking, which was safe only because nothing else could ever get
+     deep — the clamp held it at the film. With the clamp gone a BUOYANT node
+     can be dragged under by a weighted fly, and measured before this was
+     widened, three of them went through the bed and kept going.
+     It is NOT widened to the dry path, though, and that was measured too: a
+     dry rig's nodes only reach the bed when a hooked fish drags them there,
+     and pinning them stopped the fish being able to pull at all — peak
+     tension fell from 10.5 N to 0.4 in the slack case. The dry path has its
+     own answer to the bed and has had for as long as fish have sounded. */
+  if((dense||buoy)&&pos[p+1]<gy+0.012){pos[p+1]=gy+0.012;if(vel[p+1]<0)vel[p+1]=0;}
   computeFlow(x,z);
   const contact=above<0?1:Math.max(0,1-above/0.06);
   if(contact<=0) return;
-  let rx=vel[p]-flowX, ry=vel[p+1], rz=vel[p+2]-flowZ;
+  /* the vertical is measured from vSink rather than from zero, so the water
+     carries this node to its own terminal rate instead of to a standstill.
+     vSink is 0 on the dry path, which leaves that case bit-for-bit. */
+  let rx=vel[p]-flowX, ry=vel[p+1]-vSink, rz=vel[p+2]-flowZ;
   const rsp=Math.sqrt(rx*rx+ry*ry+rz*rz);
   const kd=1/(1+((12+4*P.stick)*rsp+(8+3*P.stick))*h*contact);
   rx*=kd;ry*=kd;rz*=kd;
-  vel[p]=flowX+rx;vel[p+1]=ry;vel[p+2]=flowZ+rz;
+  vel[p]=flowX+rx;vel[p+1]=vSink+ry;vel[p+2]=flowZ+rz;
 }
 
 /* ---- what the scenery is allowed to touch ---------------------------------
@@ -7265,6 +7312,11 @@ function spawnRing(x,z,scale){
 /* Contact. Everything the old take block did at the instant of decision now
    happens here instead, when the fish has actually reached the fly. */
 function commitStrike(f){
+  /* HE IS YOURS NOW, and if somebody else is fishing with you they are told
+     so. A fish being fought has to be simulated by whoever is holding the
+     rod — see fishClaim — or the fight runs through a hundred milliseconds
+     of wire and stops being a fight. */
+  fishClaim(fishes.indexOf(f));
   f.state='hooked';f.stamina=1;f.runT=0;f.risePitch=0;f.riseRoll=0;hooked=f;
   f.v.set(0,0,0);f.p.set(pos[0],pos[1],pos[2]);invM[0]=0;
   const T=(RN-1)*3;
@@ -8301,6 +8353,17 @@ function drawHUD(){
     ['HOOKED',hooked?(hooked.stamina*100).toFixed(0)+' % left':'\u2014'],
     ['FISH DOING',hooked?hooked.beh.toUpperCase():'\u2014'],
   ];
+  /* THEIR DRIFT, WHEN SOMEBODY IS FISHING WITH YOU. A learner is told "drag
+     off the rock — refused" and has no idea what that means. These are the
+     three numbers the rule actually decides on, off their headset, so the
+     person teaching can watch a drift go wrong and say why while it is
+     happening rather than afterwards. */
+  if(MP.conn&&MP.conn.open){
+    const d=MP.theirDrift;
+    rows.push(['THEIR COVER',(d[0]*100).toFixed(0)+' %']);
+    rows.push(['THEIR SLIP',d[1].toFixed(2)+' / '+P.maxSlip.toFixed(2)]);
+    rows.push(['THEIR SEAM',(TEACH_WHY[Math.round(d[2])]||'window').toUpperCase()]);
+  }
   rows.forEach(([k,v],i)=>{const y=34+i*30;
     c.fillStyle='#7d8b8c';c.fillText(k,24,y);
     c.fillStyle='#e8e3d4';c.textAlign='right';c.fillText(v,488,y);c.textAlign='left';});
@@ -8322,7 +8385,18 @@ let settingsStr='', copyState='';
    `all` overrides that for the deliberate share: `Copy settings` hands over a
    complete tuning including the water, and marks the URL so the boot block
    knows not to overwrite it. */
-function venueOwned(k){ return (k in VENUE_BASE)||(SC.par&&(k in SC.par)); }
+/* SEEDED BY THE VENUE, THEN YOURS. A third category, and it exists because
+   two-headset play exposed a design error. The sink rates live in VENUE_BASE
+   so that arriving at the Beaver Pond hands you a sinking leader, which is
+   right — but that also made them "the river's", and the river travels from
+   the host, so a GUEST could not change their own line: the host's next beat
+   put it back within a second. Your line is yours. The venue sets it up when
+   you arrive and after that nobody else touches it, which is exactly how
+   `applyFly` already treats the fly. */
+const SEEDED={flySink:1, tipSink:1, lineSink:1};
+function venueOwned(k){
+  return ((k in VENUE_BASE)||(SC.par&&(k in SC.par)))&&!(k in SEEDED);
+}
 function encodeSettings(all){
   const parts=[];
   for(const k of Object.keys(P))
@@ -9016,6 +9090,7 @@ function onSettingChanged(key){
   if(key==='grade'){waterMat.uniforms.uGrade.value=P.grade;placeTrees();placeRocks();}
   if(key==='bankGrass'){placeGrass();placeTrees();}
   if(key==='reelHand')applyReelHand();
+  if(key==='teachFollow') mpSendObj({t:'follow', on:P.teachFollow>0.5});
   if(key==='flyPat')applyFly();
   if(key==='rodHue'||key==='reelHue'||key==='lineHue'||key==='gripHue')applyTackleColours();
   if(key==='bedDetail'&&bedMat&&bedMat.normalScale)
@@ -10535,7 +10610,9 @@ renderer.setAnimationLoop(()=>{
   const haveLeft=!!offGrip;
   if(haveLeft){
     offGrip.getWorldPosition(_lh);
-    leftHand.position.copy(_lh);leftHand.visible=!netOn;
+    /* the angler rig carries its own hands, so the bare sphere stands down
+       rather than sitting inside one */
+    leftHand.position.copy(_lh);leftHand.visible=!netOn&&P.ownBody<0.5;
     leftHand.material.color.setHex(handMode===2?0xd98f4f:handMode===1?0xa8b4a0:0xc9a882);
     netGrp.visible=netOn;
     if(netOn){netGrp.position.copy(_lh);offGrip.getWorldQuaternion(_camQ);netGrp.quaternion.copy(_camQ);}
@@ -10944,12 +11021,14 @@ renderer.setAnimationLoop(()=>{
     hooked.stamina=Math.max(0,hooked.stamina
       -(M.tension*0.0060+hooked.effort*0.055)*P.fatigue*beh(hooked,'tire')*dt-dt*0.008);
     if(M.tension>P.tippet){
+      fishRelease(fishes.indexOf(hooked));
       hooked.spook('tippet popped',1);hooked=null;fishTension=0;fishCarried=0;rebuildMasses();pulse(1.0);
     } else if(netOn&&haveLeft){
       netMouth.getWorldPosition(_netP);
       const d=Math.hypot(fx-_netP.x,fy-_netP.y,fz-_netP.z);
       if(d<P.netRadius){
         const f=hooked;
+        fishRelease(fishes.indexOf(f));
         hooked=null;fishTension=0;fishCarried=0;rebuildMasses();pulse(0.6);
         f.land();
         say('netted a '+f.sp.label+' \u2014 '+f.lengthIn().toFixed(1)+' in, '+f.weightText(),f);
@@ -10960,7 +11039,11 @@ renderer.setAnimationLoop(()=>{
   /* the parked fish square their cards up to you, so this is needed whether or
      not there is a left hand tracked to fill it in the controller pass */
   camera.getWorldQuaternion(_camQW);
-  for(const f of fishes) f.update(dt,t);
+  /* A GUEST RUNS ONLY THE FISH IT OWNS. Everything else is eased toward
+     wherever the host last said it was — see fishShow. Alone or hosting,
+     fishMine is true for all of them and this is the loop it always was. */
+  for(let i=0;i<fishes.length;i++) if(fishMine(i)) fishes[i].update(dt,t);
+  fishShow(dt);
 
   /* ---- sound ---- */
   if(SND.ok){
@@ -11584,12 +11667,197 @@ function remoteData(d){
    are still each player's own. That is the whole reason this stage is
    cheap and the next one is not.
    ════════════════════════════════════════════════════════════ */
+/* ── AN ANGLER YOU CAN SEE ────────────────────────────────────────────────
+   A head and a trunk were enough to say "somebody is there"; arms and legs
+   are what make it a person. Asked for from the water, along with the fair
+   question of whether a fly-fisherman model needs finding somewhere. It does
+   not, and it would be the wrong thing:
+
+   · A HEADSET GIVES THREE TRACKED POINTS — the head and two hands. A rigged
+     model does not solve the hard part, it makes it harder: the elbows,
+     shoulders, hips, knees and feet all still have to be invented, and a
+     realistic mesh makes an invented elbow look worse than a plain one does.
+   · THE IMPORT CHAIN DOES NOT EXIST. The importmap in this file is one line.
+     A GLB means a loader, a second CDN and an asset, and index.html stops
+     being the whole shippable thing, which is the property the project is
+     built on.
+   · Everything else here is procedural — the boat is lofted from fourteen
+     stations, the oar blade is a generated mesh, the trout is built in code.
+
+   AND IT NEEDS NOTHING NEW ON THE WIRE. The head pose is already sent, the
+   line hand is already sent, and the rod hand is rod node 0 — the grip — so
+   it is already sent too. The feet are dropped from the head to the bed.
+
+   ARMS AND LEGS ARE CLOSED FORM, not a solver. Given a shoulder S, the
+   tracked hand H and two bone lengths a and b, the elbow lies on a circle:
+   `l = (d² + a² − b²)/2d` along the S→H axis with radius `r = √(a² − l²)`,
+   and which point on that circle is chosen by a hint direction — elbows down
+   and outward, knees forward. Exact, no iteration, about a dozen lines.
+   Beyond reach it straightens instead of tearing.                         */
+const ARM_UP=0.28, ARM_LO=0.27, LEG_UP=0.44, LEG_LO=0.42;
+const _ikA=new THREE.Vector3(), _ikB=new THREE.Vector3(), _ikN=new THREE.Vector3();
+/* the elbow (or knee) for a two-bone chain from `s` to `e`, bent toward `hint` */
+function ikJoint(sx,sy,sz,ex,ey,ez,a,b,hx,hy,hz,out){
+  _ikA.set(ex-sx,ey-sy,ez-sz);
+  let d=_ikA.length();
+  if(d<1e-5){ _ikA.set(0,-1,0); d=1e-5; }
+  /* past its reach the limb straightens rather than coming apart */
+  const dc=Math.min(d,(a+b)*0.999);
+  const l=(dc*dc+a*a-b*b)/(2*dc);
+  const r=Math.sqrt(Math.max(0,a*a-l*l));
+  _ikB.copy(_ikA).multiplyScalar(1/d);
+  /* the hint, with its along-the-bone part taken out, is the bend direction */
+  _ikN.set(hx,hy,hz);
+  const dot=_ikN.dot(_ikB);
+  _ikN.addScaledVector(_ikB,-dot);
+  if(_ikN.lengthSq()<1e-8) _ikN.set(0,-1,0).addScaledVector(_ikB,-_ikB.y);
+  _ikN.normalize();
+  out.set(sx+_ikB.x*l+_ikN.x*r, sy+_ikB.y*l+_ikN.y*r, sz+_ikB.z*l+_ikN.z*r);
+  return out;
+}
+/* a limb is two tapered bones and a ball at the joint, and it is posed by
+   moving three objects rather than rebuilding any geometry */
+function limbMake(g,rUp,rLo,col,jointR){
+  const m=new THREE.MeshStandardMaterial({color:col,roughness:0.82});
+  const up=new THREE.Mesh(new THREE.CylinderGeometry(rUp,rLo,1,7),m);
+  const lo=new THREE.Mesh(new THREE.CylinderGeometry(rLo,rLo*0.82,1,7),m);
+  const jt=new THREE.Mesh(new THREE.SphereGeometry(jointR,8,6),m);
+  g.add(up,lo,jt);
+  return {up,lo,jt,m};
+}
+/* point a unit-height cylinder from p to q */
+const _segA=new THREE.Vector3(), _segB=new THREE.Vector3(), _segU=new THREE.Vector3(0,1,0);
+function segPose(mesh,ax,ay,az,bx,by,bz){
+  _segA.set(bx-ax,by-ay,bz-az);
+  const len=_segA.length()||1e-5;
+  mesh.position.set((ax+bx)*0.5,(ay+by)*0.5,(az+bz)*0.5);
+  _segB.copy(_segA).multiplyScalar(1/len);
+  mesh.quaternion.setFromUnitVectors(_segU,_segB);
+  mesh.scale.set(1,len,1);
+}
+/* ONE BUILDER, TWO ANGLERS. Yours and your friend's are the same rig, so
+   there is one definition of what a person looks like here. */
+function anglerMake(){
+  const g=new THREE.Group(); g.visible=false; scene.add(g);
+  const skin=0xc08f6a, wader=0x4a5b4a, vest=0x6b6355;
+  const M=(c,ro)=>new THREE.MeshStandardMaterial({color:c,roughness:ro===undefined?0.85:ro});
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.108,14,10),M(skin,0.8));
+  /* A BRIM IS WORTH MORE THAN THE ARMS AT THIRTY METRES. It is the one part
+     that says which way somebody is facing from across a river. */
+  const brim=new THREE.Mesh(new THREE.CylinderGeometry(0.155,0.165,0.014,14),M(0x6e5c3f));
+  brim.position.set(0,0.055,-0.03);
+  const crown=new THREE.Mesh(new THREE.SphereGeometry(0.098,12,7,0,Math.PI*2,0,Math.PI*0.55),M(0x6e5c3f));
+  crown.position.y=0.055;
+  head.add(brim,crown);
+  const chest=new THREE.Mesh(new THREE.CylinderGeometry(0.165,0.185,0.40,12),M(vest,0.9));
+  /* the wader line sits at the chest, which is where a chest wader's does */
+  const belly=new THREE.Mesh(new THREE.CylinderGeometry(0.185,0.20,0.34,12),M(wader));
+  const hips=new THREE.Mesh(new THREE.SphereGeometry(0.19,12,8),M(wader));
+  hips.scale.set(1,0.62,0.85);
+  g.add(head,chest,belly,hips);
+  const arms=[limbMake(g,0.055,0.045,skin,0.052),limbMake(g,0.055,0.045,skin,0.052)];
+  const legs=[limbMake(g,0.095,0.075,wader,0.09),limbMake(g,0.095,0.075,wader,0.09)];
+  const hands=[new THREE.Mesh(new THREE.SphereGeometry(0.042,10,8),M(skin,0.75)),
+               new THREE.Mesh(new THREE.SphereGeometry(0.042,10,8),M(skin,0.75))];
+  g.add(hands[0],hands[1]);
+  return {g,head,chest,belly,hips,arms,legs,hands,
+          sh:[new THREE.Vector3(),new THREE.Vector3()],
+          hip:[new THREE.Vector3(),new THREE.Vector3()],
+          el:[new THREE.Vector3(),new THREE.Vector3()],
+          kn:[new THREE.Vector3(),new THREE.Vector3()],
+          ft:[new THREE.Vector3(),new THREE.Vector3()]};
+}
+const _angF=new THREE.Vector3(), _angR=new THREE.Vector3(), _angQ=new THREE.Quaternion();
+const _hReach=[new THREE.Vector3(),new THREE.Vector3()];
+/* Pose one angler. `hx,hy,hz` + `hq` is the head; `rh` and `lh` are the two
+   hands in world space; `soleY` is what the feet stand on. */
+function anglerPose(A,hx,hy,hz,hq,rh,lh,soleY){
+  A.g.visible=true;
+  A.head.position.set(hx,hy,hz);
+  A.head.quaternion.copy(hq);
+  /* facing, from the head, flattened: a body does not pitch when you look up */
+  _angF.set(0,0,-1).applyQuaternion(hq); _angF.y=0;
+  if(_angF.lengthSq()<1e-6) _angF.set(0,0,-1);
+  _angF.normalize();
+  _angR.set(-_angF.z,0,_angF.x);                 /* his right */
+  const yaw=Math.atan2(_angF.x,_angF.z);
+  _angQ.setFromAxisAngle(_segU,yaw);
+  const neck=hy-0.14;
+  A.chest.position.set(hx,neck-0.20,hz); A.chest.quaternion.copy(_angQ);
+  A.belly.position.set(hx,neck-0.57,hz); A.belly.quaternion.copy(_angQ);
+  A.hips.position.set(hx,neck-0.76,hz);  A.hips.quaternion.copy(_angQ);
+  const hipY=neck-0.78;
+  for(let s=0;s<2;s++){
+    const sg=s?-1:1;
+    A.sh[s].set(hx+_angR.x*0.17*sg, neck-0.06, hz+_angR.z*0.17*sg);
+    A.hip[s].set(hx+_angR.x*0.10*sg, hipY, hz+_angR.z*0.10*sg);
+  }
+  /* ARMS. The hint puts the elbow down and outward, which is where an elbow
+     goes; without the outward part both arms bend straight back and read as
+     a bird.
+     AND A HAND FURTHER AWAY THAN THE ARM IS LONG IS BROUGHT IN FIRST. ikJoint
+     straightens the limb beyond its reach, but segPose then SCALES the
+     forearm mesh to span elbow-to-hand, so an unreachable hand stretched the
+     arm like rubber — measured at 2.7 m from a 0.55 m arm. It cannot happen
+     from a headset on a body, but it can from one bad packet or the frame a
+     teleport lands on, and an arm at full stretch pointing at where the hand
+     claims to be reads far better than an arm made of chewing gum. */
+  const hnd=[rh,lh], REACH=(ARM_UP+ARM_LO)*0.995;
+  for(let s=0;s<2;s++){
+    const sg=s?-1:1;
+    _ikA.set(hnd[s].x-A.sh[s].x,hnd[s].y-A.sh[s].y,hnd[s].z-A.sh[s].z);
+    const hd=_ikA.length();
+    const h=hd>REACH
+      ? _hReach[s].copy(A.sh[s]).addScaledVector(_ikA,REACH/hd)
+      : hnd[s];
+    ikJoint(A.sh[s].x,A.sh[s].y,A.sh[s].z, h.x,h.y,h.z, ARM_UP,ARM_LO,
+            _angR.x*0.55*sg-_angF.x*0.35, -1, _angR.z*0.55*sg-_angF.z*0.35, A.el[s]);
+    const L=A.arms[s];
+    segPose(L.up,A.sh[s].x,A.sh[s].y,A.sh[s].z,A.el[s].x,A.el[s].y,A.el[s].z);
+    segPose(L.lo,A.el[s].x,A.el[s].y,A.el[s].z,h.x,h.y,h.z);
+    L.jt.position.copy(A.el[s]);
+    A.hands[s].position.copy(h);
+  }
+  /* LEGS. No foot tracking exists, so they stand under him, spread a little
+     and turned with him. On a wading venue they are under the water from the
+     knee down and the film hides most of what that costs. */
+  for(let s=0;s<2;s++){
+    const sg=s?-1:1;
+    A.ft[s].set(hx+_angR.x*0.15*sg-_angF.x*0.02, soleY, hz+_angR.z*0.15*sg-_angF.z*0.02);
+    ikJoint(A.hip[s].x,A.hip[s].y,A.hip[s].z, A.ft[s].x,A.ft[s].y,A.ft[s].z,
+            LEG_UP,LEG_LO, _angF.x, -0.15, _angF.z, A.kn[s]);
+    const L=A.legs[s];
+    segPose(L.up,A.hip[s].x,A.hip[s].y,A.hip[s].z,A.kn[s].x,A.kn[s].y,A.kn[s].z);
+    segPose(L.lo,A.kn[s].x,A.kn[s].y,A.kn[s].z,A.ft[s].x,A.ft[s].y,A.ft[s].z);
+    L.jt.position.copy(A.kn[s]);
+  }
+}
+/* what the feet stand on at a given spot: the boat's sole if you are in one,
+   otherwise the bed, and never above the water you are standing in */
+function soleAt(x,z){
+  if(boatOn&&SC.boat) return boatFloorY();
+  return bedY(x,z);
+}
+
 const MPL_N=48;                  /* line points sent for a peer */
 const MP_ROD=0, MP_HEAD=RN*3, MP_HAND=MP_HEAD+7, MP_QUAT=MP_HAND+4,
-      MP_INFO=MP_QUAT+4, MP_LINE=MP_INFO+4, MP_STRIDE=MP_LINE+MPL_N*3;
+      /* MP_DRIFT: cover, average slip, and which feature is shaping the
+         window — the three numbers the take rule actually decides on, sent
+         so whoever is teaching can watch a drift go wrong and say why. */
+      MP_DRIFT=MP_QUAT+4, MP_INFO=MP_DRIFT+3,
+      MP_LINE=MP_INFO+4, MP_STRIDE=MP_LINE+MPL_N*3;
 const MP_HZ=20, MP_SMOOTH=13, MP_STALE=3000;
 const MP={peer:null, conn:null, code:'', role:'off', state:'off', err:'',
-          timer:null, beat:0, last:null, shown:null, rxT:0, rx:0, tx:0};
+          timer:null, beat:0, last:null, shown:null, rxT:0, rx:0, tx:0,
+          /* teaching: whether the far end is following us, what we last sent
+             them, and the last drift numbers they sent back */
+          follower:false, taught:{}, theirDrift:[0,0,0],
+          /* voice: the microphone, the live call, and whether you asked */
+          mic:null, call:null, hear:null,
+          voiceWanted:false, voiceOn:false, voiceErr:'',
+          /* shared fish: 0 nobody, 1 ours, 2 theirs — and when the host last
+             described the river to us */
+          own:[], tx3:[], fishSeen:0};
 
 /* ── his rod, his reel, his hands, his line ──────────────────────────── */
 const peerTube=new RodTube(RN,6);
@@ -11604,23 +11872,22 @@ peerHand.visible=false; scene.add(peerHand);
 const peerReel=new THREE.Mesh(new THREE.CylinderGeometry(0.043,0.043,0.022,14),
   new THREE.MeshStandardMaterial({color:0x6d747a,metalness:0.7,roughness:0.35}));
 peerReel.visible=false; scene.add(peerReel);
-/* A HEAD AND A BODY, because "see them" is the whole request and a rod
-   swinging on its own reads as a poltergeist. Nothing clever: a head at
-   his camera, a waders-coloured trunk hung under it and yawed the way he
-   is facing. It is recognisable as a person at thirty metres, which is
-   the distance that matters on a river. */
-const peerHead=new THREE.Mesh(new THREE.SphereGeometry(0.115,14,10),
-  new THREE.MeshStandardMaterial({color:0xc08f6a,roughness:0.8}));
-peerHead.visible=false; scene.add(peerHead);
-const peerBody=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.21,0.95,12),
-  new THREE.MeshStandardMaterial({color:0x4a5b4a,roughness:0.85}));
-peerBody.visible=false; scene.add(peerBody);
+/* A WHOLE ANGLER, because "see them" is the whole request and a rod swinging
+   on its own reads as a poltergeist. This was a head and a trunk for one
+   round; it is now the full rig from anglerMake — hat, vest, waders, arms and
+   legs — and yours is the same one (see P.ownBody). */
+const peerMan=anglerMake();
+/* AND ONE FOR YOU, off by default — see the menu row. Same builder, so there
+   is one definition of what a person looks like in this river. */
+const myMan=anglerMake();
+const _myRH=new THREE.Vector3(), _myLH=new THREE.Vector3();
 /* and where his fly is, which is the one thing you most want to see on
    somebody else's water. It brightens while he has a fish on. */
 const peerFly=new THREE.Mesh(new THREE.SphereGeometry(0.018,8,6),
   new THREE.MeshStandardMaterial({color:0xe0c26a,roughness:0.6}));
 peerFly.visible=false; scene.add(peerFly);
 const _mpRod=new Float32Array(RN*3), _mpPath=new Float32Array(MPL_N*3);
+const _mpRH=new THREE.Vector3(), _mpLH=new THREE.Vector3();
 const _mpP=new THREE.Vector3(), _mpQ=new THREE.Quaternion(), _mpF=new THREE.Vector3();
 /* MY OWN HEAD, CAPTURED IN THE FRAME LOOP. The send runs on a timer, and in
    WebXR the camera's world matrix is only meaningful inside a frame — read
@@ -11638,6 +11905,7 @@ function mpPack(){
   f[o+3]=_mpMyQ.x; f[o+4]=_mpMyQ.y; f[o+5]=_mpMyQ.z; f[o+6]=_mpMyQ.w;
   o=MP_HAND; f[o]=_lh.x; f[o+1]=_lh.y; f[o+2]=_lh.z; f[o+3]=handMode;
   o=MP_QUAT; f[o]=_q.x; f[o+1]=_q.y; f[o+2]=_q.z; f[o+3]=_q.w;
+  o=MP_DRIFT; const dr=teachWatched(); f[o]=dr[0]; f[o+1]=dr[1]; f[o+2]=dr[2];
   o=MP_INFO; f[o]=lineOut; f[o+1]=hooked?1:0;
              f[o+2]=hooked?hooked.len:0; f[o+3]=simTime;
   /* dynPath was resampled this frame for the live line render and spans the
@@ -11687,6 +11955,7 @@ function mpUnpack(f){
   if(!f||f.length<MP_STRIDE) return false;
   if(!MP.last) MP.last=new Float32Array(MP_STRIDE);
   MP.last.set(f.subarray(0,MP_STRIDE));
+  MP.theirDrift=[f[MP_DRIFT],f[MP_DRIFT+1],f[MP_DRIFT+2]];
   MP.rx++; MP.rxT=mpNow();
   return true;
 }
@@ -11701,37 +11970,45 @@ const mpNow=()=>(typeof performance!=='undefined'&&performance.now)?performance.
 function mpHide(){
   peerTube.mesh.visible=false; peerLine.mesh.visible=false;
   peerHand.visible=false; peerReel.visible=false;
-  peerHead.visible=false; peerBody.visible=false; peerFly.visible=false;
+  peerMan.g.visible=false; peerFly.visible=false;
 }
 /* Called once a frame: take my own head pose while it is legal to read, then
    draw his. Nothing else in here costs anything when nobody is connected. */
 function mpFrame(dt){
   camera.getWorldPosition(_mpMyP); camera.getWorldQuaternion(_mpMyQ);
+  /* your own body, from the same three points and the same builder */
+  if(P.ownBody>0.5&&!previewOn){
+    _myRH.set(rpos[0],rpos[1],rpos[2]);
+    _myLH.copy(_lh);
+    anglerPose(myMan,_mpMyP.x,_mpMyP.y,_mpMyP.z,_mpMyQ,_myRH,_myLH,
+               soleAt(_mpMyP.x,_mpMyP.z));
+    /* his head would be inside your eyes; everything else stays */
+    myMan.head.visible=false;
+  } else if(myMan.g.visible) myMan.g.visible=false;
   mpShow(dt);
 }
 function mpShow(dt){
-  if(!MP.last||mpNow()-MP.rxT>MP_STALE){ if(peerHead.visible) mpHide(); return; }
+  if(!MP.last||mpNow()-MP.rxT>MP_STALE){ if(peerMan.g.visible) mpHide(); return; }
   if(!MP.shown) MP.shown=MP.last.slice(0);
   const s=MP.shown, L=MP.last, a=Math.min(1,1-Math.exp(-dt*MP_SMOOTH));
   for(let i=0;i<MP_STRIDE;i++) s[i]+=(L[i]-s[i])*a;
   _mpRod.set(s.subarray(MP_ROD,MP_ROD+RN*3));
   peerTube.update(_mpRod); peerTube.mesh.visible=true;
   let o=MP_HEAD;
-  peerHead.position.set(s[o],s[o+1],s[o+2]);
   /* lerping a quaternion componentwise is only valid for small steps, which
      is all this ever takes between frames — but it does leave it off the
      unit sphere, so it is normalised before anything is rotated by it */
   _mpQ.set(s[o+3],s[o+4],s[o+5],s[o+6]).normalize();
-  peerHead.quaternion.copy(_mpQ);
-  _mpF.set(0,0,-1).applyQuaternion(_mpQ);
-  peerBody.position.set(s[o],s[o+1]-0.60,s[o+2]);
-  peerBody.rotation.y=Math.atan2(_mpF.x,_mpF.z);
-  peerHead.visible=peerBody.visible=true;
+  /* HIS ROD HAND IS THE GRIP, which is rod node 0 and already on the wire —
+     so the arm that matters most costs nothing extra to place. */
+  _mpRH.set(_mpRod[0],_mpRod[1],_mpRod[2]);
   o=MP_HAND;
-  peerHand.position.set(s[o],s[o+1],s[o+2]);
+  _mpLH.set(s[o],s[o+1],s[o+2]);
   /* his line hand goes bright while he is gripping, so you can see a haul */
-  peerHand.material.color.setHex(s[o+3]>1.5?0xffd23e:s[o+3]>0.5?0xe8c79a:0xc9a882);
-  peerHand.visible=true;
+  peerMan.hands[1].material.color.setHex(s[o+3]>1.5?0xffd23e:s[o+3]>0.5?0xe8c79a:0xc9a882);
+  anglerPose(peerMan,s[MP_HEAD],s[MP_HEAD+1],s[MP_HEAD+2],_mpQ,_mpRH,_mpLH,
+             soleAt(s[MP_HEAD],s[MP_HEAD+2]));
+  peerHand.visible=false;
   o=MP_QUAT;
   _mpQ.set(s[o],s[o+1],s[o+2],s[o+3]).normalize();
   peerReel.position.set(_mpRod[0],_mpRod[1],_mpRod[2])
@@ -11775,7 +12052,12 @@ function mpAttach(conn){
     if(MP.conn!==conn) return;
     MP.state='ready';
     if(MP.role==='host') mpSendObj(mpRiver());
+    /* tell them straight away whether we are following, so a learner who set
+       the row before connecting does not have to touch it again */
+    MP.taught={};
+    mpSendObj({t:'follow', on:P.teachFollow>0.5});
     mpTimerStart();
+    voiceTry();
     say('your friend is here');
   });
   conn.on('data',d=>{ try{ mpData(d); }catch(e){ console.error('mp:',e); } });
@@ -11785,6 +12067,9 @@ function mpAttach(conn){
 function mpDrop(conn){
   if(MP.conn!==conn) return;
   MP.conn=null; MP.last=null; MP.shown=null;
+  MP.follower=false; MP.taught={}; MP.theirDrift=[0,0,0];
+  MP.own=[]; MP.tx3=[]; MP.fishSeen=0;
+  voiceDrop();
   mpTimerStop(); mpHide();
   if(MP.state!=='error') MP.state=MP.peer?'ready':'off';
   say('your friend dropped out');
@@ -11809,6 +12094,21 @@ function mpData(d){
   /* the river is the HOST's to describe, so a guest applies it and a host
      ignores one arriving the other way */
   if(d.t==='river'&&MP.role==='guest') mpTakeRiver(d);
+  /* TEACHING GOES BOTH WAYS, unlike the river: either of you can be the one
+     showing the other something. */
+  if(d.t==='follow'){
+    const on=!!d.on;
+    if(on!==MP.follower){
+      MP.follower=on; MP.taught={};
+      say(on?'your friend is following your setup':'your friend stopped following');
+      if(on) teachPush(true);
+    }
+    return;
+  }
+  if(d.t==='teach') teachTake(d);
+  /* the fish, and who is allowed to move which */
+  if(d.t==='fish'&&MP.role==='guest') fishTake(d.a);
+  if(d.t==='claim'||d.t==='free'||d.t==='own') fishOwnMsg(d);
 }
 function mpSendObj(o){
   const c=MP.conn;
@@ -11821,7 +12121,12 @@ function mpSend(){
   /* a fresh array per send: PeerJS may serialise after this returns, and
      one reused buffer mutated underneath it is a corrupt frame */
   try{ c.send(mpPack().buffer); MP.tx++; }catch(e){}
-  if(MP.role==='host'&&(++MP.beat%MP_HZ)===0) mpSendObj(mpRiver());
+  if(MP.role==='host'){
+    if((++MP.beat%MP_HZ)===0) mpSendObj(mpRiver());
+    if((MP.beat%Math.round(MP_HZ/FISH_HZ))===0) mpSendObj({t:'fish', a:fishPack()});
+  }
+  /* and anything the teacher has changed since the last tick */
+  teachPush(false);
 }
 /* A timer, not the frame loop — same reasoning as the phone remote: none of
    this belongs in the solver's budget, and window timers keep running
@@ -11839,6 +12144,9 @@ function mpStop(){
   try{ if(MP.peer) MP.peer.destroy(); }catch(e){}
   MP.conn=null; MP.peer=null; MP.code=''; MP.role='off'; MP.state='off';
   MP.last=null; MP.shown=null; MP.beat=0;
+  MP.follower=false; MP.taught={}; MP.theirDrift=[0,0,0];
+  MP.own=[]; MP.tx3=[]; MP.fishSeen=0;
+  voiceOff();
   mpHide();
   say('fishing alone again');
 }
@@ -11881,6 +12189,7 @@ function mpOpen(tries){
     MP.state='error'; MP.err=t;
   });
   peer.on('connection',conn=>mpAttach(conn));
+  peer.on('call',c=>voiceAnswer(c));
 }
 /* JOINING IS TYPED, WHICH MEANS IT IS TYPED OUTSIDE THE HEADSET. Four
    letters are trivial on the flat page and miserable on a VR keyboard, so
@@ -11905,6 +12214,7 @@ function mpJoin(code){
       if(MP.peer!==peer) return;
       mpAttach(peer.connect('flycast-mp-'+code));
     });
+    peer.on('call',c=>voiceAnswer(c));
     peer.on('error',e=>{
       if(MP.peer!==peer) return;
       const t=(e&&e.type)||'unknown';
@@ -11919,6 +12229,280 @@ function mpJoin(code){
       }
     },15000);
   });
+}
+
+/* ── ONE RIVER, ONE SET OF FISH ───────────────────────────────────────────
+   Until now you each had your own trout: you could see your friend's rod bend
+   but the fish on the end of it was not in your water. This makes the fish
+   shared, and the whole of the difficulty is WHO SIMULATES WHICH ONE.
+
+   AUTHORITY MIGRATES, PER FISH. The host owns every fish nobody has hooked
+   and broadcasts where they are ten times a second. The moment somebody hooks
+   one, that fish belongs to whoever hooked it for as long as the fight lasts,
+   and goes back to the host when it is landed or comes off.
+
+   That is not an optimisation, it is the only arrangement that can work. Rod
+   feel is the whole game, and a fight simulated at the far end of a hundred
+   milliseconds is a fight through treacle. Whoever is holding the rod must be
+   the one running the fish. Everybody else sees an interpolated trout on a
+   bending rod, which reads perfectly at any distance you would be standing.
+
+   A GUEST STOPS THINKING FOR THE FISH IT DOES NOT OWN — no behaviour, no
+   feeding decisions, no rises of its own — and simply eases them toward where
+   the host says they are. Its OWN take test still runs locally, because that
+   has to be instant; what it does on a take is claim the fish.
+
+   NONE OF THIS RUNS UNLESS YOU ARE A CONNECTED GUEST. Fishing alone, and
+   hosting, are the paths the whole game is tuned on and they are untouched.  */
+const FISH_HZ=10;
+const fishRemote=()=>MP.role==='guest'&&MP.conn&&MP.conn.open&&MP.fishSeen>0;
+/* who is entitled to simulate fish `i` right now */
+function fishMine(i){
+  if(!fishRemote()) return true;                 /* alone, or the host: all of them */
+  return MP.own[i]===1;                          /* a guest owns only what it claimed */
+}
+/* the host's picture of the river, as a flat array: six numbers a fish */
+function fishPack(){
+  const a=[];
+  for(let i=0;i<fishes.length;i++){
+    const f=fishes[i];
+    /* a fish the far end is fighting is THEIRS — do not send it back at them */
+    if(MP.own[i]===2){ a.push(0,0,0,0,0,0); continue; }
+    a.push(+f.p.x.toFixed(2),+f.p.y.toFixed(2),+f.p.z.toFixed(2),
+           FISH_STATE.indexOf(f.state),
+           (f.feeding?1:0)+(f.held?2:0)+(f.inBoat?4:0),
+           +(f.cruHead||0).toFixed(2));
+  }
+  return a;
+}
+const FISH_STATE=['holding','striking','hooked','chasing','spooked','landed'];
+function fishTake(a){
+  if(!a||!a.length) return;
+  MP.fishSeen=mpNow();
+  for(let i=0;i<fishes.length&&i*6+5<a.length;i++){
+    if(MP.own[i]===1) continue;                  /* mine to run, not theirs to tell */
+    const f=fishes[i], o=i*6;
+    if(a[o+3]<0) continue;                       /* a fish they are not describing */
+    MP.tx3[i]=MP.tx3[i]||new THREE.Vector3();
+    MP.tx3[i].set(a[o],a[o+1],a[o+2]);
+    const st=FISH_STATE[a[o+3]];
+    if(st&&f.state!==st&&st!=='hooked') f.state=st;
+    const fl=a[o+4]|0;
+    f.feeding=!!(fl&1);
+    f.cruHead=a[o+5];
+  }
+}
+/* eased, not snapped — ten packets a second against seventy-two frames */
+function fishShow(dt){
+  if(!fishRemote()) return;
+  const k=Math.min(1,1-Math.exp(-dt*9));
+  for(let i=0;i<fishes.length;i++){
+    if(MP.own[i]===1) continue;
+    const t=MP.tx3[i];
+    if(!t) continue;
+    const f=fishes[i];
+    f.p.x+=(t.x-f.p.x)*k; f.p.y+=(t.y-f.p.y)*k; f.p.z+=(t.z-f.p.z)*k;
+  }
+}
+/* CLAIMING. The take test runs on both machines because it has to be instant;
+   the host arbitrates, because two people can in principle cover the same
+   fish at the same moment. A guest hooks optimistically and is told to let go
+   if it lost the race — which is the right way round: the rare case pays. */
+function fishClaim(i){
+  if(!MP.conn||!MP.conn.open) return true;       /* alone: it is yours */
+  if(MP.role==='host'){
+    if(MP.own[i]===2) return false;              /* they already have it */
+    MP.own[i]=1; mpSendObj({t:'own', i, v:0});
+    return true;
+  }
+  MP.own[i]=1; mpSendObj({t:'claim', i});
+  return true;
+}
+function fishRelease(i){
+  if(MP.own[i]===1){
+    MP.own[i]=0;
+    if(MP.conn&&MP.conn.open) mpSendObj({t:'free', i});
+  }
+}
+function fishOwnMsg(d){
+  const i=d.i|0;
+  if(!(i>=0&&i<fishes.length)) return;
+  if(d.t==='claim'){
+    /* only the host grants, and only if nobody is on it */
+    if(MP.role!=='host') return;
+    if(MP.own[i]===1){ mpSendObj({t:'own', i, v:1}); return; }  /* we got there first */
+    MP.own[i]=2; mpSendObj({t:'own', i, v:2});
+    return;
+  }
+  if(d.t==='free'){ if(MP.own[i]===2) MP.own[i]=0; return; }
+  if(d.t==='own'){
+    /* the host's word. v:2 means it is ours, anything else means let go. */
+    if(d.v===2) MP.own[i]=1;
+    else if(MP.own[i]===1){
+      MP.own[i]=0;
+      if(hooked===fishes[i]){
+        hooked.spook('your friend got there first',1);
+        hooked=null; fishTension=0; fishCarried=0; rebuildMasses();
+      }
+    }
+    return;
+  }
+}
+
+/* ── TALKING ─────────────────────────────────────────────────────────────
+   Fishing with somebody is mostly TALKING to them, and the connection is
+   already open: PeerJS carries a media call over the same peer it carries
+   the data channel over, so this is a microphone and an audio element.
+
+   THE MICROPHONE IS ASKED FOR ON THE FLAT PAGE, deliberately. A permission
+   prompt cannot be answered from inside an immersive session — the browser
+   puts it on the 2D page you can no longer see — so a request made in VR is
+   a request that silently never gets granted. The stream is taken before you
+   put the headset on and held for the session.
+
+   It is NOT positional. Three.js can pan a voice to where somebody is
+   standing and it sounds clever for about a minute; what you actually want
+   on a river is to hear the person next to you clearly while you are both
+   looking at the water. Plain stereo, full volume.  */
+function voiceReady(){ return !!(MP.mic&&MP.mic.getAudioTracks&&MP.mic.getAudioTracks().length); }
+function voiceStatus(){
+  if(!MP.voiceWanted) return 'Voice is off.';
+  if(MP.voiceErr) return 'Voice problem: '+MP.voiceErr;
+  if(!voiceReady()) return 'Asking for the microphone\u2026';
+  return MP.voiceOn?'Talking.':'Microphone ready \u2014 voice starts when your friend joins.';
+}
+/* Ask once, on the flat page, and keep it. */
+function voiceArm(cb){
+  MP.voiceWanted=true; MP.voiceErr='';
+  if(voiceReady()){ if(cb) cb(); return; }
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    MP.voiceErr='this browser will not hand over a microphone'; return;
+  }
+  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false})
+    .then(st=>{ MP.mic=st; voiceTry(); if(cb) cb(); })
+    .catch(e=>{ MP.voiceErr=(e&&e.name)||'refused'; });
+}
+function voiceDrop(){
+  try{ if(MP.call) MP.call.close(); }catch(e){}
+  MP.call=null; MP.voiceOn=false;
+  if(MP.hear){ try{MP.hear.pause();}catch(e){} MP.hear.srcObject=null; }
+}
+function voiceOff(){
+  voiceDrop();
+  MP.voiceWanted=false;
+  try{ if(MP.mic) MP.mic.getTracks().forEach(t=>t.stop()); }catch(e){}
+  MP.mic=null;
+}
+/* Play whatever the far end is sending. One element, reused. */
+function voiceHear(stream){
+  if(!MP.hear){
+    MP.hear=document.createElement('audio');
+    MP.hear.autoplay=true; MP.hear.playsInline=true;
+    try{ document.body.appendChild(MP.hear); }catch(e){}
+  }
+  MP.hear.srcObject=stream;
+  const p=MP.hear.play&&MP.hear.play();
+  if(p&&p.catch) p.catch(()=>{});
+  MP.voiceOn=true;
+}
+/* THE GUEST PLACES THE CALL and the host answers, which is the same shape as
+   the data channel and avoids both ends calling at once. */
+function voiceTry(){
+  if(!MP.voiceWanted||!voiceReady()||!MP.peer||MP.call) return;
+  if(MP.role!=='guest'||!MP.conn||!MP.conn.open) return;
+  try{
+    const c=MP.peer.call(MP.conn.peer,MP.mic);
+    if(!c) return;
+    MP.call=c;
+    c.on('stream',voiceHear);
+    c.on('close',()=>{ if(MP.call===c) voiceDrop(); });
+    c.on('error',()=>{ if(MP.call===c) voiceDrop(); });
+  }catch(e){ MP.voiceErr='could not place the call'; }
+}
+/* and the host answers with its own microphone if it has one */
+function voiceAnswer(c){
+  if(MP.call){ try{MP.call.close();}catch(e){} }
+  MP.call=c;
+  try{ c.answer(MP.voiceWanted&&voiceReady()?MP.mic:undefined); }catch(e){}
+  c.on('stream',voiceHear);
+  c.on('close',()=>{ if(MP.call===c) voiceDrop(); });
+  c.on('error',()=>{ if(MP.call===c) voiceDrop(); });
+}
+
+/* ── TEACHING ────────────────────────────────────────────────────────────
+   Asked for from the water: "it might be nice to push my settings to my
+   friend, changing flies or how fish respond, so I could teach my friend
+   more about fishing while we play."
+
+   Most of it turned out to be there already. The RIVER travels host to guest
+   once a second, and that covers most of "how fish respond": Take radius,
+   Max drag slip, Feeding chance, Rise style, Spook seconds, Lining radius,
+   Splash limit and Zone length are all venue-owned. What does NOT travel is
+   the personal half — the fly, Put down by line, Non-feeder mult, Fish power,
+   Fish size, Stamina drain, Tippet strength and the six chase numbers — and
+   there was no way for a GUEST to teach a HOST at all.
+
+   CONSENT ONCE, THEN SEAMLESS. The learner turns `Follow my friend` on, and
+   from then on the teacher's changes to personal settings arrive live, so
+   "watch, I'll turn their willingness up and you'll see a take" just works.
+   Nothing changes under anybody who has not asked for it: a setting that
+   moves silently is the thing that made the venue leak so hard to find, and
+   across two headsets it would be somebody else's rod. The teacher is told
+   when a learner starts following, and the learner is told what arrived.
+
+   AND THE COACHING GOES THE OTHER WAY. A learner is told "drag off the rock
+   — refused" and has no idea what that means. The three numbers the rule
+   actually decides on — how much of the window the drift covered, the slip
+   it averaged, and which feature is shaping it — ride back on the pose
+   packet, so the teacher can watch a drift go wrong and say why. Three
+   floats, and it is the most useful thing in here.                        */
+/* what may be pushed: everything that is NOT the river's and NOT a display
+   preference. Rod, line, reel, flies, the fish's own character. */
+const TEACH_SKIP={showStats:1, hudScale:1, menuScale:1, ownBody:1, showZones:1,
+                  showMarkers:1, tensionMark:1, handGuide:1, volume:1,
+                  volReel:1, volSplash:1, volRiver:1, speckGPU:1, speckBudget:1,
+                  waterModel:1, gridIter:1, gridRate:1, teachFollow:1};
+function teachable(k){ return !venueOwned(k)&&!(k in TEACH_SKIP)&&!(k in SEEDED); }
+function teachPack(){
+  const o={};
+  for(const k in P) if(teachable(k)) o[k]=P[k];
+  return o;
+}
+/* Sent when the teacher changes something and somebody is following, and in
+   full when a learner starts. The learner applies it through the same
+   `P[key]` / onSettingChanged(key) pair every other surface uses. */
+function teachPush(all){
+  if(!MP.conn||!MP.conn.open||!MP.follower) return;
+  const p={};
+  let n=0;
+  for(const k in P){
+    if(!teachable(k)) continue;
+    if(all||P[k]!==MP.taught[k]){ p[k]=P[k]; MP.taught[k]=P[k]; n++; }
+  }
+  if(n) mpSendObj({t:'teach', p});
+}
+function teachTake(d){
+  if(P.teachFollow<0.5||!d.p) return;
+  let n=0, fly=false;
+  for(const k in d.p){
+    const v=+d.p[k];
+    if(!teachable(k)||!(k in P)||!Number.isFinite(v)||P[k]===v) continue;
+    P[k]=v; n++;
+    if(k==='flyPat') fly=true;
+    onSettingChanged(k);
+  }
+  if(n) say(fly?'your friend tied on '+FLIES[Math.max(0,Math.min(FLIES.length-1,Math.round(P.flyPat)))][0]
+               :'your friend changed '+n+(n===1?' setting':' settings'));
+}
+/* the learner's drift, for the teacher's glass. Cover and slip are what the
+   rule decides on and `zoneWhy` is the sentence it would use. */
+const TEACH_WHY=['window','rock','log','drop'];
+function teachWatched(){
+  let w=null;
+  for(const f of fishes) if(f.state==='holding'&&f.zoneT>0.02&&(!w||f.zoneT>w.zoneT)) w=f;
+  if(!w) return [0,0,0];
+  return [w.zoneCover(), w.zoneAcc/Math.max(w.zoneT,1e-3),
+          Math.max(0,TEACH_WHY.indexOf(w.zoneWhy||'window'))];
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -12269,11 +12853,17 @@ document.getElementById('preview').addEventListener('click',previewStart);
             '<code>'+location.href.split('#')[0]+'#mp='+MP.code+'</code>'
           : 'Joining that room.')+
         (joined?' <i>Connected \u2014 they are in the river with you.</i>'
-               :' <i>Waiting\u2026</i>')+'</span>'
+               :' <i>Waiting\u2026</i>')+
+        '<br>'+voiceStatus()+'</span>'
       : '<span>'+mpStatus()+'</span>';
   }
   btn.addEventListener('click',()=>{
     if(MP.state==='off') mpHost(); else mpStop();
+    draw(); watch();
+  });
+  const mic=document.getElementById('mpMic');
+  if(mic) mic.addEventListener('change',()=>{
+    if(mic.checked) voiceArm(draw); else voiceOff();
     draw(); watch();
   });
   go.addEventListener('click',()=>{ mpJoin(inp.value); draw(); watch(); });

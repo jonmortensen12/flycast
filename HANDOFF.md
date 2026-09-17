@@ -1656,6 +1656,71 @@ Recorded because each one was mis-diagnosed at least once.
    `undefined` throws rather than answering false. `ArrayBuffer`, `DataView` and `Blob` are
    on the table now.
 
+53. **A position write cannot be graded inside a substep loop.** The sink model shipped a
+   switch twice, and the second time it was because the fix was applied to the wrong kind
+   of quantity. `waterAndGround` runs six times a frame — 432 times a second — and the film
+   held a node by writing its POSITION: `pos += (target-pos)*hold`, with `hold` graded from
+   1 to 0 as the sink rate rose. That reads like a gradient and behaves like a clamp. A
+   hold of 0.067 is not "6.7% held"; applied 432 times a second it pins a node at
+   `sr*h/hold`, which at Line sink 0.28 is ten millimetres. So 0.28 sat the whole line a
+   centimetre under and 0.30 — where hold reached exactly zero — dropped it forever.
+   Reported from the water as precisely that: a switch between two clicks of the dial.
+   There was a second clamp underneath it. The buoyancy spring at the bottom of the same
+   function is `(target-pos)*40*buoyancy*h`, gated the same way, and at 40 per second it
+   holds a node flat on its own.
+   Measuring where the sink actually came from is what unlocked it: **two things already
+   wrote the vertical velocity every substep** — the integrator's gravity, and the water
+   drag damping toward ZERO — and solving those two against each other gives about 1.2 m/s
+   of sink whatever the dial says. That is why a clamp was needed at all, and why a
+   velocity ease bolted on top of them did nothing: measured, a node asked to RISE at 0.12
+   fell at 0.41.
+   So the sink is not a fourth term. Terminal velocity already has gravity in it, so the
+   gravity applied this substep is handed back, and the water drag is re-referenced from
+   zero to the node's own terminal rate. The drag becomes the mechanism: it carries the
+   node to `vSink` in about a tenth of a second and holds it there exactly. Measured
+   after: 0.03 / 0.10 / 0.20 on the dial settle at 0.030 / 0.099 / 0.197, within 1.5%.
+
+54. **A floating line is buoyant, and nylon is not a fly line.** "Zero sink" was being
+   modelled as "no vertical term", which is a NEUTRAL line — it hangs wherever you leave
+   it. A floating fly line is microballoon-coated and genuinely rises, so `sinkRate` is
+   signed and 0 on the dial returns a rise. Giving the leader the same rise made the nylon
+   a balloon: measured, a woolly bugger sinking at 0.22 moved a node 39 cm up the tippet by
+   eleven millimetres, because 39 cm of nylon rising at 0.12 out-pulled it. That is the
+   woolly-bugger complaint from the water and it was this constant. Real nylon is about
+   1.14 times the density of water — very slightly heavy — so `NYLON_RISE` is 0.02, all but
+   neutral, and a weighted fly now takes the tippet with it (0.085 m against a dry rig).
+   The taper term that used to smear the fly's weight up the tippet is gone with it: it
+   existed only because the clamp would not let the constraint chain do the job.
+
+55. **The sink dials ran to a stone.** 1.20 m/s is about 47 inches a second. Measured
+   tackle is an order of magnitude slower: an intermediate line is ~0.03 m/s, a Type 3
+   ~0.08, and the fastest sinking lines made are 0.15–0.18. So the entire useful range sat
+   in the bottom eighth of the dial — half of why the old model read as a switch, since the
+   interesting part was two clicks wide. Now 0–0.25 for the line, 0–0.12 for the tippet,
+   0–0.60 for flies. The pond is restated as a FLOATING line with a sinking leader, which
+   is a real stillwater rig and — measured — what it was actually fishing all along: under
+   the old clamp its leader was past the release threshold and sank while its belly sat
+   pinned two millimetres down.
+
+56. **Your line was the river's.** The sink rates live in `VENUE_BASE` so that arriving at
+   the pond hands you a sinking leader, which is right — but `venueOwned()` then made them
+   the host's, and the river travels host to guest, so **a guest could not change their own
+   line**: the host's next beat put it back within a second. `SEEDED` is the third
+   category — the venue sets it up on arrival and nobody touches it after — which is how
+   `applyFly` has always treated the fly.
+
+57. **Two test fixtures that measured a field.** Recorded because both looked exactly like
+   physics failures. Laying the rig with `resetCast` and a settle puts it on the BANK: the
+   guide rules draw line in when nothing is casting, `lineOut` fell 9 m → 4, and the depth
+   being reported was the height of the ground. Placing the nodes on open water and pinning
+   the length fixed that and revealed a second one — nine metres of line hanging from a rod
+   tip a metre above the water is a catenary whose shape is decided by tautness and the
+   rod, so a node four metres along is LIFTED as the far end sinks.
+   The case is now split by what each claim is about: a per-node rate is measured on one
+   node driven through the solver's own substep with no rod attached, and anything about
+   the SHAPE of a rig is measured differentially — same node, same geometry, one rig
+   against another — which cancels the catenary instead of fighting it.
+
 **`diag.mjs` reproduces a fight headlessly** — hooks a fish, drives the reel trigger, and
 traces lineOut, tension, distance and behaviour, plus a geometry report showing where stretch
 actually sits. Every fight bug above was found with it rather than by guessing. Note its Clock
@@ -1815,6 +1880,82 @@ Known limitations, none of them hidden:
 - Reliable, ordered channel — the default, and the path already proven in this file. For a
   pose stream an unreliable one would be strictly better; `{reliable:false}` is the change
   if latency spikes ever show up on a bad link.
+
+## 5c. An angler you can see, teaching, and one set of fish
+
+Three things asked for after the first two headsets fished together.
+
+### The body, and why no asset was needed
+Arms and legs are built, not downloaded, and that is the right call for three reasons.
+A headset gives **three tracked points** — the head and two hands — so a rigged model does
+not solve the hard part; the elbows, shoulders, hips, knees and feet all still have to be
+invented, and a realistic mesh makes an invented elbow look *worse*. The **import chain
+does not exist**: the importmap in `index.html` is one line, and a GLB means a loader, a
+second CDN and an asset, at which point the file stops being the whole shippable thing.
+And everything else here is already procedural.
+
+`ikJoint` is closed form, not a solver: given a shoulder, the tracked hand and two bone
+lengths, `l = (d² + a² − b²)/2d` along the axis with radius `r = √(a² − l²)`, and a hint
+direction picks the point on that circle — elbows down and outward, knees forward. Exact,
+no iteration. Beyond reach the limb straightens **and the hand is brought in to the arm's
+own length first**: `segPose` scales the forearm mesh to span elbow-to-hand, so an
+unreachable hand stretched the arm like rubber (measured at 2.7 m from a 0.55 m arm).
+
+It costs **nothing new on the wire**: the head pose is sent, the line hand is sent, and the
+rod hand is rod node 0 — the grip — so it is sent too. The feet are dropped to `soleAt`.
+`ownBody` ships OFF: peer arms at ten metres look right, your own arms at arm's length
+will occasionally settle an elbow on the wrong side, because three points is three points.
+
+A hat brim is worth more than the arms at thirty metres — it is the one part that says
+which way somebody is facing across a river.
+
+### Teaching
+Most of it already existed: the river travels host-to-guest, and that covers Take radius,
+Max drag slip, Feeding chance, Rise style, Spook seconds, Lining radius, Splash limit and
+Zone length. What did not travel is the personal half — the fly, Put down by line,
+Non-feeder mult, Fish power, Fish size, Stamina drain, Tippet strength and the six chase
+numbers — and there was no way for a **guest** to teach a **host** at all.
+
+`Follow my friend` is the contract: **the learner turns it on**, and from then the
+teacher's changes to personal settings arrive live. Nothing moves on anybody who has not
+asked. `teachable()` excludes the river (it has its own path and two owners would fight),
+the view (stats, zones, volumes, your own body), your line (`SEEDED`), and `teachFollow`
+itself — a setting that could switch its own following on is one you cannot switch off.
+
+And the coaching goes the other way: **cover, average slip and which seam** ride back on
+the pose packet and appear on the teacher's stats glass. A learner is told "drag off the
+rock — refused" and has no idea what that means; three floats let the other person watch
+it happen and say why.
+
+### Voice
+PeerJS carries a media call over the same peer as the data channel, so this is a
+microphone and an audio element. **The permission is asked for on the flat page,
+deliberately**: a prompt cannot be answered from inside an immersive session — the browser
+puts it on the 2D page you can no longer see — so a request made in VR silently never gets
+granted. The guest places the call and the host answers, same shape as the data channel.
+Not positional: panning a voice to where somebody is standing sounds clever for a minute,
+and what you want on a river is to hear them clearly.
+
+### One set of fish
+Authority migrates, per fish. The host owns everything nobody has hooked and broadcasts it
+at 10 Hz; the moment somebody hooks one it belongs to whoever hooked it for the fight, and
+returns on landing or release.
+
+That is not an optimisation, it is the only arrangement that works: **rod feel is the game**,
+and a fight simulated across a hundred milliseconds is a fight through treacle. Whoever
+holds the rod runs the fish. A guest stops thinking for fish it does not own — no
+behaviour, no feeding, no rises — and eases them toward the host's picture, but its own
+take test still runs locally because that has to be instant; what it does on a take is
+claim. The host arbitrates, and the loser is told to let go.
+
+**None of it runs unless you are a connected guest.** Fishing alone and hosting are the
+paths the game is tuned on, and `fishMine()` is true for every fish on both. A guest whose
+friend goes quiet takes its own river back rather than standing in a frozen one.
+
+Still open here: the Boat Drift is world-space and that venue moves the hull and wraps
+laps, so poses will be wrong on it. And NAT traversal remains the one thing no test can
+answer — though two houses on two networks have now connected, which is the first real
+evidence it works.
 
 ## 6. Open problems
 
